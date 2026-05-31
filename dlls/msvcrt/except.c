@@ -919,7 +919,7 @@ void CDECL _FindAndUnlinkFrame(frame_info *fi)
         return;
     }
 
-    for (; cur->next; cur = cur->next)
+    for (; cur && cur->next; cur = cur->next)
     {
         if (cur->next == fi)
         {
