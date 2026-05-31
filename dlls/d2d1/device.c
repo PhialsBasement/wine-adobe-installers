@@ -2923,8 +2923,19 @@ static void STDMETHODCALLTYPE d2d_device_context_DrawGeometryRealization(ID2D1De
 {
     struct d2d_device_context *context = impl_from_ID2D1DeviceContext(iface);
     struct d2d_geometry_realization *r = unsafe_impl_from_ID2D1GeometryRealization(realization);
+    const struct d2d_geometry *geometry_impl = unsafe_impl_from_ID2D1Geometry(r->geometry);
+    struct d2d_brush *brush_impl = unsafe_impl_from_ID2D1Brush(brush);
 
-    FIXME("iface %p, realization %p, brush %p semi-stub!\n", iface, realization, brush);
+    TRACE("iface %p, realization %p, brush %p.\n", iface, realization, brush);
+
+    if (FAILED(context->error.code))
+        return;
+
+    if (context->target.type == D2D_TARGET_UNKNOWN)
+    {
+        d2d_device_context_set_error(context, D2DERR_WRONG_STATE);
+        return;
+    }
 
     if (context->target.type == D2D_TARGET_COMMAND_LIST)
     {
@@ -2939,6 +2950,11 @@ static void STDMETHODCALLTYPE d2d_device_context_DrawGeometryRealization(ID2D1De
         }
         return;
     }
+
+    if (r->filled)
+        d2d_device_context_fill_geometry(context, geometry_impl, brush_impl, NULL);
+    else
+        d2d_device_context_draw_geometry(context, geometry_impl, brush_impl, r->stroke_width);
 }
 
 static HRESULT STDMETHODCALLTYPE d2d_device_context_CreateInk(ID2D1DeviceContext6 *iface,
