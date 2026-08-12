@@ -21,7 +21,6 @@
 #define __WINE_WINDOWS_WEB_PRIVATE_H
 
 #include <stdarg.h>
-#include <errno.h>
 
 #define COBJMACROS
 #include "windef.h"
@@ -29,7 +28,6 @@
 #include "winstring.h"
 
 #include "activation.h"
-#include "roapi.h"
 
 #define WIDL_using_Windows_Foundation
 #define WIDL_using_Windows_Foundation_Collections
@@ -37,11 +35,8 @@
 #define WIDL_using_Windows_Data_Json
 #include "windows.data.json.h"
 
-extern IActivationFactory *json_array_factory;
 extern IActivationFactory *json_object_factory;
 extern IActivationFactory *json_value_factory;
-
-HRESULT json_array_push( IJsonArray *iface, IJsonValue *value );
 
 #define DEFINE_IINSPECTABLE_( pfx, iface_type, impl_type, impl_from, iface_mem, expr )             \
     static inline impl_type *impl_from( iface_type *iface )                                        \

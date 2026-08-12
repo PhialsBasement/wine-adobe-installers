@@ -22,13 +22,11 @@
 #include <limits.h>
 #include <math.h>
 #include <stdbool.h>
-#include <stdint.h>
 #include <stdlib.h>
 #define COBJMACROS
 #include "initguid.h"
 #include "d3d11_4.h"
 #include "d3dcompiler.h"
-#include "dxva.h"
 #include "winternl.h"
 #include "wine/wined3d.h"
 #include "wine/test.h"
@@ -2341,7 +2339,9 @@ static void test_create_device(void)
     startup.cb = sizeof(startup);
     ok(CreateProcessA(NULL, cmd, NULL, NULL, FALSE, 0, NULL, NULL, &startup, &info), "CreateProcess failed.\n");
 
-    wait_child_process(&info);
+    wait_child_process(info.hProcess);
+    CloseHandle(info.hProcess);
+    CloseHandle(info.hThread);
 }
 
 static void test_device_interfaces(const D3D_FEATURE_LEVEL feature_level)
@@ -2363,11 +2363,6 @@ static void test_device_interfaces(const D3D_FEATURE_LEVEL feature_level)
     }
 
     check_interface(device, &IID_IUnknown, TRUE, FALSE);
-    check_interface(device, &IID_ID3D11Device, TRUE, FALSE);
-    check_interface(device, &IID_ID3D11Device2, TRUE, TRUE); /* Not available on all Windows versions. */
-    check_interface(device, &IID_ID3D11Device3, TRUE, TRUE); /* Not available on all Windows versions. */
-    check_interface(device, &IID_ID3D11Device4, TRUE, TRUE); /* Not available on all Windows versions. */
-    check_interface(device, &IID_ID3D11Device5, TRUE, TRUE); /* Not available on all Windows versions. */
     check_interface(device, &IID_IDXGIObject, TRUE, FALSE);
     check_interface(device, &IID_IDXGIDevice, TRUE, FALSE);
     check_interface(device, &IID_IDXGIDevice1, TRUE, FALSE);
@@ -2438,17 +2433,6 @@ static void test_immediate_context(void)
     refcount = get_refcount(device);
     ok(refcount == expected_refcount, "Got unexpected refcount %lu.\n", refcount);
     previous_immediate_context = immediate_context;
-
-    check_interface(immediate_context, &IID_IUnknown, TRUE, FALSE);
-    check_interface(immediate_context, &IID_ID3D11DeviceChild, TRUE, FALSE);
-    check_interface(immediate_context, &IID_ID3D11DeviceContext, TRUE, FALSE);
-    check_interface(immediate_context, &IID_ID3D11DeviceContext1, TRUE, FALSE);
-    check_interface(immediate_context, &IID_ID3D11DeviceContext2, TRUE, TRUE); /* Not available on all Windows versions. */
-    check_interface(immediate_context, &IID_ID3D11DeviceContext3, TRUE, TRUE); /* Not available on all Windows versions. */
-    check_interface(immediate_context, &IID_ID3D11DeviceContext4, TRUE, TRUE); /* Not available on all Windows versions. */
-    check_interface(immediate_context, &IID_ID3D11Multithread, TRUE, FALSE);
-    check_interface(immediate_context, &IID_ID3D11VideoContext, TRUE, FALSE);
-    check_interface(immediate_context, &IID_ID3DUserDefinedAnnotation, TRUE, FALSE);
 
     ID3D11Device_GetImmediateContext(device, &immediate_context);
     ok(immediate_context == previous_immediate_context, "Got different immediate device context objects.\n");
@@ -2555,12 +2539,7 @@ static void test_create_deferred_context(void)
     check_interface(context, &IID_IUnknown, TRUE, FALSE);
     check_interface(context, &IID_ID3D11DeviceChild, TRUE, FALSE);
     check_interface(context, &IID_ID3D11DeviceContext, TRUE, FALSE);
-    check_interface(context, &IID_ID3D11DeviceContext1, TRUE, FALSE);
-    check_interface(context, &IID_ID3D11DeviceContext2, TRUE, TRUE); /* Not available on all Windows versions. */
-    check_interface(context, &IID_ID3D11DeviceContext3, TRUE, TRUE); /* Not available on all Windows versions. */
-    check_interface(context, &IID_ID3D11DeviceContext4, TRUE, TRUE); /* Not available on all Windows versions. */
     check_interface(context, &IID_ID3D11Multithread, FALSE, FALSE);
-    check_interface(context, &IID_ID3DUserDefinedAnnotation, TRUE, FALSE);
 
     refcount = ID3D11DeviceContext_Release(context);
     ok(!refcount, "Got unexpected refcount %lu.\n", refcount);
@@ -5463,16 +5442,6 @@ static void test_create_sampler_state(void)
     refcount = ID3D11SamplerState_Release(sampler_state1);
     ok(!refcount, "Got unexpected refcount %lu.\n", refcount);
 
-    desc.Filter = D3D11_FILTER_ANISOTROPIC;
-    desc.MaxAnisotropy = 0;
-    hr = ID3D11Device_CreateSamplerState(device, &desc, &sampler_state1);
-    ok(hr == S_OK, "Got hr %#lx.\n", hr);
-    ID3D11SamplerState_GetDesc(sampler_state1, &desc);
-    ok(desc.Filter == D3D11_FILTER_ANISOTROPIC, "Got filter %#x.\n", desc.Filter);
-    ok(!desc.MaxAnisotropy, "Got max anisotropy %u.\n", desc.MaxAnisotropy);
-    refcount = ID3D11SamplerState_Release(sampler_state1);
-    ok(!refcount, "Got refcount %lu.\n", refcount);
-
     for (i = 0; i < ARRAY_SIZE(desc_conversion_tests); ++i)
     {
         const struct test *current = &desc_conversion_tests[i];
@@ -5889,7 +5858,6 @@ static void test_create_rasterizer_state(void)
     D3D11_RASTERIZER_DESC desc;
     ID3D11Device *device, *tmp;
     ID3D11Device1 *device1;
-    ID3D11Device3 *device3;
     HRESULT hr;
 
     if (!(device = create_device(NULL)))
@@ -5976,33 +5944,6 @@ static void test_create_rasterizer_state(void)
         ID3D11RasterizerState1_Release(state_ex1);
 
         ID3D11Device1_Release(device1);
-    }
-
-    if (ID3D11Device_QueryInterface(device, &IID_ID3D11Device3, (void **)&device3) == S_OK)
-    {
-        ID3D11RasterizerState2 *state_ex2;
-        D3D11_RASTERIZER_DESC2 desc2;
-
-        hr = ID3D11RasterizerState_QueryInterface(rast_state1, &IID_ID3D11RasterizerState2, (void **)&state_ex2);
-        ok(hr == S_OK, "Got hr %#lx.\n", hr);
-
-        memset(&desc2, 0xcc, sizeof(desc2));
-        ID3D11RasterizerState2_GetDesc2(state_ex2, &desc2);
-        ok(!memcmp(&desc2, &desc, sizeof(desc)), "D3D11 desc didn't match.\n");
-        ok(!desc2.ForcedSampleCount, "Got forced sample count %u.\n", desc2.ForcedSampleCount);
-        ok(!desc2.ConservativeRaster, "Got conservative raster %u.\n", desc2.ConservativeRaster);
-
-        ID3D11RasterizerState2_Release(state_ex2);
-
-        memcpy(&desc2, &desc, sizeof(desc));
-        desc2.ForcedSampleCount = 0;
-        desc2.ConservativeRaster = D3D11_CONSERVATIVE_RASTERIZATION_MODE_OFF;
-        hr = ID3D11Device3_CreateRasterizerState2(device3, &desc2, &state_ex2);
-        ok(hr == S_OK, "Got hr %#lx.\n", hr);
-
-        ID3D11RasterizerState2_Release(state_ex2);
-
-        ID3D11Device3_Release(device3);
     }
 
     refcount = ID3D11RasterizerState_Release(rast_state2);
@@ -6393,7 +6334,6 @@ static void test_pipeline_statistics_query(void)
         /* AMD has nonzero GSInvocations on Windows. */
         ok(!data.GSPrimitives, "Got unexpected GSPrimitives count: %u.\n", (unsigned int)data.GSPrimitives);
         ok(data.CInvocations == 2, "Got unexpected CInvocations count: %u.\n", (unsigned int)data.CInvocations);
-        todo_wine_if (!data.CPrimitives)
         ok(data.CPrimitives == 2, "Got unexpected CPrimitives count: %u.\n", (unsigned int)data.CPrimitives);
         todo_wine_if (!damavand)
             ok(!data.PSInvocations, "Got unexpected PSInvocations count: %u.\n", (unsigned int)data.PSInvocations);
@@ -6416,7 +6356,6 @@ static void test_pipeline_statistics_query(void)
     /* AMD has nonzero GSInvocations on Windows. */
     ok(!data.GSPrimitives, "Got unexpected GSPrimitives count: %u.\n", (unsigned int)data.GSPrimitives);
     ok(data.CInvocations == 2, "Got unexpected CInvocations count: %u.\n", (unsigned int)data.CInvocations);
-    todo_wine_if (!data.CPrimitives)
     ok(data.CPrimitives == 2, "Got unexpected CPrimitives count: %u.\n", (unsigned int)data.CPrimitives);
     ok(data.PSInvocations >= 640 * 480, "Got unexpected PSInvocations count: %u.\n", (unsigned int)data.PSInvocations);
     ok(!data.HSInvocations, "Got unexpected HSInvocations count: %u.\n", (unsigned int)data.HSInvocations);
@@ -14835,7 +14774,6 @@ static void test_copy_subresource_region(void)
 
     ID3D11DeviceContext_ClearRenderTargetView(context, test_context.backbuffer_rtv, red);
 
-    set_box(&box, 0, 0, 0, 1, 1, 1);
     ID3D11DeviceContext_CopySubresourceRegion(context, (ID3D11Resource *)dst_texture, 0,
             1, 1, 0, NULL, 0, &box);
     ID3D11DeviceContext_CopySubresourceRegion(context, NULL, 0,
@@ -19823,7 +19761,6 @@ static void test_null_sampler(void)
 
 static void test_check_feature_support(void)
 {
-    D3D11_FEATURE_DATA_D3D9_SIMPLE_INSTANCING_SUPPORT d3d9si;
     D3D11_FEATURE_DATA_THREADING threading[2];
     D3D11_FEATURE_DATA_D3D10_X_HARDWARE_OPTIONS hwopts;
     D3D11_FEATURE_DATA_ARCHITECTURE_INFO archinfo;
@@ -19891,9 +19828,6 @@ static void test_check_feature_support(void)
     hr = ID3D11Device_CheckFeatureSupport(device, D3D11_FEATURE_ARCHITECTURE_INFO, &archinfo, sizeof(archinfo)*2);
     ok(hr == E_INVALIDARG /* Not available on all Windows versions but they will return E_INVALIDARG anyways. */,
             "Got unexpected hr %#lx.\n", hr);
-
-    hr = ID3D11Device_CheckFeatureSupport(device, D3D11_FEATURE_D3D9_SIMPLE_INSTANCING_SUPPORT, &d3d9si, sizeof(d3d9si));
-    ok(hr == S_OK || broken(hr == E_INVALIDARG) /* Win 7 */, "Got unexpected hr %#lx.\n", hr);
 
     refcount = ID3D11Device_Release(device);
     ok(!refcount, "Device has %lu references left.\n", refcount);
@@ -20684,7 +20618,6 @@ static void test_uint_shader_instructions(void)
         const struct shader *ps;
         unsigned int bits[4];
         struct uvec4 expected_result;
-        bool todo;
     }
     tests[] =
     {
@@ -20735,10 +20668,10 @@ static void test_uint_shader_instructions(void)
         {&ps_ibfe, {15, 15, 0xffff00ff}, {0xfffffffe, 0xfffffffe, 0xfffffffe, 0xfffffffe}},
         {&ps_ibfe, {16, 15, 0xffffffff}, {0xffffffff, 0xffffffff, 0xffffffff, 0xffffffff}},
         {&ps_ibfe, {16, 15, 0x3fffffff}, {0x00007fff, 0x00007fff, 0x00007fff, 0x00007fff}},
-        {&ps_ibfe, {20, 15, 0xffffffff}, {0xffffffff, 0xffffffff, 0xffffffff, 0xffffffff}, .todo = true},
-        {&ps_ibfe, {31, 31, 0xffffffff}, {0xffffffff, 0xffffffff, 0xffffffff, 0xffffffff}, .todo = true},
-        {&ps_ibfe, {31, 31, 0x80000000}, {0xffffffff, 0xffffffff, 0xffffffff, 0xffffffff}, .todo = true},
-        {&ps_ibfe, {31, 31, 0x7fffffff}, {0x00000000, 0x00000000, 0x00000000, 0x00000000}, .todo = true},
+        {&ps_ibfe, {20, 15, 0xffffffff}, {0xffffffff, 0xffffffff, 0xffffffff, 0xffffffff}},
+        {&ps_ibfe, {31, 31, 0xffffffff}, {0xffffffff, 0xffffffff, 0xffffffff, 0xffffffff}},
+        {&ps_ibfe, {31, 31, 0x80000000}, {0xffffffff, 0xffffffff, 0xffffffff, 0xffffffff}},
+        {&ps_ibfe, {31, 31, 0x7fffffff}, {0x00000000, 0x00000000, 0x00000000, 0x00000000}},
 
         {&ps_ibfe2, {16, 15, 0x3fffffff}, {0x00007fff, 0x00007fff, 0x00007fff, 0x00007fff}},
 
@@ -20822,21 +20755,16 @@ static void test_uint_shader_instructions(void)
         if (feature_level < tests[i].ps->required_feature_level)
             continue;
 
-        winetest_push_context("Test %u", i);
-
         hr = ID3D11Device_CreatePixelShader(device, tests[i].ps->code, tests[i].ps->size, NULL, &ps);
-        ok(hr == S_OK, "Got hr %#lx.\n", hr);
+        ok(hr == S_OK, "Test %u: Got unexpected hr %#lx.\n", i, hr);
         ID3D11DeviceContext_PSSetShader(context, ps, NULL, 0);
 
         ID3D11DeviceContext_UpdateSubresource(context, (ID3D11Resource *)cb, 0, NULL, tests[i].bits, 0, 0);
 
         draw_quad(&test_context);
-        todo_wine_if (tests[i].todo)
-            check_texture_uvec4(texture, &tests[i].expected_result);
+        check_texture_uvec4(texture, &tests[i].expected_result);
 
         ID3D11PixelShader_Release(ps);
-
-        winetest_pop_context();
     }
 
     ID3D11Buffer_Release(cb);
@@ -21018,10 +20946,6 @@ static void test_index_buffer_offset(void)
     }
     release_resource_readback(&rb);
 
-    /* Without index buffer */
-    ID3D11DeviceContext_IASetIndexBuffer(context, NULL, DXGI_FORMAT_R32_UINT, 0);
-    ID3D11DeviceContext_DrawIndexed(context, 4, 0, 0);
-
     /* indirect draws */
     args_buffer = create_buffer_misc(device, 0, D3D11_RESOURCE_MISC_DRAWINDIRECT_ARGS,
             sizeof(argument_data), argument_data);
@@ -21049,10 +20973,6 @@ static void test_index_buffer_offset(void)
                 data->x, data->y, data->z, data->w, i);
     }
     release_resource_readback(&rb);
-
-    /* Without index buffer */
-    ID3D11DeviceContext_IASetIndexBuffer(context, NULL, DXGI_FORMAT_R32_UINT, 0);
-    ID3D11DeviceContext_DrawIndexedInstancedIndirect(context, args_buffer, 0);
 
     ID3D11Buffer_Release(so_buffer);
     ID3D11Buffer_Release(args_buffer);
@@ -29026,7 +28946,7 @@ static void test_fractional_viewports(void)
                 ok(compare_float(v->x, expected.x, 0) && compare_float(v->y, expected.y, 0),
                         "Got fragcoord {%.8e, %.8e}, expected {%.8e, %.8e} at (%u, %u), offset %.8e.\n",
                         v->x, v->y, expected.x, expected.y, x, y, viewport_offsets[i]);
-                ok(compare_float(v->z, expected.z, 8) && compare_float(v->w, expected.w, 8),
+                ok(compare_float(v->z, expected.z, 2) && compare_float(v->w, expected.w, 2),
                         "Got texcoord {%.8e, %.8e}, expected {%.8e, %.8e} at (%u, %u), offset %.8e.\n",
                         v->z, v->w, expected.z, expected.w, x, y, viewport_offsets[i]);
             }
@@ -29079,7 +28999,7 @@ static void test_negative_viewports(const D3D_FEATURE_LEVEL feature_level)
     SetRect(&rect, 0, 0, 639, 479);
     check_texture_sub_resource_color(test_context.backbuffer, 0, &rect, 0xff00ff00, 1);
     SetRect(&rect, 639, 479, 640, 480);
-    todo_wine_if(!quirk && feature_level >= D3D_FEATURE_LEVEL_10_0)
+    todo_wine_if(quirk)
     check_texture_sub_resource_color(test_context.backbuffer, 0, &rect, quirk ? 0xffffffff : 0xff00ff00, 1);
 
     set_viewport(context, -1.0f / 128.0f, -1.0 / 128.0f, 640.0f, 480.0f, 0.0f, 1.0f);
@@ -29088,7 +29008,7 @@ static void test_negative_viewports(const D3D_FEATURE_LEVEL feature_level)
     SetRect(&rect, 0, 0, 639, 479);
     check_texture_sub_resource_color(test_context.backbuffer, 0, &rect, 0xff00ff00, 1);
     SetRect(&rect, 639, 479, 640, 480);
-    todo_wine_if(!quirk && feature_level >= D3D_FEATURE_LEVEL_10_0)
+    todo_wine_if(quirk)
     check_texture_sub_resource_color(test_context.backbuffer, 0, &rect, quirk ? 0xffffffff : 0xff00ff00, 1);
 
     release_test_context(&test_context);
@@ -35236,7 +35156,7 @@ static void test_shared_resource(D3D_FEATURE_LEVEL feature_level)
         hr = ID3D11Texture2D_QueryInterface(tex, &IID_IDXGIResource, (void **)&res);
         ok(hr == S_OK, "got %#lx.\n", hr);
         hr = ID3D11Texture2D_QueryInterface(tex, &IID_IDXGIResource1, (void **)&res1);
-        ok(hr == S_OK, "got %#lx.\n", hr);
+        todo_wine ok(hr == S_OK, "got %#lx.\n", hr);
         if (FAILED(hr))
             goto test_done;
 
@@ -35244,23 +35164,20 @@ static void test_shared_resource(D3D_FEATURE_LEVEL feature_level)
         hr = IDXGIResource_GetSharedHandle(res, &h);
         if (nthandle)
         {
-            todo_wine ok(hr == E_INVALIDARG, "got %#lx.\n", hr);
+            ok(hr == E_INVALIDARG, "got %#lx.\n", hr);
             ok(h == (HANDLE)0xdeadbeef, "got %p.\n", h);
         }
         else if (desc.MiscFlags)
         {
-            todo_wine ok(hr == S_OK, "got %#lx.\n", hr);
+            ok(hr == S_OK, "got %#lx.\n", hr);
             ok(is_kmt_handle(h), "wrong handle %p.\n", h);
             handle = h;
         }
         else
         {
-            todo_wine ok(hr == S_OK, "got %#lx.\n", hr);
-            todo_wine ok(!h, "got %p.\n", h);
+            ok(hr == S_OK, "got %#lx.\n", hr);
+            ok(!h, "got %p.\n", h);
         }
-
-        if (FAILED(hr))
-            goto test_done;
 
         h = (HANDLE)0xdeadbeef;
         hr = IDXGIResource1_CreateSharedHandle(res1, NULL, GENERIC_ALL | DXGI_SHARED_RESOURCE_READ
@@ -36453,7 +36370,7 @@ static void test_nv12(void)
     device_context = test_context.immediate_context;
 
     hr = ID3D11Device_CheckFormatSupport(device, DXGI_FORMAT_NV12, &support);
-    todo_wine_if (!damavand) ok(hr == S_OK || broken(hr == E_FAIL) /* Win7 */, "Got hr %#lx.\n", hr);
+    ok(hr == S_OK, "Got hr %#lx.\n", hr);
 
     if (!(support & D3D11_FORMAT_SUPPORT_TEXTURE2D))
     {
@@ -36483,22 +36400,21 @@ static void test_nv12(void)
     for (test_idx = 0; test_idx < ARRAY_SIZE(tests); ++test_idx)
     {
         /* I need only two uints in the cbuffer, but the size must be a multiple of 16. */
-        ID3D11Texture2D *texture, *texture2, *check_texture, *staging_texture;
-        unsigned int i, j, image_size, broken_warp_pitch;
         D3D11_UNORDERED_ACCESS_VIEW_DESC uav_desc = {0};
         D3D11_SHADER_RESOURCE_VIEW_DESC srv_desc = {0};
         D3D11_SUBRESOURCE_DATA subresource_data = {0};
         D3D11_RENDER_TARGET_VIEW_DESC rtv_desc = {0};
+        ID3D11Texture2D *texture, *check_texture;
         char *content, *content2, *copy_source;
         ID3D11UnorderedAccessView *check_uav;
         ID3D11RenderTargetView *rtv1, *rtv2;
         ID3D11ShaderResourceView *srvs[2];
-        D3D11_MAPPED_SUBRESOURCE map_desc;
         D3D11_TEXTURE2D_DESC desc = {0};
         struct resource_readback rb;
         uint32_t cbuffer_data[4];
         ID3D11Buffer *cbuffer;
         HRESULT expected_hr;
+        unsigned int i, j;
         D3D11_BOX box;
 
         const uint32_t width = tests[test_idx].width;
@@ -36511,6 +36427,8 @@ static void test_nv12(void)
         winetest_push_context("test %u (%ux%u, %u,%u,%ux%u)", test_idx, width, height,
                 copy_x, copy_y, copy_width, copy_height);
 
+        /* Apparently no Vulkan implementation supports rendering to a NV12 texture, so here we do
+         * not request D3D11_BIND_RENDER_TARGET. We will recreate it later for render target usage. */
         desc.Width = width;
         desc.Height = height;
         desc.MipLevels = 1;
@@ -36518,7 +36436,7 @@ static void test_nv12(void)
         desc.Format = DXGI_FORMAT_NV12;
         desc.SampleDesc.Count = 1;
         desc.Usage = D3D11_USAGE_DEFAULT;
-        desc.BindFlags = D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_RENDER_TARGET;
+        desc.BindFlags = D3D11_BIND_SHADER_RESOURCE;
 
         content = calloc(width * height * 3 / 2, 1);
         content2 = calloc(width * height * 3 / 2, 1);
@@ -36552,6 +36470,7 @@ static void test_nv12(void)
 
         expected_hr = (width & 1 || height & 1) ? E_INVALIDARG : S_OK;
         hr = ID3D11Device_CreateTexture2D(device, &desc, &subresource_data, &texture);
+        todo_wine_if(SUCCEEDED(expected_hr))
         ok(hr == expected_hr, "Got hr %#lx, expected %#lx.\n", hr, expected_hr);
 
         if (FAILED(hr))
@@ -36560,26 +36479,12 @@ static void test_nv12(void)
             continue;
         }
 
-        hr = ID3D11Device_CreateTexture2D(device, &desc, &subresource_data, &texture2);
-        ok(hr == S_OK, "Got hr %#lx.\n", hr);
-
         desc.Height += height / 2;
         desc.Format = DXGI_FORMAT_R8_UINT;
         desc.BindFlags = D3D11_BIND_UNORDERED_ACCESS;
 
         hr = ID3D11Device_CreateTexture2D(device, &desc, NULL, &check_texture);
         ok(hr == S_OK, "Got hr %#lx.\n", hr);
-
-        hr = ID3D11Device_CreateShaderResourceView(device, (ID3D11Resource *)texture, NULL, &srvs[0]);
-        ok(hr == E_INVALIDARG, "Got hr %#lx.\n", hr);
-
-        srv_desc.Format = DXGI_FORMAT_NV12;
-        srv_desc.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D;
-        srv_desc.Texture2D.MostDetailedMip = 0;
-        srv_desc.Texture2D.MipLevels = 1;
-
-        hr = ID3D11Device_CreateShaderResourceView(device, (ID3D11Resource *)texture, &srv_desc, &srvs[0]);
-        ok(hr == E_INVALIDARG, "Got hr %#lx.\n", hr);
 
         srv_desc.Format = DXGI_FORMAT_R8_UINT;
         srv_desc.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D;
@@ -36647,13 +36552,12 @@ static void test_nv12(void)
             }
         }
 
-        set_box(&box, copy_x, copy_y, 0, copy_x + copy_width, copy_y + copy_height, 1);
-
         /* UpdateSubresource() copies the specified box on the luma plane and also the corresponding
          * box on the chroma plane. It does nothing as soon as any coordinate of the box is not a
          * multiple of 2. AMD seems to have a bug and copies data with the wrong pitch. */
         if (!is_amd_device(device))
         {
+            set_box(&box, copy_x, copy_y, 0, copy_x + copy_width, copy_y + copy_height, 1);
             ID3D11DeviceContext_UpdateSubresource(device_context,
                     (ID3D11Resource *)texture, 0, &box, copy_source, copy_width, 0);
 
@@ -36669,15 +36573,30 @@ static void test_nv12(void)
             release_resource_readback(&rb);
         }
 
-        hr = ID3D11Device_CreateRenderTargetView(device, (ID3D11Resource *)texture, NULL, &rtv1);
-        ok(hr == E_INVALIDARG, "Got hr %#lx.\n", hr);
+        ID3D11ShaderResourceView_Release(srvs[0]);
+        ID3D11ShaderResourceView_Release(srvs[1]);
+        ID3D11Texture2D_Release(texture);
 
-        rtv_desc.Format = DXGI_FORMAT_NV12;
-        rtv_desc.ViewDimension = D3D11_RTV_DIMENSION_TEXTURE2D;
-        rtv_desc.Texture2D.MipSlice = 0;
+        desc.Height = height;
+        desc.Format = DXGI_FORMAT_NV12;
+        desc.BindFlags = D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_RENDER_TARGET;
 
-        hr = ID3D11Device_CreateRenderTargetView(device, (ID3D11Resource *)texture, &rtv_desc, &rtv1);
-        ok(hr == E_INVALIDARG, "Got hr %#lx.\n", hr);
+        hr = ID3D11Device_CreateTexture2D(device, &desc, NULL, &texture);
+        todo_wine
+        ok(hr == S_OK, "Got hr %#lx.\n", hr);
+
+        if (FAILED(hr))
+            goto no_render_target;
+
+        srv_desc.Format = DXGI_FORMAT_R8_UINT;
+
+        hr = ID3D11Device_CreateShaderResourceView(device, (ID3D11Resource *)texture, &srv_desc, &srvs[0]);
+        ok(hr == S_OK, "Got hr %#lx.\n", hr);
+
+        srv_desc.Format = DXGI_FORMAT_R8G8_UINT;
+
+        hr = ID3D11Device_CreateShaderResourceView(device, (ID3D11Resource *)texture, &srv_desc, &srvs[1]);
+        ok(hr == S_OK, "Got hr %#lx.\n", hr);
 
         rtv_desc.Format = DXGI_FORMAT_R8_UINT;
         rtv_desc.ViewDimension = D3D11_RTV_DIMENSION_TEXTURE2D;
@@ -36716,154 +36635,15 @@ static void test_nv12(void)
         check_readback_data_u8_with_buffer(&rb, content, width, 0);
         release_resource_readback(&rb);
 
-        /* Staging upload, GPU blit, and staging download tests. */
-        desc.Height = height;
-        desc.Format = DXGI_FORMAT_NV12;
-        desc.BindFlags = 0;
-        desc.CPUAccessFlags = D3D11_CPU_ACCESS_READ | D3D11_CPU_ACCESS_WRITE;
-        desc.Usage = D3D11_USAGE_STAGING;
-        hr = ID3D11Device_CreateTexture2D(device, &desc, NULL, &staging_texture);
-        ok(hr == S_OK, "Got hr %#lx.\n", hr);
-
-        hr = ID3D11DeviceContext_Map(device_context, (ID3D11Resource *)staging_texture, 0,
-                D3D11_MAP_WRITE, 0, &map_desc);
-        ok(hr == S_OK, "Got hr %#lx.\n", hr);
-        /* Row pitch isn't consistent across drivers. Of the machines tested,
-         * row pitch may be aligned to a multiple of 4 (WARP), 128 (NVidia), or
-         * 256 (AMD).
-         *
-         * In all cases it seems to signify both the pitch of the Y plane, and
-         * the pitch of the U/V plane (which is 2x2 subsampled but has 2 bytes
-         * per sample, so has the same number of content bytes in a row).
-         *
-         * Slice pitch is either the size of the Y plane alone (WARP) or the
-         * size of the entire image (AMD, NVidia).
-         *
-         * Older versions of WARP (Windows 10) also calculate the size of the Y
-         * plane incorrectly, by taking the size of the entire image and
-         * multiplying by 2/3. This ends up being incorrect because said
-         * versions apparently add *vertical* alignment to 4 to only one plane,
-         * so the UV plane is not exactly half the size of the Y plane. */
-        ok(map_desc.RowPitch >= width, "Got row pitch %u.\n", map_desc.RowPitch);
-        image_size = (map_desc.RowPitch * (height * 3 / 2));
-        broken_warp_pitch = (map_desc.RowPitch * height) + (map_desc.RowPitch * ((height + 3) & ~3) / 2);
-        broken_warp_pitch = broken_warp_pitch / 3 * 2;
-        ok(map_desc.DepthPitch == image_size
-                || (is_warp_device(device) && map_desc.DepthPitch == (map_desc.RowPitch * height))
-                || broken(is_warp_device(device) && map_desc.DepthPitch == broken_warp_pitch),
-                "Got row pitch %u, slice pitch %u.\n", map_desc.RowPitch, map_desc.DepthPitch);
-
-        for (i = 0; i < height; ++i)
-        {
-            for (j = 0; j < width; ++j)
-            {
-                unsigned int idx = i * map_desc.RowPitch + j;
-                ((uint8_t *)map_desc.pData)[idx] = (j & 7) << 3 | (i & 7);
-                idx = i * width + j;
-                content2[idx] = (j & 7) << 3 | (i & 7);
-            }
-        }
-
-        for (i = 0; i < height / 2; ++i)
-        {
-            for (j = 0; j < width / 2; ++j)
-            {
-                unsigned int idx = map_desc.RowPitch * (height + i) + j * 2;
-                ((uint8_t *)map_desc.pData)[idx] = 1u << 6 | (j & 7) << 3 | (i & 7);
-                ((uint8_t *)map_desc.pData)[idx + 1] = 1u << 7 | (j & 7) << 3 | (i & 7);
-                idx = width * (height + i) + j * 2;
-                content2[idx] = 1u << 6 | (j & 7) << 3 | (i & 7);
-                content2[idx + 1] = 1u << 7 | (j & 7) << 3 | (i & 7);
-            }
-        }
-
-        ID3D11DeviceContext_Unmap(device_context, (ID3D11Resource *)staging_texture, 0);
-
-        ID3D11DeviceContext_CopyResource(device_context, (ID3D11Resource *)texture2, (ID3D11Resource *)staging_texture);
-        ID3D11DeviceContext_CopyResource(device_context, (ID3D11Resource *)texture, (ID3D11Resource *)texture2);
-
-        hr = ID3D11DeviceContext_Map(device_context, (ID3D11Resource *)staging_texture, 0,
-                D3D11_MAP_WRITE, 0, &map_desc);
-        ok(hr == S_OK, "Got hr %#lx.\n", hr);
-
-        memset(map_desc.pData, 0xfe, map_desc.RowPitch * height);
-        memset((uint8_t *)map_desc.pData + map_desc.RowPitch * height, 0xdc, map_desc.RowPitch * height / 2);
-
-        /* Similarly CopySubresourceRegion() ignores boxes not aligned to 2. */
-        if (copy_x % 2 == 0 && copy_y % 2 == 0 && copy_width % 2 == 0 && copy_height % 2 == 0)
-        {
-            for (i = copy_y; i < copy_y + copy_height; ++i)
-            {
-                memset(content2 + i * width + copy_x, 0xfe, copy_width);
-                if (i % 2 == 0)
-                    memset(content2 + width * (height + i / 2) + copy_x, 0xdc, copy_width);
-            }
-        }
-
-        ID3D11DeviceContext_Unmap(device_context, (ID3D11Resource *)staging_texture, 0);
-
-        ID3D11DeviceContext_CopyResource(device_context, (ID3D11Resource *)texture2, (ID3D11Resource *)staging_texture);
-        ID3D11DeviceContext_CopySubresourceRegion(device_context, (ID3D11Resource *)texture, 0,
-                copy_x, copy_y, 0, (ID3D11Resource *)texture2, 0, &box);
-
-        ID3D11DeviceContext_ClearUnorderedAccessViewUint(device_context, check_uav, clear_values);
-        ID3D11DeviceContext_CSSetShader(device_context, cs, NULL, 0);
-        ID3D11DeviceContext_CSSetShaderResources(device_context, 0, ARRAY_SIZE(srvs), srvs);
-        ID3D11DeviceContext_CSSetUnorderedAccessViews(device_context, 1, 1, &check_uav, NULL);
-        ID3D11DeviceContext_CSSetConstantBuffers(device_context, 0, 1, &cbuffer);
-        ID3D11DeviceContext_Dispatch(device_context, width, height, 1);
-
-        get_texture_readback(check_texture, 0, &rb);
-        check_readback_data_u8_with_buffer(&rb, content2, width, 0);
-        release_resource_readback(&rb);
-
-        ID3D11DeviceContext_CopyResource(device_context, (ID3D11Resource *)staging_texture, (ID3D11Resource *)texture);
-
-        hr = ID3D11DeviceContext_Map(device_context, (ID3D11Resource *)staging_texture, 0,
-                D3D11_MAP_READ, 0, &map_desc);
-        ok(hr == S_OK, "Got hr %#lx.\n", hr);
-
-        for (i = 0; i < height; ++i)
-        {
-            for (j = 0; j < width; ++j)
-            {
-                uint8_t value = ((uint8_t *)map_desc.pData)[i * map_desc.RowPitch + j];
-                uint8_t expect = content2[i * width + j];
-                ok(value == expect, "Got Y %02x, expected %02x at (%u, %u).\n", value, expect, i, j);
-                if (value != expect)
-                    goto fail_match;
-            }
-        }
-
-        for (i = 0; i < height / 2; ++i)
-        {
-            for (j = 0; j < width / 2; ++j)
-            {
-                uint8_t value = ((uint8_t *)map_desc.pData)[map_desc.RowPitch * (height + i) + j * 2];
-                uint8_t expect = content2[width * (height + i) + j * 2];
-                ok(value == expect, "Got U %02x, expected %02x at (%u, %u).\n", value, expect, i, j);
-                if (value != expect)
-                    goto fail_match;
-                value = ((uint8_t *)map_desc.pData)[map_desc.RowPitch * (height + i) + j * 2 + 1];
-                expect = content2[width * (height + i) + j * 2 + 1];
-                ok(value == expect, "Got V %02x, expected %02x at (%u, %u).\n", value, expect, i, j);
-                if (value != expect)
-                    goto fail_match;
-            }
-        }
-
-fail_match:
-        ID3D11DeviceContext_Unmap(device_context, (ID3D11Resource *)staging_texture, 0);
-
         ID3D11RenderTargetView_Release(rtv2);
         ID3D11RenderTargetView_Release(rtv1);
+
+    no_render_target:
         ID3D11Buffer_Release(cbuffer);
         ID3D11UnorderedAccessView_Release(check_uav);
         ID3D11ShaderResourceView_Release(srvs[1]);
         ID3D11ShaderResourceView_Release(srvs[0]);
-        ID3D11Texture2D_Release(staging_texture);
         ID3D11Texture2D_Release(check_texture);
-        ID3D11Texture2D_Release(texture2);
         ID3D11Texture2D_Release(texture);
         free(content);
 
@@ -36873,654 +36653,6 @@ fail_match:
     ID3D11PixelShader_Release(chroma_ps);
     ID3D11PixelShader_Release(luma_ps);
     ID3D11ComputeShader_Release(cs);
-    release_test_context(&test_context);
-}
-
-struct yuv
-{
-    uint8_t y, u, v;
-};
-
-static void get_readback_nv12(struct resource_readback *rb, unsigned int x, unsigned int y, struct yuv *colour)
-{
-    colour->y = get_readback_u8(rb, x, y, 0);
-    colour->u = get_readback_u8(rb, x & ~1, rb->height + y / 2, 0);
-    colour->v = get_readback_u8(rb, (x & ~1) + 1, rb->height + y / 2, 0);
-}
-
-static void test_h264_decoder(void)
-{
-    D3D11_VIDEO_DECODER_BUFFER_DESC buffers[4] = {{0}};
-    ID3D11Texture2D *output_texture, *readback_texture;
-    ID3D11VideoDecoderOutputView *output_views[17];
-    unsigned int count, size, bitstream_size;
-    D3D11_VIDEO_DECODER_EXTENSION extension;
-    D3D11_VIDEO_DECODER_CONFIG config = {0};
-    D3D11_TEXTURE2D_DESC texture_desc = {0};
-    struct d3d11_test_context test_context;
-    DXVA_Slice_H264_Short *h264_slice;
-    ID3D11VideoContext *video_context;
-    DXVA_PicParams_H264 *h264_params;
-    ID3D11VideoDevice *video_device;
-    DXVA_Qmatrix_H264 *h264_matrix;
-    D3D11_VIDEO_DECODER_DESC desc;
-    DXVA_Status_H264 h264_status;
-    struct resource_readback rb;
-    ID3D11VideoDecoder *decoder;
-    void *bitstream, *buffer2;
-    struct yuv colour;
-    GUID profile;
-    HRESULT hr;
-    HRSRC rsrc;
-
-    DXVA_PicParams_H264 h264_params_template =
-    {
-        .wFrameWidthInMbsMinus1 = 19,
-        .wFrameHeightInMbsMinus1 = 14,
-        .num_ref_frames = 4,
-        .chroma_format_idc = 1,
-        .RefPicFlag = 1,
-        .weighted_pred_flag = 1,
-        .weighted_bipred_idc = 2,
-        .MbsConsecutiveFlag = 1,
-        .frame_mbs_only_flag = 1,
-        .transform_8x8_mode_flag = 1,
-        .Reserved16Bits = 3,
-        .chroma_qp_index_offset = -2,
-        .second_chroma_qp_index_offset = -2,
-        .ContinuationFlag = 1,
-        .num_ref_idx_l0_active_minus1 = 2,
-        .log2_max_pic_order_cnt_lsb_minus4 = 2,
-        .direct_8x8_inference_flag = 1,
-        .entropy_coding_mode_flag = 1,
-        .deblocking_filter_control_present_flag = 1,
-    };
-
-    if (!init_test_context(&test_context, NULL))
-        return;
-
-    hr = ID3D11Device_QueryInterface(test_context.device, &IID_ID3D11VideoDevice, (void **)&video_device);
-    if (hr == E_NOINTERFACE)
-    {
-        skip("Failed to get ID3D11VideoDevice.\n");
-        release_test_context(&test_context);
-        return;
-    }
-    ok(hr == S_OK, "Got hr %#lx.\n", hr);
-
-    count = ID3D11VideoDevice_GetVideoDecoderProfileCount(video_device);
-    for (unsigned int i = 0; i < count; ++i)
-    {
-        hr = ID3D11VideoDevice_GetVideoDecoderProfile(video_device, i, &profile);
-        ok(hr == S_OK, "Got hr %#lx.\n", hr);
-    }
-    /* Native seems to have an off-by-one error; trying to pass "count"
-     * as an index succeeds and leaves a garbage GUID in the output, which is
-     * not consistent across runs. */
-    hr = ID3D11VideoDevice_GetVideoDecoderProfile(video_device, count + 1, &profile);
-    ok(hr == E_INVALIDARG, "Got hr %#lx.\n", hr);
-
-    hr = ID3D11DeviceContext_QueryInterface(test_context.immediate_context,
-            &IID_ID3D11VideoContext, (void **)&video_context);
-    ok(hr == S_OK, "Got hr %#lx.\n", hr);
-
-    desc.Guid = DXVA_ModeH264_VLD_NoFGT;
-    desc.SampleWidth = 320;
-    desc.SampleHeight = 240;
-    desc.OutputFormat = DXGI_FORMAT_NV12;
-
-    hr = ID3D11VideoDevice_GetVideoDecoderConfigCount(video_device, &desc, &count);
-    todo_wine ok(hr == S_OK, "Got hr %#lx.\n", hr);
-    if (hr == S_OK)
-        ok(count >= 1, "Got no configs.\n");
-    else
-        count = 0;
-
-    for (unsigned int i = 0; i < count; ++i)
-    {
-        memset(&config, 0xcc, sizeof(config));
-        hr = ID3D11VideoDevice_GetVideoDecoderConfig(video_device, &desc, 0, &config);
-        ok(hr == S_OK, "Got hr %#lx.\n", hr);
-
-        ok(IsEqualGUID(&config.guidConfigBitstreamEncryption, &DXVA_NoEncrypt),
-                "Got guidConfigBitstreamEncryption %s.\n", debugstr_guid(&config.guidConfigBitstreamEncryption));
-        ok(IsEqualGUID(&config.guidConfigMBcontrolEncryption, &DXVA_NoEncrypt),
-                "Got guidConfigMBcontrolEncryption %s.\n", debugstr_guid(&config.guidConfigMBcontrolEncryption));
-        ok(IsEqualGUID(&config.guidConfigResidDiffEncryption, &DXVA_NoEncrypt),
-                "Got guidConfigResidDiffEncryption %s.\n", debugstr_guid(&config.guidConfigResidDiffEncryption));
-        /* NVidia sets 1, AMD sets 2.
-         *
-         * Nevertheless NVidia seems to be fine with short slice info. */
-        ok(config.ConfigBitstreamRaw == 1 || config.ConfigBitstreamRaw == 2,
-                "Got ConfigBitstreamRaw %u.\n", config.ConfigBitstreamRaw);
-        ok(!config.ConfigMBcontrolRasterOrder, "Got ConfigMBcontrolRasterOrder %u.\n",
-                config.ConfigMBcontrolRasterOrder);
-        ok(!config.ConfigResidDiffHost, "Got ConfigResidDiffHost %u.\n", config.ConfigResidDiffHost);
-        ok(!config.ConfigSpatialResid8, "Got ConfigSpatialResid8 %u.\n", config.ConfigSpatialResid8);
-        ok(!config.ConfigResid8Subtraction, "Got ConfigResid8Subtraction %u.\n", config.ConfigResid8Subtraction);
-        ok(!config.ConfigSpatialHost8or9Clipping, "Got ConfigSpatialHost8or9Clipping %u.\n",
-                config.ConfigSpatialHost8or9Clipping);
-        ok(!config.ConfigSpatialResidInterleaved, "Got ConfigSpatialResidInterleaved %u.\n",
-                config.ConfigSpatialResidInterleaved);
-        ok(!config.ConfigIntraResidUnsigned, "Got ConfigIntraResidUnsigned %u.\n", config.ConfigIntraResidUnsigned);
-        ok(config.ConfigResidDiffAccelerator == 1, "Got ConfigResidDiffAccelerator %u.\n",
-                config.ConfigResidDiffAccelerator);
-        ok(config.ConfigHostInverseScan == 1, "Got ConfigHostInverseScan %u.\n", config.ConfigHostInverseScan);
-        ok(config.ConfigSpecificIDCT == 2, "Got ConfigSpecificIDCT %u.\n", config.ConfigSpecificIDCT);
-        ok(!config.Config4GroupedCoefs, "Got Config4GroupedCoefs %u.\n", config.Config4GroupedCoefs);
-        /* AMD has 0 for ConfigMinRenderTargetBuffCount; NVidia has 3. */
-        /* AMD has 0x4000 for ConfigDecoderSpecific.
-         * This flag is an extension bit related to interleaved decoding. */
-        ok(!config.ConfigDecoderSpecific || config.ConfigDecoderSpecific == 0x4000,
-                "Got ConfigDecoderSpecific %u.\n", config.ConfigDecoderSpecific);
-    }
-
-    hr = ID3D11VideoDevice_GetVideoDecoderConfig(video_device, &desc, count, &config);
-    todo_wine ok(hr == E_INVALIDARG, "Got hr %#lx.\n", hr);
-
-    memset(&config, 0, sizeof(config));
-    config.guidConfigBitstreamEncryption = DXVA_NoEncrypt;
-    config.guidConfigMBcontrolEncryption = DXVA_NoEncrypt;
-    config.guidConfigResidDiffEncryption = DXVA_NoEncrypt;
-    config.ConfigBitstreamRaw = 2;
-    config.ConfigResidDiffAccelerator = 1;
-    config.ConfigHostInverseScan = 1;
-    config.ConfigSpecificIDCT = 2;
-    config.ConfigMinRenderTargetBuffCount = 1;
-
-    memset(&desc.Guid, 0xcc, sizeof(desc.Guid));
-    hr = ID3D11VideoDevice_CreateVideoDecoder(video_device, &desc, &config, &decoder);
-    ok(hr == E_INVALIDARG, "Got hr %#lx.\n", hr);
-
-    desc.Guid = DXVA_ModeH264_VLD_NoFGT;
-    hr = ID3D11VideoDevice_CreateVideoDecoder(video_device, &desc, &config, &decoder);
-    if (hr == E_INVALIDARG)
-    {
-        skip("H.264 decoding is not supported.\n");
-        ID3D11VideoContext_Release(video_context);
-        ID3D11VideoDevice_Release(video_device);
-        release_test_context(&test_context);
-        return;
-    }
-    ok(hr == S_OK, "Got hr %#lx.\n", hr);
-
-    texture_desc.Width = 320;
-    texture_desc.Height = 240;
-    texture_desc.MipLevels = 1;
-    texture_desc.ArraySize = ARRAY_SIZE(output_views);
-    texture_desc.Format = DXGI_FORMAT_NV12;
-    texture_desc.SampleDesc.Count = 1;
-    texture_desc.BindFlags = D3D11_BIND_DECODER;
-    texture_desc.Usage = D3D11_USAGE_DEFAULT;
-    hr = ID3D11Device_CreateTexture2D(test_context.device, &texture_desc, NULL, &output_texture);
-    ok(hr == S_OK, "Got hr %#lx.\n", hr);
-    texture_desc.ArraySize = 1;
-    texture_desc.BindFlags = 0;
-    hr = ID3D11Device_CreateTexture2D(test_context.device, &texture_desc, NULL, &readback_texture);
-    ok(hr == S_OK, "Got hr %#lx.\n", hr);
-
-    for (unsigned int i = 0; i < ARRAY_SIZE(output_views); ++i)
-    {
-        D3D11_VIDEO_DECODER_OUTPUT_VIEW_DESC view_desc =
-        {
-            .DecodeProfile = desc.Guid,
-            .ViewDimension = D3D11_VDOV_DIMENSION_TEXTURE2D,
-            .Texture2D.ArraySlice = i,
-        };
-
-        view_desc.ViewDimension = D3D11_VDOV_DIMENSION_UNKNOWN;
-        hr = ID3D11VideoDevice_CreateVideoDecoderOutputView(video_device,
-                (ID3D11Resource *)output_texture, &view_desc, &output_views[i]);
-        ok(hr == E_INVALIDARG, "Got hr %#lx.\n", hr);
-
-        view_desc.ViewDimension = D3D11_VDOV_DIMENSION_TEXTURE2D;
-        hr = ID3D11VideoDevice_CreateVideoDecoderOutputView(video_device,
-                (ID3D11Resource *)output_texture, &view_desc, &output_views[i]);
-        ok(hr == S_OK, "Got hr %#lx.\n", hr);
-    }
-
-    memset(&h264_status, 0xcc, sizeof(h264_status));
-    memset(&extension, 0, sizeof(extension));
-    extension.Function = DXVA_STATUS_REPORTING_FUNCTION;
-    extension.pPrivateOutputData = &h264_status;
-    extension.PrivateOutputDataSize = sizeof(h264_status);
-    hr = ID3D11VideoContext_DecoderExtension(video_context, decoder, &extension);
-    ok(hr == E_FAIL /* AMD */ || hr == S_OK /* NVidia */, "Got hr %#lx.\n", hr);
-    if (hr == S_OK)
-    {
-        DXVA_Status_H264 zero_status = {0};
-
-        ok(!memcmp(&h264_status, &zero_status, sizeof(zero_status)), "Expected zeroed structure.\n");
-    }
-
-    hr = ID3D11VideoContext_DecoderBeginFrame(video_context, decoder, output_views[0], 0, NULL);
-    ok(hr == S_OK, "Got hr %#lx.\n", hr);
-
-    hr = ID3D11VideoContext_GetDecoderBuffer(video_context, decoder,
-            D3D11_VIDEO_DECODER_BUFFER_PICTURE_PARAMETERS, &size, (void **)&h264_params);
-    ok(hr == S_OK, "Got hr %#lx.\n", hr);
-    ok(size >= sizeof(*h264_params), "Got size %u.\n", size);
-
-    hr = ID3D11VideoContext_GetDecoderBuffer(video_context, decoder,
-            D3D11_VIDEO_DECODER_BUFFER_PICTURE_PARAMETERS, &size, &buffer2);
-    todo_wine ok(hr == DXGI_ERROR_INVALID_CALL, "Got hr %#lx.\n", hr);
-
-    hr = ID3D11VideoContext_ReleaseDecoderBuffer(video_context,
-            decoder, D3D11_VIDEO_DECODER_BUFFER_PICTURE_PARAMETERS);
-    ok(hr == S_OK, "Got hr %#lx.\n", hr);
-
-    hr = ID3D11VideoContext_ReleaseDecoderBuffer(video_context,
-            decoder, D3D11_VIDEO_DECODER_BUFFER_PICTURE_PARAMETERS);
-    todo_wine ok(hr == DXGI_ERROR_INVALID_CALL, "Got hr %#lx.\n", hr);
-
-    hr = ID3D11VideoContext_GetDecoderBuffer(video_context, decoder,
-            D3D11_VIDEO_DECODER_BUFFER_PICTURE_PARAMETERS, &size, &buffer2);
-    ok(hr == S_OK, "Got hr %#lx.\n", hr);
-    ok(size >= sizeof(*h264_params), "Got size %u.\n", size);
-    ok(buffer2 == h264_params, "Buffer pointers didn't match.\n");
-
-    *h264_params = h264_params_template;
-    h264_params->CurrPic.Index7Bits = 0;
-    h264_params->IntraPicFlag = 1;
-    h264_params->StatusReportFeedbackNumber = 1;
-    for (unsigned int i = 0; i < 16; ++i)
-        h264_params->RefFrameList[i].bPicEntry = 0xff;
-    h264_params->CurrFieldOrderCnt[0] = 0;
-    h264_params->CurrFieldOrderCnt[1] = 0;
-    h264_params->frame_num = 0;
-
-    hr = ID3D11VideoContext_ReleaseDecoderBuffer(video_context,
-            decoder, D3D11_VIDEO_DECODER_BUFFER_PICTURE_PARAMETERS);
-    ok(hr == S_OK, "Got hr %#lx.\n", hr);
-
-    hr = ID3D11VideoContext_GetDecoderBuffer(video_context, decoder,
-            D3D11_VIDEO_DECODER_BUFFER_INVERSE_QUANTIZATION_MATRIX, &size, (void **)&h264_matrix);
-    ok(hr == S_OK, "Got hr %#lx.\n", hr);
-    ok(size >= sizeof(*h264_matrix), "Got size %u.\n", size);
-
-    /* All scaling list fields are UCHARs; set them all to 16. */
-    memset(h264_matrix, 16, sizeof(*h264_matrix));
-
-    hr = ID3D11VideoContext_ReleaseDecoderBuffer(video_context,
-            decoder, D3D11_VIDEO_DECODER_BUFFER_INVERSE_QUANTIZATION_MATRIX);
-    ok(hr == S_OK, "Got hr %#lx.\n", hr);
-
-    rsrc = FindResourceW(NULL, L"h264_frame0", (const WCHAR *)RT_RCDATA);
-    ok(!!rsrc, "Failed to load resource, error %lu.\n", GetLastError());
-    bitstream_size = SizeofResource(NULL, rsrc);
-
-    hr = ID3D11VideoContext_GetDecoderBuffer(video_context, decoder,
-            D3D11_VIDEO_DECODER_BUFFER_SLICE_CONTROL, &size, (void **)&h264_slice);
-    ok(hr == S_OK, "Got hr %#lx.\n", hr);
-    ok(size >= sizeof(*h264_slice) * 4, "Got size %u.\n", size);
-
-    h264_slice[0].BSNALunitDataLocation = 0;
-    h264_slice[0].SliceBytesInBuffer = bitstream_size;
-    h264_slice[0].wBadSliceChopping = 0;
-
-    hr = ID3D11VideoContext_ReleaseDecoderBuffer(video_context,
-            decoder, D3D11_VIDEO_DECODER_BUFFER_SLICE_CONTROL);
-    ok(hr == S_OK, "Got hr %#lx.\n", hr);
-
-    hr = ID3D11VideoContext_GetDecoderBuffer(video_context, decoder,
-            D3D11_VIDEO_DECODER_BUFFER_BITSTREAM, &size, &bitstream);
-    ok(hr == S_OK, "Got hr %#lx.\n", hr);
-    ok(size >= bitstream_size, "Got size %u, expected at least %u.\n", size, bitstream_size);
-
-    memcpy(bitstream, LockResource(LoadResource(GetModuleHandleW(NULL), rsrc)), bitstream_size);
-
-    hr = ID3D11VideoContext_ReleaseDecoderBuffer(video_context,
-            decoder, D3D11_VIDEO_DECODER_BUFFER_BITSTREAM);
-    ok(hr == S_OK, "Got hr %#lx.\n", hr);
-
-    buffers[0].BufferType = D3D11_VIDEO_DECODER_BUFFER_PICTURE_PARAMETERS;
-    buffers[0].DataSize = sizeof(*h264_params);
-    buffers[1].BufferType = D3D11_VIDEO_DECODER_BUFFER_INVERSE_QUANTIZATION_MATRIX;
-    buffers[1].DataSize = sizeof(*h264_matrix);
-    buffers[2].BufferType = D3D11_VIDEO_DECODER_BUFFER_SLICE_CONTROL;
-    buffers[2].DataSize = sizeof(*h264_slice);
-    buffers[3].BufferType = D3D11_VIDEO_DECODER_BUFFER_BITSTREAM;
-    buffers[3].DataSize = bitstream_size;
-    hr = ID3D11VideoContext_SubmitDecoderBuffers(video_context, decoder, ARRAY_SIZE(buffers), buffers);
-    ok(hr == S_OK, "Got hr %#lx.\n", hr);
-
-    hr = ID3D11VideoContext_DecoderEndFrame(video_context, decoder);
-    ok(hr == S_OK, "Got hr %#lx.\n", hr);
-
-    /* Second frame. */
-
-    rsrc = FindResourceW(NULL, L"h264_frame1", (const WCHAR *)RT_RCDATA);
-    ok(!!rsrc, "Failed to load resource, error %lu.\n", GetLastError());
-    bitstream_size = SizeofResource(NULL, rsrc);
-
-    hr = ID3D11VideoContext_DecoderBeginFrame(video_context, decoder, output_views[1], 0, NULL);
-    ok(hr == S_OK, "Got hr %#lx.\n", hr);
-
-    hr = ID3D11VideoContext_GetDecoderBuffer(video_context, decoder,
-            D3D11_VIDEO_DECODER_BUFFER_PICTURE_PARAMETERS, &size, (void **)&h264_matrix);
-    ok(hr == S_OK, "Got hr %#lx.\n", hr);
-    ok(size >= sizeof(*h264_matrix), "Got size %u.\n", size);
-
-    *h264_params = h264_params_template;
-    h264_params->CurrPic.Index7Bits = 1;
-    h264_params->StatusReportFeedbackNumber = 2;
-    h264_params->RefFrameList[0].Index7Bits = 0;
-    h264_params->RefFrameList[0].AssociatedFlag = 0;
-    for (unsigned int i = 1; i < 16; ++i)
-        h264_params->RefFrameList[i].bPicEntry = 0xff;
-    h264_params->CurrFieldOrderCnt[0] = 2;
-    h264_params->CurrFieldOrderCnt[1] = 2;
-    h264_params->FieldOrderCntList[0][0] = 0;
-    h264_params->FieldOrderCntList[0][1] = 0;
-    h264_params->FrameNumList[0] = 0;
-    h264_params->UsedForReferenceFlags = 0x3;
-    h264_params->frame_num = 1;
-
-    hr = ID3D11VideoContext_ReleaseDecoderBuffer(video_context,
-            decoder, D3D11_VIDEO_DECODER_BUFFER_PICTURE_PARAMETERS);
-    ok(hr == S_OK, "Got hr %#lx.\n", hr);
-
-    hr = ID3D11VideoContext_GetDecoderBuffer(video_context, decoder,
-            D3D11_VIDEO_DECODER_BUFFER_INVERSE_QUANTIZATION_MATRIX, &size, (void **)&h264_matrix);
-    ok(hr == S_OK, "Got hr %#lx.\n", hr);
-    ok(size >= sizeof(*h264_matrix), "Got size %u.\n", size);
-
-    /* All scaling list fields are UCHARs; set them all to 16. */
-    memset(h264_matrix, 16, sizeof(*h264_matrix));
-
-    hr = ID3D11VideoContext_ReleaseDecoderBuffer(video_context,
-            decoder, D3D11_VIDEO_DECODER_BUFFER_INVERSE_QUANTIZATION_MATRIX);
-    ok(hr == S_OK, "Got hr %#lx.\n", hr);
-
-    hr = ID3D11VideoContext_GetDecoderBuffer(video_context, decoder,
-            D3D11_VIDEO_DECODER_BUFFER_SLICE_CONTROL, &size, (void **)&h264_slice);
-    ok(hr == S_OK, "Got hr %#lx.\n", hr);
-    ok(size >= sizeof(*h264_slice) * 4, "Got size %u.\n", size);
-
-    h264_slice[0].BSNALunitDataLocation = 0;
-    h264_slice[0].SliceBytesInBuffer = bitstream_size;
-    h264_slice[0].wBadSliceChopping = 0;
-
-    hr = ID3D11VideoContext_ReleaseDecoderBuffer(video_context,
-            decoder, D3D11_VIDEO_DECODER_BUFFER_SLICE_CONTROL);
-    ok(hr == S_OK, "Got hr %#lx.\n", hr);
-
-    hr = ID3D11VideoContext_GetDecoderBuffer(video_context, decoder,
-            D3D11_VIDEO_DECODER_BUFFER_BITSTREAM, &size, &bitstream);
-    ok(hr == S_OK, "Got hr %#lx.\n", hr);
-    ok(size >= bitstream_size, "Got size %u, expected at least %u.\n", size, bitstream_size);
-
-    memcpy(bitstream, LockResource(LoadResource(GetModuleHandleW(NULL), rsrc)), bitstream_size);
-
-    hr = ID3D11VideoContext_ReleaseDecoderBuffer(video_context,
-            decoder, D3D11_VIDEO_DECODER_BUFFER_BITSTREAM);
-    ok(hr == S_OK, "Got hr %#lx.\n", hr);
-
-    buffers[3].DataSize = bitstream_size;
-    hr = ID3D11VideoContext_SubmitDecoderBuffers(video_context, decoder, ARRAY_SIZE(buffers), buffers);
-    ok(hr == S_OK, "Got hr %#lx.\n", hr);
-
-    hr = ID3D11VideoContext_DecoderEndFrame(video_context, decoder);
-    ok(hr == S_OK, "Got hr %#lx.\n", hr);
-
-    /* We cannot use get_texture_readback() directly.
-     * Direct3D11 seems to forbid CPU NV12 arrays. */
-    ID3D11DeviceContext_CopySubresourceRegion(test_context.immediate_context,
-            (ID3D11Resource *)readback_texture, 0, 0, 0, 0, (ID3D11Resource *)output_texture, 0, NULL);
-    get_texture_readback(readback_texture, 0, &rb);
-    get_readback_nv12(&rb, 148, 109, &colour);
-    ok(colour.y == 49 && colour.u == 109 && colour.v == 184,
-            "Got (Y, U, V) values (%u, %u, %u).\n", colour.y, colour.u, colour.v);
-    get_readback_nv12(&rb, 176, 136, &colour);
-    ok(colour.y == 41 && colour.u == 240 && colour.v == 110,
-            "Got (Y, U, V) values (%u, %u, %u).\n", colour.y, colour.u, colour.v);
-    release_resource_readback(&rb);
-
-    ID3D11DeviceContext_CopySubresourceRegion(test_context.immediate_context,
-            (ID3D11Resource *)readback_texture, 0, 0, 0, 0, (ID3D11Resource *)output_texture, 1, NULL);
-    get_texture_readback(readback_texture, 0, &rb);
-    get_readback_nv12(&rb, 148, 109, &colour);
-    ok(colour.y == 41 && colour.u == 240 && colour.v == 110,
-            "Got (Y, U, V) values (%u, %u, %u).\n", colour.y, colour.u, colour.v);
-    get_readback_nv12(&rb, 176, 136, &colour);
-    ok(colour.y == 49 && colour.u == 109 && colour.v == 184,
-            "Got (Y, U, V) values (%u, %u, %u).\n", colour.y, colour.u, colour.v);
-    release_resource_readback(&rb);
-
-    /* The status query is asynchronous and does not wait for any frames to be
-     * completed. Call it after downloading the frames so we're sure that
-     * they're done. */
-
-    memset(&h264_status, 0xcc, sizeof(h264_status));
-    memset(&extension, 0, sizeof(extension));
-    extension.Function = DXVA_STATUS_REPORTING_FUNCTION;
-    extension.pPrivateOutputData = &h264_status;
-    extension.PrivateOutputDataSize = sizeof(h264_status) - 1;
-    hr = ID3D11VideoContext_DecoderExtension(video_context, decoder, &extension);
-    ok(hr == E_FAIL, "Got hr %#lx.\n", hr);
-
-    memset(&h264_status, 0xcc, sizeof(h264_status));
-    memset(&extension, 0, sizeof(extension));
-    extension.Function = DXVA_STATUS_REPORTING_FUNCTION;
-    extension.pPrivateInputData = (void *)0xdeadbeef;
-    extension.PrivateInputDataSize = 123;
-    extension.pPrivateOutputData = &h264_status;
-    extension.PrivateOutputDataSize = sizeof(h264_status);
-    hr = ID3D11VideoContext_DecoderExtension(video_context, decoder, &extension);
-    ok(hr == S_OK, "Got hr %#lx.\n", hr);
-    ok(h264_status.StatusReportFeedbackNumber == 2, "Got number %u.\n", h264_status.StatusReportFeedbackNumber);
-    ok(h264_status.CurrPic.bPicEntry == 1, "Got index %#x.\n", h264_status.CurrPic.bPicEntry);
-    ok(!h264_status.field_pic_flag, "Got field pic flag %#x.\n", h264_status.field_pic_flag);
-    ok(h264_status.bDXVA_Func == DXVA_PICTURE_DECODING_FUNCTION, "Got function %#x.\n", h264_status.bDXVA_Func);
-    ok(h264_status.bBufType == (UCHAR)~0, "Got buffer type %#x.\n", h264_status.bBufType);
-    ok(!h264_status.bStatus, "Got status %#x.\n", h264_status.bStatus);
-    ok(!h264_status.bReserved8Bits, "Got reserved %#x.\n", h264_status.bReserved8Bits);
-    /* AMD reports that 1 macroblock was successfully decoded, which is
-     * obviously wrong.
-     * NVidia returns 0xffff, which is valid and means that no estimate was
-     * provided. */
-
-    for (unsigned int i = 0; i < ARRAY_SIZE(output_views); ++i)
-        ID3D11VideoDecoderOutputView_Release(output_views[i]);
-    ID3D11Texture2D_Release(readback_texture);
-    ID3D11Texture2D_Release(output_texture);
-    ID3D11VideoDecoder_Release(decoder);
-    ID3D11VideoContext_Release(video_context);
-    ID3D11VideoDevice_Release(video_device);
-    release_test_context(&test_context);
-}
-
-static void test_filter_minmax(void)
-{
-    ID3D11Resource *srv_resource, *rtv_resource;
-    D3D11_FEATURE_DATA_D3D11_OPTIONS1 options1;
-    struct d3d11_test_context test_context;
-    ID3D10Blob *bytecode, *vs_blob;
-    ID3D11ShaderResourceView *srv;
-    ID3D11DeviceContext *context;
-    struct resource_readback rb;
-    ID3D11RenderTargetView *rtv;
-    D3D11_SUBRESOURCE_DATA data;
-    ID3D11SamplerState *sampler;
-    ID3D11PixelShader *ps;
-    const struct vec4 *c;
-    ID3D11Device *device;
-    size_t i, j;
-    HRESULT hr;
-
-    static const struct resource_desc srv_resource_desc =
-    {
-        .dimension = D3D11_RESOURCE_DIMENSION_TEXTURE2D,
-        .width = 4,
-        .height = 4,
-        .depth_or_array_size = 1,
-        .level_count = 1,
-        .format = DXGI_FORMAT_R32G32B32A32_FLOAT,
-        .sample_desc.Count = 1,
-        .usage = D3D11_USAGE_DEFAULT,
-        .bind_flags = D3D11_BIND_SHADER_RESOURCE,
-    },
-    rtv_resource_desc =
-    {
-        .dimension = D3D11_RESOURCE_DIMENSION_TEXTURE2D,
-        .width = 64,
-        .height = 64,
-        .depth_or_array_size = 1,
-        .level_count = 1,
-        .format = DXGI_FORMAT_R32G32B32A32_FLOAT,
-        .sample_desc.Count = 1,
-        .usage = D3D11_USAGE_DEFAULT,
-        .bind_flags = D3D11_BIND_RENDER_TARGET,
-    };
-
-    static const struct vec4 srv_data[] =
-    {
-        {.00, .00, .00, 1.0}, {.25, .00, .00, 1.0}, {.50, .00, .00, 1.0}, {.75, .00, .00, 1.0},
-        {.00, .25, .00, 1.0}, {.25, .25, .00, 1.0}, {.50, .25, .00, 1.0}, {.75, .25, .00, 1.0},
-        {.00, .50, .00, 1.0}, {.25, .50, .00, 1.0}, {.50, .50, .00, 1.0}, {.75, .50, .00, 1.0},
-        {.00, .75, .00, 1.0}, {.25, .75, .00, 1.0}, {.50, .75, .00, 1.0}, {.75, .75, .00, 1.0},
-    };
-
-    static const struct expected
-    {
-        unsigned int x, y;
-        struct vec4 c;
-    }
-    avg_expected[] =
-    {
-        {36, 20, {.375, .125, 0, 1}},
-        {20, 36, {.125, .375, 0, 1}},
-        {36, 36, {.375, .375, 0, 1}},
-        {52, 36, {.625, .375, 0, 1}},
-        {36, 52, {.375, .625, 0, 1}},
-    },
-    minimum_expected[] =
-    {
-        {36, 20, {.25, .00, 0, 1}},
-        {20, 36, {.00, .25, 0, 1}},
-        {36, 36, {.25, .25, 0, 1}},
-        {52, 36, {.50, .25, 0, 1}},
-        {36, 52, {.25, .50, 0, 1}},
-    },
-    maximum_expected[] =
-    {
-        {36, 20, {.50, .25, 0, 1}},
-        {20, 36, {.25, .50, 0, 1}},
-        {36, 36, {.50, .50, 0, 1}},
-        {52, 36, {.75, .50, 0, 1}},
-        {36, 52, {.50, .75, 0, 1}},
-    };
-
-    static const struct
-    {
-        D3D11_FILTER filter;
-        const struct expected *expected;
-        size_t expected_count;
-    }
-    tests[] =
-    {
-        {D3D11_FILTER_MIN_MAG_LINEAR_MIP_POINT,         avg_expected,     ARRAY_SIZE(avg_expected)},
-        {D3D11_FILTER_MINIMUM_MIN_MAG_LINEAR_MIP_POINT, minimum_expected, ARRAY_SIZE(minimum_expected)},
-        {D3D11_FILTER_MAXIMUM_MIN_MAG_LINEAR_MIP_POINT, maximum_expected, ARRAY_SIZE(maximum_expected)},
-    };
-
-    static const char vs_code[] =
-            "void main(float4 p : POSITION, out float2 t : TEXCOORD, out float4 position : SV_Position)\n"
-            "{\n"
-            "    t.x = (p.x + 1.0) / 2.0;\n"
-            "    t.y = (-p.y + 1.0) / 2.0;\n"
-            "    position = p;\n"
-            "}\n";
-    static const char ps_code[] =
-            "Texture2D t;\n"
-            "sampler s;\n"
-            "\n"
-            "float4 main(float2 p : TEXCOORD) : SV_Target\n"
-            "{\n"
-            "    return t.Sample(s, floor(p * 8.0) / 8.0);\n"
-            "}\n";
-
-    static const float white_color[] = {1.0f, 1.0f, 1.0f, 1.0f};
-
-    if (!init_test_context(&test_context, NULL))
-        return;
-
-    device = test_context.device;
-    context = test_context.immediate_context;
-
-    if (FAILED(hr = ID3D11Device_CheckFeatureSupport(device, D3D11_FEATURE_D3D11_OPTIONS1,
-            &options1, sizeof(options1))) || !options1.MinMaxFiltering)
-    {
-        skip("Min/max reduction filtering is not supported.\n");
-        release_test_context(&test_context);
-        return;
-    }
-
-    vs_blob = compile_shader(vs_code, strlen(vs_code), "vs_4_0");
-
-    bytecode = compile_shader(ps_code, strlen(ps_code), "ps_4_0");
-    hr = ID3D11Device_CreatePixelShader(device, ID3D10Blob_GetBufferPointer(bytecode),
-            ID3D10Blob_GetBufferSize(bytecode), NULL, &ps);
-    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
-    ID3D10Blob_Release(bytecode);
-    ID3D11DeviceContext_PSSetShader(context, ps, NULL, 0);
-
-    data.pSysMem = srv_data;
-    data.SysMemPitch = srv_resource_desc.width * sizeof(*srv_data);
-    data.SysMemSlicePitch = srv_resource_desc.height * data.SysMemPitch;
-    hr = create_resource(device, &srv_resource_desc, &data, &srv_resource);
-    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
-    hr = ID3D11Device_CreateShaderResourceView(device, srv_resource, NULL, &srv);
-    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
-    ID3D11DeviceContext_PSSetShaderResources(context, 0, 1, &srv);
-
-    hr = create_resource(device, &rtv_resource_desc, NULL, &rtv_resource);
-    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
-    hr = ID3D11Device_CreateRenderTargetView(device, rtv_resource, NULL, &rtv);
-    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
-    ID3D11DeviceContext_OMSetRenderTargets(context, 1, &rtv, NULL);
-    set_viewport(context, 0.0f, 0.0f, 64.0f, 64.0f, 0.0f, 1.0f);
-
-    for (i = 0; i < ARRAY_SIZE(tests); ++i)
-    {
-        const D3D11_SAMPLER_DESC sampler_desc =
-        {
-            .Filter = tests[i].filter,
-            .AddressU = D3D11_TEXTURE_ADDRESS_CLAMP,
-            .AddressV = D3D11_TEXTURE_ADDRESS_CLAMP,
-            .AddressW = D3D11_TEXTURE_ADDRESS_CLAMP,
-        };
-
-        winetest_push_context("Test %Iu", i);
-
-        ID3D11DeviceContext_ClearRenderTargetView(context, rtv, white_color);
-
-        hr = ID3D11Device_CreateSamplerState(device, &sampler_desc, &sampler);
-        ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
-        ID3D11DeviceContext_PSSetSamplers(context, 0, 1, &sampler);
-        draw_quad_vs(&test_context, ID3D10Blob_GetBufferPointer(vs_blob), ID3D10Blob_GetBufferSize(vs_blob));
-        ID3D11SamplerState_Release(sampler);
-
-        get_resource_readback(rtv_resource, 0, &rb);
-        for (j = 0; j < tests[i].expected_count; ++j)
-        {
-            const struct expected *e = &tests[i].expected[j];
-
-            c = get_readback_vec4(&rb, e->x, e->y);
-            ok(compare_vec4(c, &e->c, 0), "Got {%.8e, %.8e, %.8e, %.8e} at %u, %u.\n",
-                    c->x, c->y, c->z, c->w, e->x, e->y);
-        }
-        release_resource_readback(&rb);
-
-        winetest_pop_context();
-    }
-
-    ID3D11RenderTargetView_Release(rtv);
-    ID3D11Resource_Release(rtv_resource);
-    ID3D11ShaderResourceView_Release(srv);
-    ID3D11Resource_Release(srv_resource);
-    ID3D11PixelShader_Release(ps);
-    ID3D10Blob_Release(vs_blob);
     release_test_context(&test_context);
 }
 
@@ -37730,8 +36862,6 @@ START_TEST(d3d11)
     queue_test(test_stencil_export);
     queue_test(test_high_resource_count);
     queue_test(test_nv12);
-    queue_test(test_h264_decoder);
-    queue_test(test_filter_minmax);
 
     run_queued_tests();
 

@@ -5,18 +5,10 @@ IMPORTS   = $(MUSL_PE_LIBS) ntdll
 DELAYIMPORTS = advapi32 user32
 PARENTSRC = ../msvcrt
 
-VER_FILEDESCRIPTION_STR = "Wine CRT library"
-VER_PRODUCTVERSION      = 10,0,30319,0
-
 SOURCES = \
 	concurrency.c \
 	console.c \
 	cpp.c \
-	crt_gccmain.c \
-	crt_main.c \
-	crt_winmain.c \
-	crt_wmain.c \
-	crt_wwinmain.c \
 	ctype.c \
 	data.c \
 	dir.c \
@@ -42,6 +34,7 @@ SOURCES = \
 	misc.c \
 	onexit.c \
 	process.c \
+	rsrc.rc \
 	scanf.c \
 	sincos.c \
 	string.c \

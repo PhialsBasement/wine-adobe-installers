@@ -28,6 +28,7 @@
 #include <setjmp.h>
 
 #include "ntstatus.h"
+#define WIN32_NO_STATUS
 #include "windef.h"
 #include "winternl.h"
 #include "ddk/wdm.h"
@@ -44,7 +45,7 @@ WINE_DECLARE_DEBUG_CHANNEL(relay);
  *         syscalls
  */
 #define SYSCALL_ENTRY(id,name,args) __ASM_SYSCALL_FUNC( id, name )
-ALL_SYSCALLS
+ALL_SYSCALLS64
 #undef SYSCALL_ENTRY
 
 
@@ -109,9 +110,11 @@ __ASM_GLOBAL_FUNC( RtlCaptureContext,
 /**********************************************************************
  *           virtual_unwind
  */
-static NTSTATUS virtual_unwind( ULONG type, DISPATCHER_CONTEXT *dispatch, CONTEXT *context )
+static NTSTATUS virtual_unwind( ULONG type, DISPATCHER_CONTEXT *dispatch, CONTEXT *context,
+                                BOOL dump_backtrace )
 {
     DISPATCHER_CONTEXT_NONVOLREG_ARM64 *nonvol_regs;
+    LDR_DATA_TABLE_ENTRY *module = NULL;
     DWORD64 pc = context->Pc;
     int i;
 
@@ -125,6 +128,15 @@ static NTSTATUS virtual_unwind( ULONG type, DISPATCHER_CONTEXT *dispatch, CONTEX
     for (i = 0; i < 8; i++) nonvol_regs->FpNvRegs[i] = context->V[i + 8].D[0];
 
     dispatch->FunctionEntry = RtlLookupFunctionEntry( pc, &dispatch->ImageBase, dispatch->HistoryTable );
+
+    if (dump_backtrace)
+    {
+        if (!LdrFindEntryForAddress( (void *)pc, &module ))
+            WINE_BACKTRACE_LOG( "%p: %s + %p.\n", (void *)pc, debugstr_w(module->BaseDllName.Buffer),
+                                (void *)((char *)pc - (char *)module->DllBase) );
+        else
+            WINE_BACKTRACE_LOG( "%p: unknown module.\n", (void *)pc );
+    }
 
     if (RtlVirtualUnwind2( type, dispatch->ImageBase, pc, dispatch->FunctionEntry, context,
                            NULL, &dispatch->HandlerData, &dispatch->EstablisherFrame,
@@ -233,7 +245,7 @@ NTSTATUS call_seh_handlers( EXCEPTION_RECORD *rec, CONTEXT *orig_context )
 
     for (;;)
     {
-        status = virtual_unwind( UNW_FLAG_EHANDLER, &dispatch, &context );
+        status = virtual_unwind( UNW_FLAG_EHANDLER, &dispatch, &context, need_backtrace( rec->ExceptionCode ) );
         if (status != STATUS_SUCCESS) return status;
 
     unwind_done:
@@ -507,7 +519,7 @@ void WINAPI RtlUnwindEx( PVOID end_frame, PVOID target_ip, EXCEPTION_RECORD *rec
 
     for (;;)
     {
-        status = virtual_unwind( UNW_FLAG_UHANDLER, &dispatch, &new_context );
+        status = virtual_unwind( UNW_FLAG_UHANDLER, &dispatch, &new_context, FALSE );
         if (status != STATUS_SUCCESS) raise_status( status, rec );
 
     unwind_done:
@@ -613,16 +625,6 @@ NTSTATUS WINAPI RtlGetNativeSystemInformation( SYSTEM_INFORMATION_CLASS class,
 }
 
 
-static ULONGLONG cpu_features_bitmap[2];
-static RTL_RUN_ONCE init_once = RTL_RUN_ONCE_INIT;
-
-static DWORD WINAPI init_cpu_features( RTL_RUN_ONCE *once, void *param, void **context )
-{
-    return !NtQuerySystemInformation( SystemProcessorFeaturesBitMapInformation,
-                                      cpu_features_bitmap, sizeof(cpu_features_bitmap), NULL );
-}
-
-
 /***********************************************************************
  *           RtlIsProcessorFeaturePresent [NTDLL.@]
  */
@@ -659,19 +661,79 @@ BOOLEAN WINAPI RtlIsProcessorFeaturePresent( UINT feature )
         (1ull << PF_ARM_SVE_SM4_INSTRUCTIONS_AVAILABLE) |
         (1ull << PF_ARM_SVE_I8MM_INSTRUCTIONS_AVAILABLE) |
         (1ull << PF_ARM_SVE_F32MM_INSTRUCTIONS_AVAILABLE) |
-        (1ull << PF_ARM_SVE_F64MM_INSTRUCTIONS_AVAILABLE) |
-        (1ull << PF_ARM_LSE2_AVAILABLE);
+        (1ull << PF_ARM_SVE_F64MM_INSTRUCTIONS_AVAILABLE);
 
-    if (feature < PROCESSOR_FEATURE_MAX)
-        return (arm64_features & (1ull << feature)) && user_shared_data->ProcessorFeatures[feature];
-
-    feature -= PROCESSOR_FEATURE_MAX;
-    if (feature >= 8 * sizeof(cpu_features_bitmap)) return FALSE;
-
-    RtlRunOnceExecuteOnce( &init_once, init_cpu_features, NULL, NULL );
-    return !!(cpu_features_bitmap[feature / 64] & (1ull << (feature % 64)));
+    return (feature < PROCESSOR_FEATURE_MAX && (arm64_features & (1ull << feature)) &&
+            user_shared_data->ProcessorFeatures[feature]);
 }
 
+static void suspend_remote_breakin( HANDLE thread )
+{
+    ULONG count;
+    NTSTATUS status = pWow64SuspendLocalThread( thread, &count );
+    if (status >= 0) status = count;
+    NtTerminateThread( GetCurrentThread(),  status );
+}
+
+/***********************************************************************
+ *              RtlWow64SuspendThread (NTDLL.@)
+ */
+NTSTATUS WINAPI RtlWow64SuspendThread( HANDLE thread, ULONG *count )
+{
+    HANDLE thread_dup;
+    THREAD_BASIC_INFORMATION tbi;
+    NTSTATUS status = NtDuplicateObject( NtCurrentProcess(), thread, NtCurrentProcess(), &thread_dup,
+                                         THREAD_QUERY_INFORMATION | THREAD_SUSPEND_RESUME, 0, 0 );
+    if (status) return status;
+    status = NtQueryInformationThread( thread_dup, ThreadBasicInformation, &tbi, sizeof(tbi), NULL);
+    NtClose( thread_dup );
+    if (status) return status;
+
+    if (tbi.ClientId.UniqueProcess != NtCurrentTeb()->ClientId.UniqueProcess)
+    {
+        HANDLE process;
+        HANDLE suspender_thread;
+        HANDLE remote_suspendee_thread;
+        OBJECT_ATTRIBUTES attr = { .Length = sizeof(attr) };
+
+        status = NtOpenProcess( &process, PROCESS_CREATE_THREAD | PROCESS_DUP_HANDLE, &attr, &tbi.ClientId );
+        if (status) return status;
+
+        status = NtDuplicateObject( NtCurrentProcess(), thread, process, &remote_suspendee_thread, 0, 0,
+                                    DUPLICATE_SAME_ACCESS );
+        if (status) goto err_close_proc;
+
+        status = NtCreateThreadEx( &suspender_thread, SYNCHRONIZE | THREAD_QUERY_INFORMATION, NULL, process,
+                                   suspend_remote_breakin, remote_suspendee_thread,
+                                   THREAD_CREATE_FLAGS_SKIP_THREAD_ATTACH | THREAD_CREATE_FLAGS_SKIP_LOADER_INIT |
+                                   THREAD_CREATE_FLAGS_HIDE_FROM_DEBUGGER | THREAD_CREATE_FLAGS_BYPASS_PROCESS_FREEZE,
+                                   0, 0, 0, NULL );
+        if (status) goto err_close_remote_hnd;
+
+        NtWaitForSingleObject( suspender_thread, FALSE, NULL );
+        status = NtQueryInformationThread( suspender_thread, ThreadBasicInformation, &tbi, sizeof(tbi), NULL );
+        if (!status)
+        {
+            if (tbi.ExitStatus < 0)
+            {
+                status = tbi.ExitStatus;
+            }
+            else if (count)
+            {
+                *count = (ULONG)tbi.ExitStatus;
+            }
+        }
+
+        NtClose( suspender_thread );
+err_close_remote_hnd:
+        NtDuplicateObject( process, remote_suspendee_thread, NULL, NULL, 0, 0, DUPLICATE_CLOSE_SOURCE );
+err_close_proc:
+        NtClose( process );
+        return status;
+    }
+
+    return pWow64SuspendLocalThread( thread, count );
+}
 
 /*************************************************************************
  *		RtlWalkFrameChain (NTDLL.@)

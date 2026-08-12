@@ -73,7 +73,11 @@ BOOL clip_device_rect( DC *dc, RECT *dst, const RECT *src )
 {
     RECT clip;
 
-    if (get_dc_device_rect( dc, &clip )) return intersect_rect( dst, src, &clip );
+    if (get_dc_device_rect( dc, &clip ))
+    {
+        clip = map_dpi_rect( clip, dc->dpi_from, dc->dpi_to );
+        return intersect_rect( dst, src, &clip );
+    }
     *dst = *src;
     return TRUE;
 }
@@ -88,7 +92,11 @@ BOOL clip_visrect( DC *dc, RECT *dst, const RECT *src )
     RECT clip;
 
     if (!clip_device_rect( dc, dst, src )) return FALSE;
-    if (NtGdiGetRgnBox( get_dc_region(dc), &clip )) return intersect_rect( dst, dst, &clip );
+    if (NtGdiGetRgnBox( get_dc_region(dc), &clip ))
+    {
+        clip = map_dpi_rect( clip, dc->dpi_from, dc->dpi_to );
+        return intersect_rect( dst, dst, &clip );
+    }
     return TRUE;
 }
 
@@ -100,7 +108,7 @@ BOOL clip_visrect( DC *dc, RECT *dst, const RECT *src )
 void update_dc_clipping( DC * dc )
 {
     PHYSDEV physdev = GET_DC_PHYSDEV( dc, pSetDeviceClipping );
-    HRGN regions[3];
+    HRGN regions[3], region, monitor_region;
     int count = 0;
 
     if (dc->hVisRgn)  regions[count++] = dc->hVisRgn;
@@ -118,7 +126,10 @@ void update_dc_clipping( DC * dc )
         if (dc->region) NtGdiDeleteObjectApp( dc->region );
         dc->region = 0;
     }
-    physdev->funcs->pSetDeviceClipping( physdev, get_dc_region( dc ));
+    region = get_dc_region( dc );
+    monitor_region = map_dpi_region( region, dc->dpi_from, dc->dpi_to );
+    physdev->funcs->pSetDeviceClipping( physdev, region, monitor_region );
+    if (monitor_region) NtGdiDeleteObjectApp( monitor_region );
 }
 
 /***********************************************************************
@@ -204,7 +215,7 @@ INT WINAPI NtGdiExtSelectClipRgn( HDC hdc, HRGN rgn, INT mode )
  *           set_visible_region
  */
 void set_visible_region( HDC hdc, HRGN hrgn, const RECT *vis_rect, const RECT *device_rect,
-                         struct window_surface *surface )
+                         struct window_surface *surface, UINT dpi_from, UINT dpi_to )
 {
     DC * dc;
 
@@ -221,6 +232,9 @@ void set_visible_region( HDC hdc, HRGN hrgn, const RECT *vis_rect, const RECT *d
     dc->attr->vis_rect = *vis_rect;
     dc->device_rect = *device_rect;
     dc->hVisRgn = hrgn;
+    dc->dpi_from = dpi_from;
+    dc->dpi_to = dpi_to;
+
     dibdrv_set_window_surface( dc, surface );
     DC_UpdateXforms( dc );
     update_dc_clipping( dc );
@@ -439,7 +453,7 @@ INT WINAPI NtGdiGetRandomRgn( HDC hDC, HRGN hRgn, INT iCode )
         {
             NtGdiCombineRgn( hRgn, dc->hVisRgn, 0, RGN_COPY );
             /* On Windows NT/2000, the SYSRGN returned is in screen coordinates */
-            if (RtlGetCurrentPeb()->OSPlatformId != VER_PLATFORM_WIN32s)
+            if (NtCurrentTeb()->Peb->OSPlatformId != VER_PLATFORM_WIN32s)
                 NtGdiOffsetRgn( hRgn, dc->attr->vis_rect.left, dc->attr->vis_rect.top );
         }
         else if (!IsRectEmpty( &dc->device_rect ))
@@ -463,12 +477,12 @@ INT WINAPI NtGdiGetRandomRgn( HDC hDC, HRGN hRgn, INT iCode )
     if (ret > 0 && (iCode & NTGDI_RGN_MONITOR_DPI))
     {
         HWND hwnd = NtUserWindowFromDC( hDC );
-        UINT raw_dpi;
+        UINT raw_dpi_num, raw_dpi_den;
         HRGN region;
 
-        get_win_monitor_dpi( hwnd, &raw_dpi );
+        get_win_monitor_dpi( hwnd, &raw_dpi_num, &raw_dpi_den );
         NtGdiOffsetRgn( hRgn, -dc->attr->vis_rect.left, -dc->attr->vis_rect.top );
-        region = map_dpi_region( hRgn, get_dpi_for_window( hwnd ), raw_dpi );
+        region = map_dpi_region( hRgn, get_dpi_for_window( hwnd ) * raw_dpi_den, raw_dpi_num );
         NtGdiCombineRgn( hRgn, region, 0, RGN_COPY );
         NtGdiDeleteObjectApp( region );
     }

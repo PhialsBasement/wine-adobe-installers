@@ -1,6 +1,0 @@
-MODULE    = odbcad32.exe
-
-EXTRADLLFLAGS = -mwindows -municode
-
-SOURCES = \
-	main.c

@@ -58,7 +58,7 @@ static BOOL INT21_RenameFile( CONTEXT *context );
 WINE_DEFAULT_DEBUG_CHANNEL(int21);
 
 
-#pragma pack(push,1)
+#include "pshpack1.h"
 
 /*
  * Extended Drive Parameter Block.
@@ -196,7 +196,7 @@ typedef struct
     DWORD  filesize;             /* 1c file size */
 } DOS_DIRENTRY_LAYOUT;
 
-#pragma pack(pop)
+#include "poppack.h"
 
 /* dos file attributes */
 #define FA_NORMAL    0x00        /* Normal file, no attributes */
@@ -611,7 +611,7 @@ static BOOL INT21_FillDrivePB( BYTE drive )
  */
 static BOOL INT21_GetCurrentDirectory( CONTEXT *context, BOOL islong )
 {
-    char  *buffer = ldt_get_ptr(context->SegDs, context->Esi);
+    char  *buffer = CTX_SEG_OFF_TO_LIN(context, context->SegDs, context->Esi);
     BYTE   drive = INT21_MapDrive( DL_reg(context) );
     WCHAR  pathW[MAX_PATH];
     char   pathA[MAX_PATH];
@@ -737,7 +737,7 @@ static BOOL INT21_SetCurrentDirectory( CONTEXT *context )
     WCHAR dirW[MAX_PATH];
     WCHAR env_var[4];
     DWORD attr;
-    char *dirA = ldt_get_ptr(context->SegDs, context->Edx);
+    char *dirA = CTX_SEG_OFF_TO_LIN(context, context->SegDs, context->Edx);
     BYTE  drive = INT21_GetCurrentDrive();
     BOOL  result;
 
@@ -782,7 +782,7 @@ static BOOL INT21_CreateFile( CONTEXT *context,
                               BYTE       dosAction )
 {
     WORD   dosStatus;
-    char  *pathA = ldt_get_ptr(context->SegDs, pathSegOff);
+    char  *pathA = CTX_SEG_OFF_TO_LIN(context, context->SegDs, pathSegOff);
     WCHAR  pathW[MAX_PATH];   
     DWORD  winAccess;
     DWORD  winAttributes;
@@ -920,6 +920,13 @@ static BOOL INT21_CreateFile( CONTEXT *context,
     MultiByteToWideChar(CP_OEMCP, 0, pathA, -1, pathW, MAX_PATH);
 
     winHandle = CreateFileW( pathW, winAccess, winSharing, NULL, winMode, winAttributes, 0 );
+    /* DOS allows opening files on a CDROM R/W */
+    if( winHandle == INVALID_HANDLE_VALUE &&
+        (GetLastError() == ERROR_WRITE_PROTECT ||
+         GetLastError() == ERROR_ACCESS_DENIED)) {
+        winHandle = CreateFileW( pathW, winAccess & ~GENERIC_WRITE,
+                                 winSharing, NULL, winMode, winAttributes, 0 );
+    }
 
     if (winHandle == INVALID_HANDLE_VALUE)
         return FALSE;
@@ -975,7 +982,8 @@ static BYTE *INT21_GetCurrentDTA( CONTEXT *context )
     TDB *pTask = GlobalLock16(GetCurrentTask());
 
     /* FIXME: This assumes DTA was set correctly! */
-    return ldt_get_ptr( SELECTOROF(pTask->dta), OFFSETOF(pTask->dta) );
+    return CTX_SEG_OFF_TO_LIN( context, SELECTOROF(pTask->dta),
+                               OFFSETOF(pTask->dta) );
 }
 
 
@@ -1007,7 +1015,7 @@ static void INT21_OpenFileUsingFCB( CONTEXT *context )
     BY_HANDLE_FILE_INFORMATION info;
     BYTE AL_result;
 
-    fcb = ldt_get_ptr(context->SegDs, context->Edx);
+    fcb = CTX_SEG_OFF_TO_LIN(context, context->SegDs, context->Edx);
     if (fcb->drive_number == 0xff) {
         xfcb = (struct XFCB *) fcb;
         fcb = (struct FCB *) xfcb->fcb;
@@ -1101,7 +1109,7 @@ static void INT21_CloseFileUsingFCB( CONTEXT *context )
     struct XFCB *xfcb;
     BYTE AL_result;
 
-    fcb = ldt_get_ptr(context->SegDs, context->Edx);
+    fcb = CTX_SEG_OFF_TO_LIN(context, context->SegDs, context->Edx);
     if (fcb->drive_number == 0xff) {
         xfcb = (struct XFCB *) fcb;
         fcb = (struct FCB *) xfcb->fcb;
@@ -1151,7 +1159,7 @@ static void INT21_SequentialReadFromFCB( CONTEXT *context )
     UINT bytes_read;
     BYTE AL_result;
 
-    fcb = ldt_get_ptr(context->SegDs, context->Edx);
+    fcb = CTX_SEG_OFF_TO_LIN(context, context->SegDs, context->Edx);
     if (fcb->drive_number == 0xff) {
         xfcb = (struct XFCB *) fcb;
         fcb = (struct FCB *) xfcb->fcb;
@@ -1231,7 +1239,7 @@ static void INT21_SequentialWriteToFCB( CONTEXT *context )
     UINT bytes_written;
     BYTE AL_result;
 
-    fcb = ldt_get_ptr(context->SegDs, context->Edx);
+    fcb = CTX_SEG_OFF_TO_LIN(context, context->SegDs, context->Edx);
     if (fcb->drive_number == 0xff) {
         xfcb = (struct XFCB *) fcb;
         fcb = (struct FCB *) xfcb->fcb;
@@ -1307,7 +1315,7 @@ static void INT21_ReadRandomRecordFromFCB( CONTEXT *context )
     UINT bytes_read;
     BYTE AL_result;
 
-    fcb = ldt_get_ptr(context->SegDs, context->Edx);
+    fcb = CTX_SEG_OFF_TO_LIN(context, context->SegDs, context->Edx);
     if (fcb->drive_number == 0xff) {
         xfcb = (struct XFCB *) fcb;
         fcb = (struct FCB *) xfcb->fcb;
@@ -1380,7 +1388,7 @@ static void INT21_WriteRandomRecordToFCB( CONTEXT *context )
     UINT bytes_written;
     BYTE AL_result;
 
-    fcb = ldt_get_ptr(context->SegDs, context->Edx);
+    fcb = CTX_SEG_OFF_TO_LIN(context, context->SegDs, context->Edx);
     if (fcb->drive_number == 0xff) {
         xfcb = (struct XFCB *) fcb;
         fcb = (struct FCB *) xfcb->fcb;
@@ -1458,7 +1466,7 @@ static void INT21_RandomBlockReadFromFCB( CONTEXT *context )
     UINT records_read;
     BYTE AL_result;
 
-    fcb = ldt_get_ptr(context->SegDs, context->Edx);
+    fcb = CTX_SEG_OFF_TO_LIN(context, context->SegDs, context->Edx);
     if (fcb->drive_number == 0xff) {
         xfcb = (struct XFCB *) fcb;
         fcb = (struct FCB *) xfcb->fcb;
@@ -1549,7 +1557,7 @@ static void INT21_RandomBlockWriteToFCB( CONTEXT *context )
     UINT records_written;
     BYTE AL_result;
 
-    fcb = ldt_get_ptr(context->SegDs, context->Edx);
+    fcb = CTX_SEG_OFF_TO_LIN(context, context->SegDs, context->Edx);
     if (fcb->drive_number == 0xff) {
         xfcb = (struct XFCB *) fcb;
         fcb = (struct FCB *) xfcb->fcb;
@@ -1607,7 +1615,9 @@ static void INT21_RandomBlockWriteToFCB( CONTEXT *context )
 static BOOL INT21_CreateDirectory( CONTEXT *context )
 {
     WCHAR dirW[MAX_PATH];
-    char *dirA = ldt_get_ptr(context->SegDs, context->Edx);
+    char *dirA = CTX_SEG_OFF_TO_LIN(context,
+                                    context->SegDs, 
+                                    context->Edx);
 
     TRACE( "CREATE DIRECTORY %s\n", dirA );
 
@@ -1644,7 +1654,7 @@ static BOOL INT21_CreateDirectory( CONTEXT *context )
  */
 static void INT21_ExtendedCountryInformation( CONTEXT *context )
 {
-    BYTE *dataptr = ldt_get_ptr( context->SegEs, context->Edi );
+    BYTE *dataptr = CTX_SEG_OFF_TO_LIN( context, context->SegEs, context->Edi );
     BYTE buffsize = CX_reg (context);
     
     TRACE( "GET EXTENDED COUNTRY INFORMATION, subfunction %02x\n",
@@ -1737,7 +1747,8 @@ static void INT21_ExtendedCountryInformation( CONTEXT *context )
     case 0xa1: /* CAPITALIZE COUNTED FILENAME STRING */
         TRACE("Convert string to uppercase with length\n");
         {
-            char *ptr = ldt_get_ptr( context->SegDs, context->Edx );
+            char *ptr = CTX_SEG_OFF_TO_LIN( context, context->SegDs,
+                                            context->Edx );
             WORD len = CX_reg(context);
             while (len--) { *ptr = toupper(*ptr); ptr++; }
         }
@@ -1747,7 +1758,7 @@ static void INT21_ExtendedCountryInformation( CONTEXT *context )
     case 0xa2: /* CAPITALIZE ASCIIZ FILENAME */
         TRACE("Convert ASCIIZ string to uppercase\n");
         {
-            char *p = ldt_get_ptr( context->SegDs, context->Edx );
+            char *p = CTX_SEG_OFF_TO_LIN( context, context->SegDs, context->Edx );
             for ( ; *p; p++) *p = toupper(*p);
         }
         break;
@@ -1777,7 +1788,9 @@ static BOOL INT21_FileAttributes( CONTEXT *context,
                                   BOOL       islong )
 {
     WCHAR fileW[MAX_PATH];
-    char *fileA = ldt_get_ptr(context->SegDs, context->Edx);
+    char *fileA = CTX_SEG_OFF_TO_LIN(context, 
+                                     context->SegDs, 
+                                     context->Edx);
     HANDLE   handle;
     BOOL     status;
     FILETIME filetime;
@@ -2256,7 +2269,7 @@ static void INT21_Ioctl_Block( CONTEXT *context )
 
     case 0x0d: /* GENERIC BLOCK DEVICE REQUEST */
         /* Get pointer to IOCTL parameter block */
-        dataptr = ldt_get_ptr(context->SegDs, context->Edx);
+        dataptr = CTX_SEG_OFF_TO_LIN(context, context->SegDs, context->Edx);
 
         switch (CX_reg(context))
         {
@@ -2268,7 +2281,7 @@ static void INT21_Ioctl_Block( CONTEXT *context )
                 WORD cyl    = *(WORD *)(dataptr+3);
                 WORD sect   = *(WORD *)(dataptr+5);
                 WORD nrsect = *(WORD *)(dataptr+7);
-                BYTE *data  = ldt_get_ptr(*(WORD *)(dataptr+11), *(WORD *)(dataptr+9));
+                BYTE *data  = CTX_SEG_OFF_TO_LIN(context, *(WORD *)(dataptr+11), *(WORD *)(dataptr+9));
                 WORD cyl_cnt, head_cnt, sec_cnt;
 
                 /* FIXME: we're faking some values here */
@@ -2331,7 +2344,7 @@ static void INT21_Ioctl_Block( CONTEXT *context )
                 WORD cyl    = *(WORD *)(dataptr+3);
                 WORD sect   = *(WORD *)(dataptr+5);
                 WORD nrsect = *(WORD *)(dataptr+7);
-                BYTE *data  = ldt_get_ptr(*(WORD *)(dataptr+11), *(WORD *)(dataptr+9));
+                BYTE *data  = CTX_SEG_OFF_TO_LIN(context, *(WORD *)(dataptr+11), *(WORD *)(dataptr+9));
                 WORD cyl_cnt, head_cnt, sec_cnt;
 
                 /* FIXME: we're faking some values here */
@@ -2596,7 +2609,8 @@ static BOOL INT21_Fat32( CONTEXT *context )
     case 0x02: /* FAT32 - GET EXTENDED DPB */
         {
             BYTE drive = INT21_MapDrive( DL_reg(context) );
-            WORD *ptr = ldt_get_ptr(context->SegEs, context->Edi);
+            WORD *ptr = CTX_SEG_OFF_TO_LIN(context, 
+                                           context->SegEs, context->Edi);
             INT21_DPB *target = (INT21_DPB*)(ptr + 1);
             INT21_DPB *source;
 
@@ -2634,8 +2648,10 @@ static BOOL INT21_Fat32( CONTEXT *context )
     case 0x03: /* FAT32 - GET EXTENDED FREE SPACE ON DRIVE */
         {
             WCHAR dirW[MAX_PATH];
-            char *dirA = ldt_get_ptr( context->SegDs, context->Edx );
-            BYTE *data = ldt_get_ptr( context->SegEs, context->Edi );
+            char *dirA = CTX_SEG_OFF_TO_LIN( context,
+                                             context->SegDs, context->Edx );
+            BYTE *data = CTX_SEG_OFF_TO_LIN( context, 
+                                             context->SegEs, context->Edi );
             DWORD cluster_sectors;
             DWORD sector_bytes;
             DWORD free_clusters;
@@ -2723,7 +2739,7 @@ static void INT21_LongFilename( CONTEXT *context )
         break;
 
     case 0x3a: /* LONG FILENAME - REMOVE DIRECTORY */
-        pathA = ldt_get_ptr(context->SegDs, context->Edx);
+        pathA = CTX_SEG_OFF_TO_LIN(context, context->SegDs, context->Edx);
 
         TRACE( "LONG FILENAME - REMOVE DIRECTORY %s\n", pathA);
         MultiByteToWideChar(CP_OEMCP, 0, pathA, -1, pathW, MAX_PATH);
@@ -2736,7 +2752,7 @@ static void INT21_LongFilename( CONTEXT *context )
         break;
 
     case 0x41: /* LONG FILENAME - DELETE FILE */
-        pathA = ldt_get_ptr(context->SegDs, context->Edx);
+        pathA = CTX_SEG_OFF_TO_LIN(context, context->SegDs, context->Edx);
 
         TRACE( "LONG FILENAME - DELETE FILE %s\n", pathA );
         MultiByteToWideChar(CP_OEMCP, 0, pathA, -1, pathW, MAX_PATH);
@@ -2761,13 +2777,13 @@ static void INT21_LongFilename( CONTEXT *context )
             WIN32_FIND_DATAW    dataW;
             WIN32_FIND_DATAA*   dataA;
 
-            pathA = ldt_get_ptr(context->SegDs,context->Edx);
+            pathA = CTX_SEG_OFF_TO_LIN(context, context->SegDs,context->Edx);
             TRACE(" LONG FILENAME - FIND FIRST MATCHING FILE for %s\n", pathA);
 
             MultiByteToWideChar(CP_OEMCP, 0, pathA, -1, pathW, MAX_PATH);
             handle = FindFirstFileW(pathW, &dataW);
 
-            dataA = ldt_get_ptr(context->SegEs, context->Edi);
+            dataA = CTX_SEG_OFF_TO_LIN(context, context->SegEs, context->Edi);
             if (handle != INVALID_HANDLE_VALUE && 
                 (h16 = GlobalAlloc16(GMEM_MOVEABLE, sizeof(handle))))
             {
@@ -2796,7 +2812,7 @@ static void INT21_LongFilename( CONTEXT *context )
             TRACE("LONG FILENAME - FIND NEXT MATCHING FILE for handle %d\n",
                   BX_reg(context));
 
-            dataA = ldt_get_ptr(context->SegEs, context->Edi);
+            dataA = CTX_SEG_OFF_TO_LIN(context, context->SegEs, context->Edi);
 
             if (h16 != INVALID_HANDLE_VALUE16 && (ptr = GlobalLock16( h16 )))
             {
@@ -2830,24 +2846,28 @@ static void INT21_LongFilename( CONTEXT *context )
                  */
 
             case 0x01:  /* Get short filename or path */
-                MultiByteToWideChar(CP_OEMCP, 0, ldt_get_ptr(context->SegDs, context->Esi), -1, pathW, MAX_PATH);
+                MultiByteToWideChar(CP_OEMCP, 0, CTX_SEG_OFF_TO_LIN(context, context->SegDs, context->Esi), -1, pathW, MAX_PATH);
                 if (!GetShortPathNameW(pathW, res, 67))
                     bSetDOSExtendedError = TRUE;
                 else
                 {
                     SET_AX( context, 0 );
-                    WideCharToMultiByte(CP_OEMCP, 0, res, -1, ldt_get_ptr(context->SegEs, context->Edi), 67, NULL, NULL);
+                    WideCharToMultiByte(CP_OEMCP, 0, res, -1, 
+                                        CTX_SEG_OFF_TO_LIN(context, context->SegEs, context->Edi), 
+                                        67, NULL, NULL);
                 }
                 break;
 	    
             case 0x02:  /* Get canonical long filename or path */
-                MultiByteToWideChar(CP_OEMCP, 0, ldt_get_ptr(context->SegDs, context->Esi), -1, pathW, MAX_PATH);
+                MultiByteToWideChar(CP_OEMCP, 0, CTX_SEG_OFF_TO_LIN(context, context->SegDs, context->Esi), -1, pathW, MAX_PATH);
                 if (!GetFullPathNameW(pathW, 128, res, NULL))
                     bSetDOSExtendedError = TRUE;
                 else
                 {
                     SET_AX( context, 0 );
-                    WideCharToMultiByte(CP_OEMCP, 0, res, -1, ldt_get_ptr(context->SegEs, context->Edi), 128, NULL, NULL);
+                    WideCharToMultiByte(CP_OEMCP, 0, res, -1, 
+                                        CTX_SEG_OFF_TO_LIN(context, context->SegEs, context->Edi), 
+                                        128, NULL, NULL);
                 }
                 break;
             default:
@@ -2871,7 +2891,7 @@ static void INT21_LongFilename( CONTEXT *context )
             DWORD filename_len, flags;
             WCHAR dstW[8];
 
-            pathA = ldt_get_ptr(context->SegDs,context->Edx);
+            pathA = CTX_SEG_OFF_TO_LIN(context, context->SegDs,context->Edx);
 
             TRACE("LONG FILENAME - GET VOLUME INFORMATION for drive having root dir '%s'.\n", pathA);
             SET_AX( context, 0 );
@@ -2886,7 +2906,9 @@ static void INT21_LongFilename( CONTEXT *context )
             SET_BX( context, flags | 0x4000 ); /* support for LFN functions */
             SET_CX( context, filename_len );
             SET_DX( context, MAX_PATH ); /* FIXME: which len if DRIVE_SHORT_NAMES ? */
-            WideCharToMultiByte(CP_OEMCP, 0, dstW, -1, ldt_get_ptr(context->SegEs, context->Edi), 8, NULL, NULL);
+            WideCharToMultiByte(CP_OEMCP, 0, dstW, -1, 
+                                CTX_SEG_OFF_TO_LIN(context, context->SegEs, context->Edi), 
+                                8, NULL, NULL);
         }
         break;
 
@@ -2910,14 +2932,15 @@ static void INT21_LongFilename( CONTEXT *context )
             }
         }
         break;
-
+          
     case 0xa6: /* LONG FILENAME - GET FILE INFO BY HANDLE */
         {
             HANDLE handle = DosFileHandleToWin32Handle(BX_reg(context));
-            BY_HANDLE_FILE_INFORMATION *info = ldt_get_ptr(context->SegDs, context->Edx);
-
+            BY_HANDLE_FILE_INFORMATION *info =
+                CTX_SEG_OFF_TO_LIN(context, context->SegDs, context->Edx);
+            
             TRACE( "LONG FILENAME - GET FILE INFO BY HANDLE\n" );
-
+            
             if (!GetFileInformationByHandle(handle, info))
                 bSetDOSExtendedError = TRUE;
         }
@@ -2929,7 +2952,9 @@ static void INT21_LongFilename( CONTEXT *context )
         case 0x00: /* FILE TIME TO DOS TIME */
             {
                 WORD      date, time;
-                FILETIME *filetime = ldt_get_ptr(context->SegDs, context->Esi);
+                FILETIME *filetime = CTX_SEG_OFF_TO_LIN(context,
+                                                        context->SegDs,
+                                                        context->Esi);
 
                 TRACE( "LONG FILENAME - FILE TIME TO DOS TIME\n" );
 
@@ -2948,7 +2973,9 @@ static void INT21_LongFilename( CONTEXT *context )
 
         case 0x01: /* DOS TIME TO FILE TIME */
             {
-                FILETIME *filetime = ldt_get_ptr(context->SegEs, context->Edi);
+                FILETIME *filetime = CTX_SEG_OFF_TO_LIN(context,
+                                                        context->SegEs,
+                                                        context->Edi);
 
                 TRACE( "LONG FILENAME - DOS TIME TO FILE TIME\n" );
 
@@ -2998,8 +3025,10 @@ static BOOL INT21_RenameFile( CONTEXT *context )
 {
     WCHAR fromW[MAX_PATH];
     WCHAR toW[MAX_PATH];
-    char *fromA = ldt_get_ptr(context->SegDs, context->Edx);
-    char *toA = ldt_get_ptr(context->SegEs, context->Edi);
+    char *fromA = CTX_SEG_OFF_TO_LIN(context, 
+                                     context->SegDs,context->Edx);
+    char *toA = CTX_SEG_OFF_TO_LIN(context, 
+                                   context->SegEs,context->Edi);
 
     TRACE( "RENAME FILE %s to %s\n", fromA, toA );
     MultiByteToWideChar(CP_OEMCP, 0, fromA, -1, fromW, MAX_PATH);
@@ -3025,7 +3054,7 @@ static BOOL INT21_NetworkFunc (CONTEXT *context)
             DWORD s = ARRAY_SIZE(dstW);
             int len;
 
-            char *dst = ldt_get_ptr(context->SegDs, context->Edx);
+            char *dst = CTX_SEG_OFF_TO_LIN (context,context->SegDs,context->Edx);
             TRACE("getting machine name to %p\n", dst);
             if (!GetComputerNameW(dstW, &s) ||
                 !WideCharToMultiByte(CP_OEMCP, 0, dstW, -1, dst, 16, NULL, NULL))
@@ -3054,7 +3083,7 @@ static BOOL INT21_NetworkFunc (CONTEXT *context)
  */
 static int INT21_GetDiskSerialNumber( CONTEXT *context )
 {
-    BYTE *dataptr = ldt_get_ptr(context->SegDs, context->Edx);
+    BYTE *dataptr = CTX_SEG_OFF_TO_LIN(context, context->SegDs, context->Edx);
     WCHAR path[] = {'A',':','\\',0}, label[11];
     DWORD serial;
 
@@ -3080,7 +3109,7 @@ static int INT21_GetDiskSerialNumber( CONTEXT *context )
 static BOOL INT21_SetDiskSerialNumber( CONTEXT *context )
 {
 #if 0
-    BYTE *dataptr = ldt_get_ptr(context->SegDs, context->Edx);
+    BYTE *dataptr = CTX_SEG_OFF_TO_LIN(context, context->SegDs, context->Edx);
     int drive = INT21_MapDrive(BL_reg(context));
 
     if (!is_valid_drive(drive))
@@ -3309,7 +3338,7 @@ static void INT21_GetExtendedError( CONTEXT *context )
 static BOOL INT21_CreateTempFile( CONTEXT *context )
 {
     static int counter = 0;
-    char *name = ldt_get_ptr( context->SegDs, context->Edx );
+    char *name = CTX_SEG_OFF_TO_LIN(context,  context->SegDs, context->Edx );
     char *p = name + strlen(name);
 
     /* despite what Ralf Brown says, some programs seem to call without
@@ -3448,7 +3477,7 @@ static BOOL INT21_FindFirst( CONTEXT *context )
     WCHAR maskW[12], pathW[MAX_PATH];
     static const WCHAR wildcardW[] = {'*','.','*',0};
 
-    path = ldt_get_ptr(context->SegDs, context->Edx);
+    path = CTX_SEG_OFF_TO_LIN(context, context->SegDs, context->Edx);
     MultiByteToWideChar(CP_OEMCP, 0, path, -1, pathW, MAX_PATH);
 
     p = wcsrchr( pathW, '\\');
@@ -3619,7 +3648,7 @@ static BOOL INT21_FindNext( CONTEXT *context )
  */
 static BOOL INT21_FindFirstFCB( CONTEXT *context )
 {
-    BYTE *fcb = ldt_get_ptr(context->SegDs, context->Edx);
+    BYTE *fcb = CTX_SEG_OFF_TO_LIN(context, context->SegDs, context->Edx);
     FINDFILE_FCB *pFCB;
     int drive;
     WCHAR p[] = {' ',':',};
@@ -3643,7 +3672,7 @@ static BOOL INT21_FindFirstFCB( CONTEXT *context )
  */
 static BOOL INT21_FindNextFCB( CONTEXT *context )
 {
-    BYTE *fcb = ldt_get_ptr(context->SegDs, context->Edx);
+    BYTE *fcb = CTX_SEG_OFF_TO_LIN(context, context->SegDs, context->Edx);
     FINDFILE_FCB *pFCB;
     LPBYTE pResult = INT21_GetCurrentDTA(context);
     DOS_DIRENTRY_LAYOUT *ddl;
@@ -3706,8 +3735,10 @@ static BOOL INT21_FindNextFCB( CONTEXT *context )
  */
 static void INT21_ParseFileNameIntoFCB( CONTEXT *context )
 {
-    char *filename = ldt_get_ptr( context->SegDs, context->Esi );
-    char *fcb = ldt_get_ptr( context->SegEs, context->Edi );
+    char *filename =
+        CTX_SEG_OFF_TO_LIN(context, context->SegDs, context->Esi );
+    char *fcb =
+        CTX_SEG_OFF_TO_LIN(context, context->SegEs, context->Edi );
     char *s;
     WCHAR *buffer;
     WCHAR fcbW[12];
@@ -3858,7 +3889,8 @@ void WINAPI DOSVM_Int21Handler( CONTEXT *context )
         TRACE("WRITE '$'-terminated string from %04lX:%04X to stdout\n",
 	      context->SegDs, DX_reg(context) );
         {
-            LPSTR data = ldt_get_ptr( context->SegDs, context->Edx );
+            LPSTR data = CTX_SEG_OFF_TO_LIN( context, 
+                                             context->SegDs, context->Edx );
             LPSTR p = data;
             DWORD w;
             /*
@@ -3922,7 +3954,7 @@ void WINAPI DOSVM_Int21Handler( CONTEXT *context )
 
     case 0x11: /* FIND FIRST MATCHING FILE USING FCB */
 	TRACE("FIND FIRST MATCHING FILE USING FCB %p\n",
-	      ldt_get_ptr(context->SegDs, context->Edx));
+	      CTX_SEG_OFF_TO_LIN(context, context->SegDs, context->Edx));
         if (!INT21_FindFirstFCB(context))
         {
             SET_AL( context, 0xff );
@@ -4264,7 +4296,9 @@ void WINAPI DOSVM_Int21Handler( CONTEXT *context )
         }
         if(AX_reg(context) != 2 )
         {
-            INT21_FillCountryInformation( ldt_get_ptr(context->SegDs, context->Edx) );
+            INT21_FillCountryInformation( CTX_SEG_OFF_TO_LIN(context,
+                                                             context->SegDs,
+                                                             context->Edx) );
             SET_AX( context, INT21_GetSystemCountryCode() );
             SET_BX( context, INT21_GetSystemCountryCode() );
             RESET_CFLAG(context);
@@ -4281,7 +4315,8 @@ void WINAPI DOSVM_Int21Handler( CONTEXT *context )
     case 0x3a: /* "RMDIR" - REMOVE DIRECTORY */
         {
             WCHAR dirW[MAX_PATH];
-            char *dirA = ldt_get_ptr(context->SegDs, context->Edx);
+            char *dirA = CTX_SEG_OFF_TO_LIN(context,
+                                            context->SegDs, context->Edx);
 
             TRACE( "REMOVE DIRECTORY %s\n", dirA );
 
@@ -4334,7 +4369,9 @@ void WINAPI DOSVM_Int21Handler( CONTEXT *context )
         {
             DWORD result;
             WORD  count  = CX_reg(context);
-            BYTE *buffer = ldt_get_ptr( context->SegDs, context->Edx );
+            BYTE *buffer = CTX_SEG_OFF_TO_LIN( context, 
+                                               context->SegDs,
+                                               context->Edx );
 
             /* Some programs pass a count larger than the allocated buffer */
             DWORD maxcount = GetSelectorLimit16( context->SegDs ) - DX_reg(context) + 1;
@@ -4358,7 +4395,7 @@ void WINAPI DOSVM_Int21Handler( CONTEXT *context )
                context->SegDs, DX_reg(context),
                BX_reg(context), CX_reg(context) );
         {
-            char *ptr = ldt_get_ptr(context->SegDs, context->Edx);
+            char *ptr = CTX_SEG_OFF_TO_LIN(context, context->SegDs, context->Edx);
             HFILE handle = (HFILE)DosFileHandleToWin32Handle(BX_reg(context));
             LONG result = _hwrite( handle, ptr, CX_reg(context) );
             if (result == HFILE_ERROR)
@@ -4374,7 +4411,9 @@ void WINAPI DOSVM_Int21Handler( CONTEXT *context )
     case 0x41: /* "UNLINK" - DELETE FILE */
         {
             WCHAR fileW[MAX_PATH];
-            char *fileA = ldt_get_ptr(context->SegDs, context->Edx);
+            char *fileA = CTX_SEG_OFF_TO_LIN(context, 
+                                             context->SegDs, 
+                                             context->Edx);
 
             TRACE( "UNLINK %s\n", fileA );
             MultiByteToWideChar(CP_OEMCP, 0, fileA, -1, fileW, MAX_PATH);
@@ -4507,7 +4546,7 @@ void WINAPI DOSVM_Int21Handler( CONTEXT *context )
 
     case 0x4b: /* "EXEC" - LOAD AND/OR EXECUTE PROGRAM */
         {
-            char *program = ldt_get_ptr(context->SegDs, context->Edx);
+            char *program = CTX_SEG_OFF_TO_LIN(context, context->SegDs, context->Edx);
             HINSTANCE16 instance;
 
             TRACE( "EXEC %s\n", program );
@@ -4534,7 +4573,7 @@ void WINAPI DOSVM_Int21Handler( CONTEXT *context )
 
     case 0x4e: /* "FINDFIRST" - FIND FIRST MATCHING FILE */
         TRACE("FINDFIRST mask 0x%04x spec %s\n",CX_reg(context),
-	      debugstr_a( ldt_get_ptr( context->SegDs, context->Edx )));
+	      (LPCSTR)CTX_SEG_OFF_TO_LIN(context,  context->SegDs, context->Edx));
         if (!INT21_FindFirst(context)) break;
         /* fall through */
 
@@ -4683,14 +4722,17 @@ void WINAPI DOSVM_Int21Handler( CONTEXT *context )
             WCHAR       pathW[MAX_PATH], res[MAX_PATH];
             /* FIXME: likely to be broken */
 
-            TRACE("TRUENAME %s\n", debugstr_a(ldt_get_ptr(context->SegDs,context->Esi)));
-            MultiByteToWideChar(CP_OEMCP, 0, ldt_get_ptr(context->SegDs, context->Esi), -1, pathW, MAX_PATH);
+            TRACE("TRUENAME %s\n",
+                  (LPCSTR)CTX_SEG_OFF_TO_LIN(context, context->SegDs,context->Esi));
+            MultiByteToWideChar(CP_OEMCP, 0, CTX_SEG_OFF_TO_LIN(context, context->SegDs, context->Esi), -1, pathW, MAX_PATH);
             if (!GetFullPathNameW( pathW, 128, res, NULL ))
 		bSetDOSExtendedError = TRUE;
             else
             {
                 SET_AX( context, 0 );
-                WideCharToMultiByte(CP_OEMCP, 0, res, -1, ldt_get_ptr(context->SegEs, context->Edi), 128, NULL, NULL);
+                WideCharToMultiByte(CP_OEMCP, 0, res, -1, 
+                                    CTX_SEG_OFF_TO_LIN(context, context->SegEs, context->Edi), 
+                                    128, NULL, NULL);
             }
         }
         break;

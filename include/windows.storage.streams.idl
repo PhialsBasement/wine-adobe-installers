@@ -20,9 +20,11 @@
 #pragma winrt ns_prefix
 #endif
 
+#ifndef DO_NO_IMPORTS
 import "inspectable.idl";
 import "eventtoken.idl";
 import "windows.foundation.idl";
+#endif
 
 namespace Windows.Storage {
     interface IStorageFile;
@@ -314,6 +316,7 @@ namespace Windows.Storage.Streams {
     {
     }
 
+#ifndef _WINDOWS_STORAGE
     [
         activatable(Windows.Storage.Streams.IBufferFactory, Windows.Foundation.UniversalApiContract, 1.0),
         contract(Windows.Foundation.UniversalApiContract, 1.0),
@@ -347,6 +350,7 @@ namespace Windows.Storage.Streams {
     {
         [default] interface Windows.Foundation.IAsyncOperation<UINT32>;
     }
+#endif
 
     [
         activatable(Windows.Foundation.UniversalApiContract, 1.0),

@@ -172,10 +172,7 @@ static BOOL match_star(char c, const char *str, const char *regexp, UINT pos, BO
 static BOOL match_regexp(const char *str, const char *regexp, BOOL case_sensitive)
 {
     if (strstr(regexp, "[")) FIXME("character ranges (i.e. [abc], [^a-z]) are not supported\n");
-    if ((strstr(regexp, "\\<") && strstr(regexp, "\\<") != regexp) || strstr(regexp, "\\>"))
-        FIXME("word position (i.e. \\< and \\>) not supported\n");
-
-    if (regexp[0] == '\\' && regexp[1] == '<') return match_here(str, regexp, 2, case_sensitive);
+    if (strstr(regexp, "\\<") || strstr(regexp, "\\>")) FIXME("word position (i.e. \\< and \\>) not supported\n");
 
     if (regexp[0] == '^') return match_here(str, regexp, 1, case_sensitive);
     do { if (match_here(str, regexp, 0, case_sensitive)) return TRUE; } while (*str++);
@@ -188,7 +185,7 @@ int __cdecl wmain(int argc, WCHAR *argv[])
     struct findstr_file *file_head = NULL, *current_file, *next_file;
     char line[MAXSTRING];
     WCHAR *string, *ptr, *buffer;
-    BOOL has_string = FALSE, has_file = FALSE, case_sensitive = TRUE, regular_expression = TRUE;
+    BOOL has_string = FALSE, has_file = FALSE, case_sensitive = TRUE, regular_expression = FALSE;
     int ret = 1, i, j;
 
     for (i = 0; i < argc; i++)
@@ -240,10 +237,6 @@ int __cdecl wmain(int argc, WCHAR *argv[])
                 case 'I':
                 case 'i':
                     case_sensitive = FALSE;
-                    break;
-                case 'L':
-                case 'l':
-                    regular_expression = FALSE;
                     break;
                 case 'R':
                 case 'r':

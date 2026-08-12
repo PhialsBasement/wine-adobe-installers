@@ -1,5 +1,5 @@
 /*
- * Copyright 2025 Connor McAdams for CodeWeavers
+ * Copyright 2024 Connor McAdams for CodeWeavers
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -23,6 +23,118 @@
 #include <stdint.h>
 #include "windef.h" /* For RECT. */
 #include "wingdi.h" /* For PALETTEENTRY. */
+
+#if D3DX_D3D_VERSION == 9
+#define COBJMACROS
+#include "d3dx9.h"
+
+#define D3DX_ERROR_INVALID_DATA D3DXERR_INVALIDDATA;
+#define D3DX_HELPER_ERR_FILE_NOT_FOUND ERROR_FILE_NOT_FOUND
+
+#define ID3DXBlob                              ID3DXBuffer
+#define d3dx_create_blob(size, blob)           D3DXCreateBuffer(size, blob)
+#define d3dx_blob_get_buffer_pointer(blob)     ID3DXBuffer_GetBufferPointer(blob)
+#define d3dx_blob_get_buffer_size(blob)        ID3DXBuffer_GetBufferSize(blob)
+#define d3dx_blob_release(blob)                ID3DXBuffer_Release(blob)
+#endif /* D3DX_D3D_VERSION == 9 */
+
+#if D3DX_D3D_VERSION == 10
+#define COBJMACROS
+#include "d3dx10.h"
+
+#define D3DERR_INVALIDCALL      0x8876086c
+#define D3DX_ERROR_INVALID_DATA D3DX10_ERR_INVALID_DATA
+
+#define D3DX_HELPER_ERR_FILE_NOT_FOUND D3D10_ERROR_FILE_NOT_FOUND
+
+#define D3DX_DEFAULT                  D3DX10_DEFAULT
+
+#define D3DX_FILTER_NONE              D3DX10_FILTER_NONE
+#define D3DX_FILTER_POINT             D3DX10_FILTER_POINT
+#define D3DX_FILTER_LINEAR            D3DX10_FILTER_LINEAR
+#define D3DX_FILTER_TRIANGLE          D3DX10_FILTER_TRIANGLE
+#define D3DX_FILTER_BOX               D3DX10_FILTER_BOX
+#define D3DX_FILTER_MIRROR_U          D3DX10_FILTER_MIRROR_U
+#define D3DX_FILTER_MIRROR_V          D3DX10_FILTER_MIRROR_V
+#define D3DX_FILTER_MIRROR_W          D3DX10_FILTER_MIRROR_W
+#define D3DX_FILTER_MIRROR            D3DX10_FILTER_MIRROR
+#define D3DX_FILTER_DITHER            D3DX10_FILTER_DITHER
+#define D3DX_FILTER_DITHER_DIFFUSION  D3DX10_FILTER_DITHER_DIFFUSION
+#define D3DX_FILTER_SRGB_IN           D3DX10_FILTER_SRGB_IN
+#define D3DX_FILTER_SRGB_OUT          D3DX10_FILTER_SRGB_OUT
+#define D3DX_FILTER_SRGB              D3DX10_FILTER_SRGB
+
+#define ID3DXBlob                          ID3D10Blob
+#define d3dx_create_blob(size, blob)       D3D10CreateBlob(size, blob)
+#define d3dx_blob_get_buffer_pointer(blob) ID3D10Blob_GetBufferPointer(blob)
+#define d3dx_blob_get_buffer_size(blob)    ID3D10Blob_GetBufferSize(blob)
+#define d3dx_blob_release(blob)            ID3D10Blob_Release(blob)
+
+enum d3dx_pixel_format_id d3dx_pixel_format_id_from_dxgi_format(DXGI_FORMAT format);
+DXGI_FORMAT dxgi_format_from_legacy_dds_d3dx_pixel_format_id(enum d3dx_pixel_format_id format);
+DXGI_FORMAT dxgi_format_from_dxt10_dds_d3dx_pixel_format_id(enum d3dx_pixel_format_id format);
+#endif /* D3DX_D3D_VERSION == 10 */
+
+#if D3DX_D3D_VERSION == 11
+#define COBJMACROS
+#include "d3dx11.h"
+#include "d3dcompiler.h"
+
+#define D3DERR_INVALIDCALL      0x8876086c
+#define D3DX_ERROR_INVALID_DATA D3DX11_ERR_INVALID_DATA
+
+#define D3DX_HELPER_ERR_FILE_NOT_FOUND D3D11_ERROR_FILE_NOT_FOUND
+
+#define D3DX_DEFAULT                  D3DX11_DEFAULT
+
+#define D3DX_FILTER_NONE              D3DX11_FILTER_NONE
+#define D3DX_FILTER_POINT             D3DX11_FILTER_POINT
+#define D3DX_FILTER_LINEAR            D3DX11_FILTER_LINEAR
+#define D3DX_FILTER_TRIANGLE          D3DX11_FILTER_TRIANGLE
+#define D3DX_FILTER_BOX               D3DX11_FILTER_BOX
+#define D3DX_FILTER_MIRROR_U          D3DX11_FILTER_MIRROR_U
+#define D3DX_FILTER_MIRROR_V          D3DX11_FILTER_MIRROR_V
+#define D3DX_FILTER_MIRROR_W          D3DX11_FILTER_MIRROR_W
+#define D3DX_FILTER_MIRROR            D3DX11_FILTER_MIRROR
+#define D3DX_FILTER_DITHER            D3DX11_FILTER_DITHER
+#define D3DX_FILTER_DITHER_DIFFUSION  D3DX11_FILTER_DITHER_DIFFUSION
+#define D3DX_FILTER_SRGB_IN           D3DX11_FILTER_SRGB_IN
+#define D3DX_FILTER_SRGB_OUT          D3DX11_FILTER_SRGB_OUT
+#define D3DX_FILTER_SRGB              D3DX11_FILTER_SRGB
+
+#define ID3DXBlob                          ID3D10Blob
+#define d3dx_create_blob(size, blob)       D3DCreateBlob(size, blob)
+#define d3dx_blob_get_buffer_pointer(blob) ID3D10Blob_GetBufferPointer(blob)
+#define d3dx_blob_get_buffer_size(blob)    ID3D10Blob_GetBufferSize(blob)
+#define d3dx_blob_release(blob)            ID3D10Blob_Release(blob)
+
+enum d3dx_pixel_format_id d3dx_pixel_format_id_from_dxgi_format(DXGI_FORMAT format);
+DXGI_FORMAT dxgi_format_from_legacy_dds_d3dx_pixel_format_id(enum d3dx_pixel_format_id format);
+DXGI_FORMAT dxgi_format_from_dxt10_dds_d3dx_pixel_format_id(enum d3dx_pixel_format_id format);
+#endif /* D3DX_D3D_VERSION == 11 */
+
+#define D3DX_FILTER_INVALID_BITS 0xff80fff8
+static inline HRESULT d3dx_validate_filter(uint32_t filter)
+{
+    if ((filter & D3DX_FILTER_INVALID_BITS) || !(filter & 0x7) || ((filter & 0x7) > D3DX_FILTER_BOX))
+        return D3DERR_INVALIDCALL;
+
+    return S_OK;
+}
+
+static inline HRESULT d3dx_handle_filter(UINT *filter)
+{
+    if (*filter == D3DX_DEFAULT)
+        *filter = D3DX_FILTER_TRIANGLE | D3DX_FILTER_DITHER;
+
+    return d3dx_validate_filter(*filter);
+}
+
+#ifndef MAKEFOURCC
+#define MAKEFOURCC(ch0, ch1, ch2, ch3)  \
+    ((DWORD)(BYTE)(ch0) | ((DWORD)(BYTE)(ch1) << 8) |  \
+    ((DWORD)(BYTE)(ch2) << 16) | ((DWORD)(BYTE)(ch3) << 24 ))
+#endif
 
 #define DDS_PALETTE_SIZE (sizeof(PALETTEENTRY) * 256)
 
@@ -98,6 +210,11 @@ struct dds_header
     DWORD reserved2;
 };
 
+/* These are custom Wine only filter flags. */
+#define D3DX_FILTER_PMA_IN  0x00800000
+#define D3DX_FILTER_PMA_OUT 0x01000000
+#define D3DX_FILTER_PMA     0x01800000
+
 struct vec4
 {
     float x, y, z, w;
@@ -149,7 +266,7 @@ enum d3dx_image_file_format
     D3DX_IMAGE_FILE_FORMAT_DIB  = 6,
     D3DX_IMAGE_FILE_FORMAT_HDR  = 7,
     D3DX_IMAGE_FILE_FORMAT_PFM  = 8,
-    /* TIFF/GIF/WMP are only available on D3DX10/D3DX11. */
+    /* TIFF/GIF/WMP are only available on d3dx10/d3dx11. */
     D3DX_IMAGE_FILE_FORMAT_TIFF = 10,
     D3DX_IMAGE_FILE_FORMAT_GIF  = 11,
     D3DX_IMAGE_FILE_FORMAT_WMP  = 12,
@@ -173,8 +290,10 @@ enum d3dx_pixel_format_id
 {
     D3DX_PIXEL_FORMAT_B8G8R8_UNORM,
     D3DX_PIXEL_FORMAT_B8G8R8A8_UNORM,
+    D3DX_PIXEL_FORMAT_B8G8R8A8_UNORM_SRGB,
     D3DX_PIXEL_FORMAT_B8G8R8X8_UNORM,
     D3DX_PIXEL_FORMAT_R8G8B8A8_UNORM,
+    D3DX_PIXEL_FORMAT_R8G8B8A8_UNORM_SRGB,
     D3DX_PIXEL_FORMAT_R8G8B8X8_UNORM,
     D3DX_PIXEL_FORMAT_B5G6R5_UNORM,
     D3DX_PIXEL_FORMAT_B5G5R5X1_UNORM,
@@ -198,10 +317,13 @@ enum d3dx_pixel_format_id
     D3DX_PIXEL_FORMAT_L8_UNORM,
     D3DX_PIXEL_FORMAT_L16_UNORM,
     D3DX_PIXEL_FORMAT_DXT1_UNORM,
+    D3DX_PIXEL_FORMAT_BC1_UNORM_SRGB,
     D3DX_PIXEL_FORMAT_DXT2_UNORM,
     D3DX_PIXEL_FORMAT_DXT3_UNORM,
+    D3DX_PIXEL_FORMAT_BC2_UNORM_SRGB,
     D3DX_PIXEL_FORMAT_DXT4_UNORM,
     D3DX_PIXEL_FORMAT_DXT5_UNORM,
+    D3DX_PIXEL_FORMAT_BC3_UNORM_SRGB,
     D3DX_PIXEL_FORMAT_BC4_UNORM,
     D3DX_PIXEL_FORMAT_BC4_SNORM,
     D3DX_PIXEL_FORMAT_BC5_UNORM,
@@ -211,17 +333,14 @@ enum d3dx_pixel_format_id
     D3DX_PIXEL_FORMAT_R16G16B16A16_FLOAT,
     D3DX_PIXEL_FORMAT_R32_FLOAT,
     D3DX_PIXEL_FORMAT_R32G32_FLOAT,
+    D3DX_PIXEL_FORMAT_R11G11B10_FLOAT,
     D3DX_PIXEL_FORMAT_R32G32B32_FLOAT,
     D3DX_PIXEL_FORMAT_R32G32B32A32_FLOAT,
-    D3DX_PIXEL_FORMAT_P1_UINT,
-    D3DX_PIXEL_FORMAT_P2_UINT,
-    D3DX_PIXEL_FORMAT_P4_UINT,
     D3DX_PIXEL_FORMAT_P8_UINT,
     D3DX_PIXEL_FORMAT_P8_UINT_A8_UNORM,
     D3DX_PIXEL_FORMAT_U8V8W8Q8_SNORM,
     D3DX_PIXEL_FORMAT_U16V16W16Q16_SNORM,
     D3DX_PIXEL_FORMAT_U8V8_SNORM,
-    D3DX_PIXEL_FORMAT_U8V8_SNORM_Cx,
     D3DX_PIXEL_FORMAT_U16V16_SNORM,
     D3DX_PIXEL_FORMAT_U8V8_SNORM_L8X8_UNORM,
     D3DX_PIXEL_FORMAT_U10V10W10_SNORM_A2_UNORM,
@@ -241,15 +360,8 @@ enum d3dx_pixel_format_id
 #define D3DX_PIXEL_FORMAT_BC2_UNORM          D3DX_PIXEL_FORMAT_DXT3_UNORM
 #define D3DX_PIXEL_FORMAT_BC3_UNORM          D3DX_PIXEL_FORMAT_DXT5_UNORM
 
-/* for internal use */
-enum conversion_flag
-{
-    CONV_FLAG_PM_ALPHA_IN  = 0x01,
-    CONV_FLAG_PM_ALPHA_OUT = 0x02,
-    CONV_FLAG_SRGB_IN  = 0x04,
-    CONV_FLAG_SRGB_OUT = 0x08,
-};
 
+/* for internal use */
 enum component_type
 {
     CTYPE_EMPTY,
@@ -258,7 +370,6 @@ enum component_type
     CTYPE_FLOAT,
     CTYPE_LUMA,
     CTYPE_INDEX,
-    CTYPE_SHILO, /* Signed HILO. */
 };
 
 enum format_flag
@@ -267,13 +378,13 @@ enum format_flag
     FMT_FLAG_PACKED = 0x02,
     /* Internal only format, has no exact D3DFORMAT equivalent. */
     FMT_FLAG_INTERNAL = 0x04,
+    FMT_FLAG_PM_ALPHA = 0x08,
     /*
      * For formats that only have a DXGI_FORMAT mapping, no D3DFORMAT
      * equivalent.
      */
-    FMT_FLAG_DXGI     = 0x08,
-    /* Formats with premultiplied alpha, i.e DXT2/DXT4. */
-    FMT_FLAG_PM_ALPHA = 0x10,
+    FMT_FLAG_DXGI     = 0x10,
+    FMT_FLAG_SRGB     = 0x20,
 };
 
 struct pixel_format_desc {
@@ -364,11 +475,6 @@ static inline BOOL is_packed_format(const struct pixel_format_desc *format)
     return !!(format->flags & FMT_FLAG_PACKED);
 }
 
-static inline BOOL is_signed_hilo_format(const struct pixel_format_desc *format)
-{
-    return format->rgb_type == CTYPE_SHILO;
-}
-
 static inline BOOL format_types_match(const struct pixel_format_desc *src, const struct pixel_format_desc *dst)
 {
     if ((src->a_type && dst->a_type) && (src->a_type != dst->a_type))
@@ -393,6 +499,16 @@ static inline BOOL is_dxgi_format(const struct pixel_format_desc *format)
     return !!(format->flags & FMT_FLAG_DXGI);
 }
 
+static inline BOOL filter_flags_match(uint32_t filter_flags)
+{
+    if (!!(filter_flags & D3DX_FILTER_PMA_IN) != !!((filter_flags & D3DX_FILTER_PMA_OUT)))
+        return FALSE;
+    if (!!(filter_flags & D3DX_FILTER_SRGB_IN) != !!((filter_flags & D3DX_FILTER_SRGB_OUT)))
+        return FALSE;
+
+    return TRUE;
+}
+
 static inline BOOL is_conversion_from_supported(const struct pixel_format_desc *format)
 {
     return !is_packed_format(format) && !is_unknown_format(format);
@@ -400,35 +516,29 @@ static inline BOOL is_conversion_from_supported(const struct pixel_format_desc *
 
 static inline BOOL is_conversion_to_supported(const struct pixel_format_desc *format)
 {
-    return !is_index_format(format) && !is_packed_format(format) && !is_signed_hilo_format(format)
-        && !is_unknown_format(format);
+    return !is_index_format(format) && !is_packed_format(format) && !is_unknown_format(format);
 }
-
-/* Returns TRUE if num is a power of 2, FALSE if not, or if 0 */
-static inline BOOL is_pow2(UINT num)
-{
-    return !(num & (num - 1));
-}
-
-HRESULT d3dx_validate_filter(uint32_t filter);
 
 const struct pixel_format_desc *get_d3dx_pixel_format_info(enum d3dx_pixel_format_id format);
+HRESULT dds_pixel_format_from_d3dx_pixel_format_id(struct dds_pixel_format *pixel_format,
+        enum d3dx_pixel_format_id d3dx_pixel_format);
 
 void format_to_d3dx_color(const struct pixel_format_desc *format, const BYTE *src, const PALETTEENTRY *palette,
         struct d3dx_color *dst);
 void format_from_d3dx_color(const struct pixel_format_desc *format, const struct d3dx_color *src, BYTE *dst);
 
-enum d3dx_pixel_format_id d3dx_pixel_format_id_from_dxgi_format(uint32_t format);
 void d3dx_get_next_mip_level_size(struct volume *size);
 void d3dx_get_mip_level_size(struct volume *size, uint32_t level);
 uint32_t d3dx_get_max_mip_levels_for_size(uint32_t width, uint32_t height, uint32_t depth);
 HRESULT d3dx_calculate_pixels_size(enum d3dx_pixel_format_id format, uint32_t width, uint32_t height,
     uint32_t *pitch, uint32_t *size);
-uint32_t d3dx_calculate_layer_pixels_size(enum d3dx_pixel_format_id format, uint32_t width, uint32_t height,
-        uint32_t depth, uint32_t mip_levels);
-HRESULT d3dx_init_dds_header(struct dds_header *header, enum d3dx_resource_type resource_type,
-        enum d3dx_pixel_format_id format, const struct volume *size, uint32_t mip_levels);
-const char *debug_d3dx_image_file_format(enum d3dx_image_file_format format);
+uint32_t d3dx_calculate_layer_pixels_size(enum d3dx_pixel_format_id format, uint32_t width, uint32_t height, uint32_t depth,
+        uint32_t mip_levels);
+HRESULT d3dx_create_dds_file_blob(enum d3dx_pixel_format_id format, const PALETTEENTRY *palette,
+        enum d3dx_resource_type resource_type, const struct volume *size, uint32_t mip_levels, uint32_t layers,
+        BOOL support_dxt10, ID3DXBlob **out_blob);
+HRESULT d3dx_save_pixels_to_memory(struct d3dx_pixels *src_pixels, const struct pixel_format_desc *src_fmt_desc,
+        enum d3dx_image_file_format file_format, enum d3dx_pixel_format_id dst_format, ID3DXBlob **dst_blob);
 HRESULT d3dx_pixels_init(const void *data, uint32_t row_pitch, uint32_t slice_pitch,
         const PALETTEENTRY *palette, enum d3dx_pixel_format_id format, uint32_t left, uint32_t top, uint32_t right,
         uint32_t bottom, uint32_t front, uint32_t back, struct d3dx_pixels *pixels);
@@ -440,44 +550,14 @@ void get_aligned_rect(uint32_t left, uint32_t top, uint32_t right, uint32_t bott
 
 unsigned short float_32_to_16(const float in);
 float float_16_to_32(const unsigned short in);
-
-struct d3dx_buffer
-{
-    void *buffer_iface;
-    void *buffer_data;
-};
-
-struct d3dx_buffer_wrapper
-{
-    HRESULT (*d3dx_buffer_create)(unsigned int size, struct d3dx_buffer *d3dx_buffer);
-    void (*d3dx_buffer_destroy)(struct d3dx_buffer *d3dx_buffer);
-};
-
-HRESULT d3dx_save_pixels_to_memory(struct d3dx_pixels *src_pixels, const struct pixel_format_desc *src_fmt_desc,
-        enum d3dx_image_file_format file_format, const struct d3dx_buffer_wrapper *wrapper, struct d3dx_buffer *dst_buffer);
-
-/* Compatible with D3D10_SUBRESOURCE_DATA and D3D11_SUBRESOURCE_DATA. */
-struct d3dx_subresource_data
-{
-    const void *data;
-    UINT row_pitch;
-    UINT slice_pitch;
-};
-
-HRESULT d3dx_create_subresource_data_for_texture(uint32_t width, uint32_t height, uint32_t depth,
-        uint32_t mip_levels, uint32_t layer_count, const struct pixel_format_desc *fmt_desc,
-        struct d3dx_subresource_data **out_sub_rsrc_data);
-
-/*
- * File/resource loading helper functions.
- */
-HRESULT d3dx_load_file(const WCHAR *path, void **data, uint32_t *size);
-HRESULT d3dx_load_resource_init_a(HMODULE module, const char *resource, HRSRC *rsrc);
-HRESULT d3dx_load_resource_init_w(HMODULE module, const WCHAR *resource, HRSRC *rsrc);
-HRESULT d3dx_load_resource(HMODULE module, HRSRC rsrc, void **data, uint32_t *size);
-HRESULT d3dx_load_resource_a(HMODULE module, const char *resource, void **data, uint32_t *size);
-HRESULT d3dx_load_resource_w(HMODULE module, const WCHAR *resource, void **data, uint32_t *size);
-
 /* debug helpers */
 const char *debug_d3dx_image_file_format(enum d3dx_image_file_format format);
+
+HRESULT write_buffer_to_file(const WCHAR *filename, ID3DXBlob *buffer);
+HRESULT load_file(const WCHAR *path, void **data, DWORD *size);
+HRESULT load_resource(HMODULE module, HRSRC rsrc, void **data, DWORD *size);
+HRESULT load_resourceW(HMODULE module, const WCHAR *resource, void **data, DWORD *size);
+HRESULT load_resourceA(HMODULE module, const char *resource, void **data, DWORD *size);
+HRESULT load_resource_initA(HMODULE module, const char *resource, HRSRC *rsrc);
+HRESULT load_resource_initW(HMODULE module, const WCHAR *resource, HRSRC *rsrc);
 #endif /* __WINE_D3DX_HELPERS_H */

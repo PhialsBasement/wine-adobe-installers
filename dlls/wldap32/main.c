@@ -24,7 +24,6 @@
 #include "winbase.h"
 
 #include "wine/debug.h"
-#include "winldap_private.h"
 
 HINSTANCE hwldap32;
 
@@ -39,11 +38,6 @@ BOOL WINAPI DllMain( HINSTANCE hinst, DWORD reason, LPVOID reserved )
     case DLL_PROCESS_ATTACH:
         hwldap32 = hinst;
         DisableThreadLibraryCalls( hinst );
-        if (TRACE_ON( wldap32 ))
-        {
-            int ld_debug = -1;
-            ldap_set_option( NULL, LDAP_OPT_DEBUG_LEVEL, &ld_debug );
-        }
         break;
     }
     return TRUE;

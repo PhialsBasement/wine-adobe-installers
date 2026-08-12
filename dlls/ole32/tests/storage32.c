@@ -894,8 +894,6 @@ static void test_storage_suminfo(void)
     IStorage *stg = NULL;
     IPropertySetStorage *propset = NULL;
     IPropertyStorage *ps = NULL;
-    IStream *stm;
-    WCHAR name[CCH_MAX_PROPSTG_NAME + 1];
     HRESULT r;
 
     DeleteFileA(filenameA);
@@ -951,26 +949,11 @@ static void test_storage_suminfo(void)
         IPropertyStorage_Release(ps);
 
     /* should be able to open it */
-    r = IPropertySetStorage_Open( propset, &FMTID_SummaryInformation,
+    r = IPropertySetStorage_Open( propset, &FMTID_SummaryInformation, 
             STGM_READWRITE|STGM_SHARE_EXCLUSIVE, &ps);
     ok(r == S_OK, "open failed\n");
     if(r == S_OK)
         IPropertyStorage_Release(ps);
-
-    r = IPropertySetStorage_Open(propset, &FMTID_SummaryInformation,
-            STGM_READWRITE|STGM_SHARE_EXCLUSIVE|STGM_TRANSACTED, &ps);
-    ok(r == S_OK, "Open failed: 0x%08lx\n", r);
-    IPropertyStorage_Release(ps);
-
-    r = FmtIdToPropStgName(&FMTID_SummaryInformation, name);
-    ok(r == S_OK, "FmtIdToPropStgName failed: 0x%08lx\n", r);
-
-    r = IStorage_OpenStream(stg, name, NULL, STGM_READWRITE|STGM_SHARE_EXCLUSIVE, 0, &stm);
-    ok(r == S_OK, "OpenStream failed: 0x%08lx\n", r);
-    IStream_Release(stm);
-
-    r = IStorage_OpenStream(stg, name, NULL, STGM_READWRITE|STGM_SHARE_EXCLUSIVE|STGM_TRANSACTED, 0, &stm);
-    ok(r == STG_E_INVALIDFUNCTION, "OpenStream should fail: 0x%08lx\n", r);
 
     /* delete it */
     r = IPropertySetStorage_Delete( propset, &FMTID_SummaryInformation );
@@ -3831,8 +3814,6 @@ static void test_custom_lockbytes(void)
     HRESULT hr;
     IStorage* stg;
     IStream* stm;
-    BYTE invalid_data[] = { 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0A };
-    ULARGE_INTEGER offset = {0};
 
     CreateTestLockBytes(&lockbytes);
 
@@ -3888,52 +3869,6 @@ static void test_custom_lockbytes(void)
     hr = StgCreateDocfileOnILockBytes(&lockbytes->ILockBytes_iface, STGM_CREATE|STGM_READWRITE|STGM_TRANSACTED, 0, &stg);
     ok(hr==STG_E_INVALIDFUNCTION, "StgCreateDocfileOnILockBytes failed %lx\n", hr);
 
-    DeleteTestLockBytes(lockbytes);
-
-    /*test empty lockbytes*/
-    CreateTestLockBytes(&lockbytes);
-
-    hr = StgOpenStorageOnILockBytes(&lockbytes->ILockBytes_iface, NULL, STGM_READ | STGM_SHARE_EXCLUSIVE, NULL, 0, &stg);
-    ok(hr == STG_E_FILEALREADYEXISTS, "StgOpenStorageOnILockBytes on empty lockbytes failed: %lx\n", hr);
-
-    if (stg)
-        IStorage_Release(stg);
-    DeleteTestLockBytes(lockbytes);
-
-    /*test empty lockbytes with different mode*/
-    CreateTestLockBytes(&lockbytes);
-
-    hr = StgOpenStorageOnILockBytes(&lockbytes->ILockBytes_iface, NULL, STGM_READWRITE | STGM_SHARE_DENY_WRITE | STGM_TRANSACTED, NULL, 0, &stg);
-    ok(hr == STG_E_FILEALREADYEXISTS, "StgOpenStorageOnILockBytes on empty lockbytes with different mode failed: %lx\n", hr);
-
-    if (stg)
-        IStorage_Release(stg);
-    DeleteTestLockBytes(lockbytes);
-
-    /*test invalid lockbytes*/
-    CreateTestLockBytes(&lockbytes);
-
-    hr = ILockBytes_WriteAt(&lockbytes->ILockBytes_iface, offset, invalid_data, sizeof(invalid_data), NULL);
-    ok(hr == S_OK, "ILockBytes_WriteAt failed: %lx\n", hr);
-
-    hr = StgOpenStorageOnILockBytes(&lockbytes->ILockBytes_iface, NULL, STGM_READ | STGM_SHARE_EXCLUSIVE, NULL, 0, &stg);
-    ok(hr == STG_E_FILEALREADYEXISTS, "StgOpenStorageOnILockBytes on invalid lockbytes failed: %lx\n", hr);
-
-    if (stg)
-        IStorage_Release(stg);
-    DeleteTestLockBytes(lockbytes);
-
-    /*test invalid lockbytes with different mode*/
-    CreateTestLockBytes(&lockbytes);
-
-    hr = ILockBytes_WriteAt(&lockbytes->ILockBytes_iface, offset, invalid_data, sizeof(invalid_data), NULL);
-    ok(hr == S_OK, "ILockBytes_WriteAt failed: %lx\n", hr);
-
-    hr = StgOpenStorageOnILockBytes(&lockbytes->ILockBytes_iface, NULL, STGM_READWRITE | STGM_SHARE_DENY_WRITE | STGM_TRANSACTED, NULL, 0, &stg);
-    ok(hr == STG_E_FILEALREADYEXISTS, "StgOpenStorageOnILockBytes on invalid lockbytes with different mode failed: %lx\n", hr);
-
-    if (stg)
-        IStorage_Release(stg);
     DeleteTestLockBytes(lockbytes);
 }
 

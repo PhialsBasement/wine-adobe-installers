@@ -1,6 +1,9 @@
+MODULE    = winepulse.drv
 UNIXLIB   = winepulse.so
-UNIX_LIBS    = $(PULSE_LIBS) $(PTHREAD_LIBS) -lm
-UNIX_CFLAGS  = $(PULSE_CFLAGS)
+IMPORTS   = dxguid uuid winmm user32 advapi32 ole32
+UNIX_LIBS    = $(PULSE_LIBS) $(PTHREAD_LIBS) $(UDEV_LIBS) -lm
+UNIX_CFLAGS  = $(PULSE_CFLAGS) $(UDEV_CFLAGS)
 
 SOURCES = \
+	mmdevdrv.c \
 	pulse.c

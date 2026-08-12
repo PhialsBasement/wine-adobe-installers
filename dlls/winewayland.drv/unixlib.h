@@ -27,7 +27,6 @@ enum waylanddrv_unix_func
 {
     waylanddrv_unix_func_init,
     waylanddrv_unix_func_read_events,
-    waylanddrv_unix_func_init_clipboard,
     waylanddrv_unix_func_count,
 };
 

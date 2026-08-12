@@ -26,6 +26,7 @@
 #include <stdarg.h>
 #include <stdio.h>
 #include "ntstatus.h"
+#define WIN32_NO_STATUS
 #include "windef.h"
 #include "wine/debug.h"
 #include "ntdll_misc.h"
@@ -263,7 +264,12 @@ static BOOL get_nt_registry_version( RTL_OSVERSIONINFOEXW *version )
     BOOL ret = FALSE;
     KEY_VALUE_PARTIAL_INFORMATION *info = (KEY_VALUE_PARTIAL_INFORMATION *)tmp;
 
-    InitializeObjectAttributes( &attr, &nameW, OBJ_CASE_INSENSITIVE, 0, NULL );
+    attr.Length = sizeof(attr);
+    attr.RootDirectory = 0;
+    attr.ObjectName = &nameW;
+    attr.Attributes = 0;
+    attr.SecurityDescriptor = NULL;
+    attr.SecurityQualityOfService = NULL;
     RtlInitUnicodeString( &nameW, L"\\Registry\\Machine\\Software\\Microsoft\\Windows NT\\CurrentVersion" );
 
     if (NtOpenKey( &hkey, KEY_ALL_ACCESS, &attr )) return FALSE;
@@ -385,7 +391,12 @@ static BOOL get_win9x_registry_version( RTL_OSVERSIONINFOEXW *version )
     BOOL ret = FALSE;
     KEY_VALUE_PARTIAL_INFORMATION *info = (KEY_VALUE_PARTIAL_INFORMATION *)tmp;
 
-    InitializeObjectAttributes( &attr, &nameW, OBJ_CASE_INSENSITIVE, 0, NULL );
+    attr.Length = sizeof(attr);
+    attr.RootDirectory = 0;
+    attr.ObjectName = &nameW;
+    attr.Attributes = 0;
+    attr.SecurityDescriptor = NULL;
+    attr.SecurityQualityOfService = NULL;
     RtlInitUnicodeString( &nameW, L"\\Registry\\Machine\\Software\\Microsoft\\Windows\\CurrentVersion" );
 
     if (NtOpenKey( &hkey, KEY_ALL_ACCESS, &attr )) return FALSE;
@@ -483,7 +494,12 @@ void version_init(void)
     current_version = &VersionData[WIN10];
 
     RtlOpenCurrentUser( KEY_ALL_ACCESS, &root );
-    InitializeObjectAttributes( &attr, &nameW, OBJ_CASE_INSENSITIVE, root, NULL );
+    attr.Length = sizeof(attr);
+    attr.RootDirectory = root;
+    attr.ObjectName = &nameW;
+    attr.Attributes = 0;
+    attr.SecurityDescriptor = NULL;
+    attr.SecurityQualityOfService = NULL;
     RtlInitUnicodeString( &nameW, L"Software\\Wine" );
 
     /* @@ Wine registry key: HKCU\Software\Wine */

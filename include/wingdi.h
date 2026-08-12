@@ -1568,17 +1568,6 @@ typedef struct tagEXTLOGPEN
     DWORD elpStyleEntry[1];
 } EXTLOGPEN, *PEXTLOGPEN, *NPEXTLOGPEN, *LPEXTLOGPEN;
 
-typedef struct tagEXTLOGPEN32
-{
-    DWORD    elpPenStyle;
-    DWORD    elpWidth;
-    UINT     elpBrushStyle;
-    COLORREF elpColor;
-    ULONG    elpHatch;
-    DWORD    elpNumEntries;
-    DWORD    elpStyleEntry[1];
-} EXTLOGPEN32, *PEXTLOGPEN32, *NPEXTLOGPEN32, *LPEXTLOGPEN32;
-
 #define PS_SOLID         0x00000000
 #define PS_DASH          0x00000001
 #define PS_DOT           0x00000002
@@ -1837,7 +1826,7 @@ typedef struct tagRGBTRIPLE {
   BYTE rgbtRed;
 } RGBTRIPLE;
 
-#pragma pack(push,2)
+#include <pshpack2.h>
 typedef struct
 {
     WORD    bfType;
@@ -1846,7 +1835,7 @@ typedef struct
     WORD    bfReserved2;
     DWORD   bfOffBits;
 } BITMAPFILEHEADER, *PBITMAPFILEHEADER, *LPBITMAPFILEHEADER;
-#pragma pack(pop)
+#include <poppack.h>
 
 #define MAKEPOINTS(l)  (*((POINTS *)&(l)))
 
@@ -2032,7 +2021,7 @@ typedef struct _BLENDFUNCTION
 
 
 /* Metafile header structure */
-#pragma pack(push,2)
+#include <pshpack2.h>
 typedef struct
 {
     WORD       mtType;
@@ -2043,7 +2032,7 @@ typedef struct
     DWORD      mtMaxRecord;
     WORD       mtNoParameters;
 } METAHEADER, *PMETAHEADER, *LPMETAHEADER;
-#pragma pack(pop)
+#include <poppack.h>
 
 /* Metafile typical record structure */
 typedef struct
@@ -2349,7 +2338,7 @@ typedef struct {
     DWORD     cbBmi;
     DWORD     offBits;
     DWORD     cbBits;
-    EXTLOGPEN32 elp;
+    EXTLOGPEN elp;
 } EMREXTCREATEPEN, *PEMREXTCREATEPEN;
 
 typedef struct tagEMREXTESCAPE
@@ -3957,7 +3946,6 @@ WINGDIAPI UINT        WINAPI GetEnhMetaFileDescriptionW(HENHMETAFILE,UINT,LPWSTR
 #define                      GetEnhMetaFileDescription WINELIB_NAME_AW(GetEnhMetaFileDescription)
 WINGDIAPI UINT        WINAPI GetEnhMetaFileHeader(HENHMETAFILE,UINT,LPENHMETAHEADER);
 WINGDIAPI UINT        WINAPI GetEnhMetaFilePaletteEntries(HENHMETAFILE,UINT,LPPALETTEENTRY);
-WINGDIAPI UINT        WINAPI GetEnhMetaFilePixelFormat(HENHMETAFILE,UINT,PIXELFORMATDESCRIPTOR*);
 WINGDIAPI DWORD       WINAPI GetFontData(HDC,DWORD,DWORD,LPVOID,DWORD);
 WINGDIAPI DWORD       WINAPI GetFontLanguageInfo(HDC);
 WINGDIAPI DWORD       WINAPI GetFontUnicodeRanges(HDC,LPGLYPHSET);

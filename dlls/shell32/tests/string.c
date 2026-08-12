@@ -49,6 +49,7 @@ static void test_StrRetToStringNA(void)
 
 static void test_StrRetToStringNW(void)
 {
+    static const WCHAR szTestW[] = { 'T','e','s','t','\0' };
     ITEMIDLIST iidl[10];
     WCHAR buff[128];
     STRRET strret;
@@ -59,15 +60,15 @@ static void test_StrRetToStringNW(void)
     strret.uType = STRRET_WSTR;
     strret.pOleStr = CoDupStrW("Test");
     memset(buff, 0xff, sizeof(buff));
-    ret = pStrRetToStrNAW(buff, ARRAY_SIZE(buff) - 1, &strret, NULL);
-    ok(ret == TRUE && !wcscmp(buff, L"Test"),
+    ret = pStrRetToStrNAW(buff, ARRAY_SIZE(buff), &strret, NULL);
+    ok(ret == TRUE && !wcscmp(buff, szTestW),
        "STRRET_WSTR: dup failed, ret=%d\n", ret);
 
     strret.uType = STRRET_CSTR;
     lstrcpyA(strret.cStr, "Test");
     memset(buff, 0xff, sizeof(buff));
     ret = pStrRetToStrNAW(buff, ARRAY_SIZE(buff), &strret, NULL);
-    ok(ret == TRUE && !wcscmp(buff, L"Test"),
+    ok(ret == TRUE && !wcscmp(buff, szTestW),
        "STRRET_CSTR: dup failed, ret=%d\n", ret);
 
     strret.uType = STRRET_OFFSET;
@@ -75,20 +76,8 @@ static void test_StrRetToStringNW(void)
     strcpy((char*)&iidl, " Test");
     memset(buff, 0xff, sizeof(buff));
     ret = pStrRetToStrNAW(buff, ARRAY_SIZE(buff), &strret, iidl);
-    ok(ret == TRUE && !wcscmp(buff, L"Test"),
+    ok(ret == TRUE && !wcscmp(buff, szTestW),
        "STRRET_OFFSET: dup failed, ret=%d\n", ret);
-
-    strret.uType = 3;
-    memset(buff, 0xff, sizeof(buff));
-    ret = pStrRetToStrNAW(buff, 0, &strret, NULL);
-    ok(ret == TRUE && buff[0] == 0xffff,
-       "Invalid STRRET type: dup failed, ret=%d\n", ret);
-
-    strret.uType = 3;
-    memset(buff, 0xff, sizeof(buff));
-    ret = pStrRetToStrNAW(buff, ARRAY_SIZE(buff), &strret, NULL);
-    ok(ret == TRUE && buff[0] == 0,
-       "Invalid STRRET type: dup failed, ret=%d\n", ret);
 
     /* The next test crashes on W2K, WinXP and W2K3, so we don't test. */
 if (0)

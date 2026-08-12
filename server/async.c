@@ -24,6 +24,7 @@
 #include <stdarg.h>
 
 #include "ntstatus.h"
+#define WIN32_NO_STATUS
 #include "windef.h"
 #include "winternl.h"
 
@@ -32,81 +33,6 @@
 #include "request.h"
 #include "process.h"
 #include "handle.h"
-
-struct async_cancel
-{
-    struct object        obj;                 /* object header */
-    struct object       *sync;                /* sync object for wait/signal */
-    unsigned int         count;               /* count of the asyncs in the cancel group */
-};
-
-static void async_cancel_dump( struct object *obj, int verbose );
-static struct object *async_cancel_get_sync( struct object *obj );
-static void async_cancel_destroy( struct object *obj );
-
-static const struct object_ops async_cancel_ops =
-{
-    sizeof(struct async_cancel), /* size */
-    &no_type,                    /* type */
-    async_cancel_dump,           /* dump */
-    NULL,                        /* add_queue */
-    NULL,                        /* remove_queue */
-    NULL,                        /* signaled */
-    NULL,                        /* satisfied */
-    no_signal,                   /* signal */
-    no_get_fd,                   /* get_fd */
-    async_cancel_get_sync,       /* get_sync */
-    default_map_access,          /* map_access */
-    default_get_sd,              /* get_sd */
-    default_set_sd,              /* set_sd */
-    no_get_full_name,            /* get_full_name */
-    no_lookup_name,              /* lookup_name */
-    no_link_name,                /* link_name */
-    NULL,                        /* unlink_name */
-    no_open_file,                /* open_file */
-    no_kernel_obj_list,          /* get_kernel_obj_list */
-    no_close_handle,             /* close_handle */
-    async_cancel_destroy         /* destroy */
-};
-
-static void async_cancel_dump( struct object *obj, int verbose )
-{
-    struct async_cancel *cancel = (struct async_cancel *)obj;
-    assert( obj->ops == &async_cancel_ops );
-    fprintf( stderr, "async_cancel %p\n", cancel );
-}
-
-static struct object *async_cancel_get_sync( struct object *obj )
-{
-    struct async_cancel *cancel = (struct async_cancel *)obj;
-
-    assert( obj->ops == &async_cancel_ops );
-    return grab_object( cancel->sync );
-}
-
-static void async_cancel_destroy( struct object *obj )
-{
-    struct async_cancel *cancel = (struct async_cancel *)obj;
-
-    assert( obj->ops == &async_cancel_ops );
-    if (cancel->sync) release_object( cancel->sync );
-}
-
-static struct async_cancel *create_async_cancel( struct process *process )
-{
-    struct async_cancel *cancel;
-
-    if (!(cancel = alloc_object( &async_cancel_ops ))) return NULL;
-    cancel->sync = NULL;
-    cancel->count = 0;
-
-    if (!(cancel->sync = create_internal_sync( 1, 0 )))
-    {
-        release_object( cancel );
-        return NULL;
-    }
-    return cancel;
-}
 
 struct async
 {
@@ -137,7 +63,6 @@ struct async
     unsigned int         comp_flags;      /* completion flags */
     async_completion_callback completion_callback; /* callback to be called on completion */
     void                *completion_callback_private; /* argument to completion_callback */
-    struct async_cancel *async_cancel;    /* cancel object if async is being canceled */
 };
 
 static void async_dump( struct object *obj, int verbose );
@@ -153,10 +78,11 @@ static const struct object_ops async_ops =
     add_queue,                 /* add_queue */
     remove_queue,              /* remove_queue */
     async_signaled,            /* signaled */
+    NULL,                      /* get_esync_fd */
+    NULL,                      /* get_fsync_idx */
     async_satisfied,           /* satisfied */
     no_signal,                 /* signal */
     no_get_fd,                 /* get_fd */
-    default_get_sync,          /* get_sync */
     default_map_access,        /* map_access */
     default_get_sd,            /* get_sd */
     default_set_sd,            /* set_sd */
@@ -221,7 +147,6 @@ static void async_destroy( struct object *obj )
     struct async *async = (struct async *)obj;
     assert( obj->ops == &async_ops );
 
-    assert( !async->async_cancel );
     list_remove( &async->process_entry );
 
     if (async->queue)
@@ -360,7 +285,6 @@ struct async *create_async( struct fd *fd, struct thread *thread, const struct a
     async->comp_flags    = 0;
     async->completion_callback = NULL;
     async->completion_callback_private = NULL;
-    async->async_cancel = NULL;
 
     if (iosb) async->iosb = (struct iosb *)grab_object( iosb );
     else async->iosb = NULL;
@@ -562,20 +486,6 @@ static void add_async_completion( struct async *async, apc_param_t cvalue, unsig
     if (async->completion) add_completion( async->completion, async->comp_key, cvalue, status, information );
 }
 
-static void async_complete_cancel( struct async *async )
-{
-    struct async_cancel *cancel;
-
-    if (!(cancel = async->async_cancel)) return;
-    async->async_cancel = NULL;
-
-    if (!--cancel->count)
-    {
-        signal_sync( cancel->sync );
-        release_object( cancel );
-    }
-}
-
 /* store the result of the client-side async callback */
 void async_set_result( struct object *obj, unsigned int status, apc_param_t total )
 {
@@ -610,7 +520,6 @@ void async_set_result( struct object *obj, unsigned int status, apc_param_t tota
                 union apc_call data;
                 memset( &data, 0, sizeof(data) );
                 data.type         = APC_USER;
-                data.user.flags   = 0;
                 data.user.func    = async->data.apc;
                 data.user.args[0] = async->data.apc_context;
                 data.user.args[1] = async->data.iosb;
@@ -634,7 +543,6 @@ void async_set_result( struct object *obj, unsigned int status, apc_param_t tota
         }
 
         async_call_completion_callback( async );
-        async_complete_cancel( async );
 
         if (async->queue)
         {
@@ -668,70 +576,30 @@ int async_waiting( struct async_queue *queue )
     return !async->terminated;
 }
 
-static void cancel_async( struct async *async )
-{
-    async->canceled = 1;
-    fd_cancel_async( async->fd, async );
-}
-
-static struct async *find_async_from_user( struct process *process, client_ptr_t user )
+static int cancel_async( struct process *process, struct object *obj, struct thread *thread, client_ptr_t iosb )
 {
     struct async *async;
+    int woken = 0;
 
-    LIST_FOR_EACH_ENTRY( async, &process->asyncs, struct async, process_entry )
-        if (async->data.user == user) return async;
-
-    return NULL;
-}
-
-static int cancel_process_async( struct process *process, struct object *obj, struct thread *thread, client_ptr_t iosb, obj_handle_t *wait_handle )
-{
-    struct async_cancel *cancel = NULL;
-    struct async *async, *next_async;
-    struct list tracked;
-    int count = 0;
-
-    if (thread && !(cancel = create_async_cancel( process ))) return 0;
-
-    list_init( &tracked );
-
-    /* We can't simply use LIST_FOR_EACH_ENTRY_SAFE here, because currently
-     * cancelling an async can cause other asyncs to be removed via
-     * async_reselect() */
+    /* FIXME: it would probably be nice to replace the "canceled" flag with a
+     * single LIST_FOR_EACH_ENTRY_SAFE, but currently cancelling an async can
+     * cause other asyncs to be removed via async_reselect() */
 
 restart:
     LIST_FOR_EACH_ENTRY( async, &process->asyncs, struct async, process_entry )
     {
-        if (async->terminated || async->is_system) continue;
+        if (async->terminated || async->canceled || async->is_system) continue;
         if ((!obj || (get_fd_user( async->fd ) == obj)) &&
             (!thread || async->thread == thread) &&
             (!iosb || async->data.iosb == iosb))
         {
-            if (!async->canceled) cancel_async( async );
-            if (cancel)
-            {
-                assert( !async->async_cancel );
-                async->async_cancel = cancel;
-                cancel->count++;
-            }
-            list_remove( &async->process_entry );
-            list_add_tail( &tracked, &async->process_entry );
-            count++;
+            async->canceled = 1;
+            fd_cancel_async( async->fd, async );
+            woken++;
             goto restart;
         }
     }
-    /* Put the asyncs back into the process list */
-    LIST_FOR_EACH_ENTRY_SAFE( async, next_async, &tracked, struct async, process_entry )
-    {
-        list_remove( &async->process_entry );
-        list_add_tail( &process->asyncs, &async->process_entry );
-    }
-    if (cancel)
-    {
-        if (!cancel->count) release_object( cancel );
-        else *wait_handle = alloc_handle( process, cancel, SYNCHRONIZE, 0 );
-    }
-    return count;
+    return woken;
 }
 
 static int cancel_blocking( struct process *process, struct thread *thread, client_ptr_t iosb )
@@ -746,7 +614,8 @@ restart:
         if (async->blocking && async->thread == thread &&
             (!iosb || async->data.iosb == iosb))
         {
-            cancel_async( async );
+            async->canceled = 1;
+            fd_cancel_async( async->fd, async );
             woken++;
             goto restart;
         }
@@ -754,7 +623,7 @@ restart:
     return woken;
 }
 
-void cancel_terminating_process_asyncs( struct process *process )
+void cancel_process_asyncs( struct process *process )
 {
     struct async *async;
 
@@ -762,7 +631,8 @@ restart:
     LIST_FOR_EACH_ENTRY( async, &process->asyncs, struct async, process_entry )
     {
         if (async->terminated || async->canceled) continue;
-        cancel_async( async );
+        async->canceled = 1;
+        fd_cancel_async( async->fd, async );
         goto restart;
     }
 }
@@ -781,7 +651,9 @@ restart:
     {
         if (async->terminated || async->canceled || get_fd_user( async->fd ) != obj) continue;
         if (!async->completion || !async->data.apc_context || async->event) continue;
-        cancel_async( async );
+
+        async->canceled = 1;
+        fd_cancel_async( async->fd, async );
         goto restart;
     }
     return 1;
@@ -789,16 +661,17 @@ restart:
 
 void cancel_terminating_thread_asyncs( struct thread *thread )
 {
-    struct process *process = thread->process;
     struct async *async;
 
 restart:
-    LIST_FOR_EACH_ENTRY( async, &process->asyncs, struct async, process_entry )
+    LIST_FOR_EACH_ENTRY( async, &thread->process->asyncs, struct async, process_entry )
     {
         if (async->thread != thread || async->terminated || async->canceled) continue;
         if (async->completion && async->data.apc_context && !async->event) continue;
         if (async->is_system) continue;
-        cancel_async( async );
+
+        async->canceled = 1;
+        fd_cancel_async( async->fd, async );
         goto restart;
     }
 }
@@ -827,10 +700,11 @@ static const struct object_ops iosb_ops =
     no_add_queue,             /* add_queue */
     NULL,                     /* remove_queue */
     NULL,                     /* signaled */
+    NULL,                     /* get_esync_fd */
+    NULL,                     /* get_fsync_idx */
     NULL,                     /* satisfied */
     no_signal,                /* signal */
     no_get_fd,                /* get_fd */
-    default_get_sync,         /* get_sync */
     default_map_access,       /* map_access */
     default_get_sd,           /* get_sd */
     default_set_sd,           /* set_sd */
@@ -945,13 +819,11 @@ DECL_HANDLER(cancel_async)
 {
     struct object *obj = get_handle_obj( current->process, req->handle, 0, NULL );
     struct thread *thread = req->only_thread ? current : NULL;
-    obj_handle_t wait_handle = 0;
 
     if (obj)
     {
-        int count = cancel_process_async( current->process, obj, thread, req->iosb, &wait_handle );
+        int count = cancel_async( current->process, obj, thread, req->iosb );
         if (!count && !thread) set_error( STATUS_NOT_FOUND );
-        else reply->cancel_handle = wait_handle;
         release_object( obj );
     }
 }
@@ -959,10 +831,17 @@ DECL_HANDLER(cancel_async)
 /* get async result from associated iosb */
 DECL_HANDLER(get_async_result)
 {
-    struct iosb *iosb;
+    struct iosb *iosb = NULL;
     struct async *async;
 
-    if (!(async = find_async_from_user( current->process, req->user_arg )) || !(iosb = async->iosb))
+    LIST_FOR_EACH_ENTRY( async, &current->process->asyncs, struct async, process_entry )
+        if (async->data.user == req->user_arg)
+        {
+            iosb = async->iosb;
+            break;
+        }
+
+    if (!iosb)
     {
         set_error( STATUS_INVALID_PARAMETER );
         return;

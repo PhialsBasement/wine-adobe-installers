@@ -38,6 +38,7 @@
 #include "shlguid.h"
 #include "servprov.h"
 #include "wine/debug.h"
+#include "wine/heap.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(commdlg);
 
@@ -144,6 +145,42 @@ static void COMDLG32_UpdateCurrentDir(const FileOpenDlgInfos *fodInfos)
     IShellFolder_Release(psfDesktop);
 }
 
+/* copied from shell32 to avoid linking to it */
+static BOOL COMDLG32_StrRetToStrNW (LPVOID dest, DWORD len, LPSTRRET src, LPCITEMIDLIST pidl)
+{
+        TRACE("dest=%p len=0x%lx strret=%p pidl=%p\n", dest , len, src, pidl);
+
+	switch (src->uType)
+	{
+	  case STRRET_WSTR:
+            lstrcpynW(dest, src->pOleStr, len);
+	    CoTaskMemFree(src->pOleStr);
+	    break;
+
+	  case STRRET_CSTR:
+            if (len && !MultiByteToWideChar( CP_ACP, 0, src->cStr, -1, dest, len ))
+                ((LPWSTR)dest)[len-1] = 0;
+	    break;
+
+	  case STRRET_OFFSET:
+	    if (pidl)
+	    {
+                if (len && !MultiByteToWideChar( CP_ACP, 0, ((LPCSTR)&pidl->mkid)+src->uOffset,
+                                                 -1, dest, len ))
+                    ((LPWSTR)dest)[len-1] = 0;
+	    }
+	    break;
+
+	  default:
+	    FIXME("unknown type!\n");
+	    if (len)
+	    { *(LPWSTR)dest = '\0';
+	    }
+	    return(FALSE);
+	}
+        return TRUE;
+}
+
 /*
  *	IShellBrowser
  */
@@ -156,7 +193,7 @@ IShellBrowser * IShellBrowserImpl_Construct(HWND hwndOwner)
     FileOpenDlgInfos *fodInfos = get_filedlg_infoptr(hwndOwner);
     IShellBrowserImpl *sb;
 
-    sb = malloc(sizeof(*sb));
+    sb = heap_alloc(sizeof(*sb));
 
     /* Initialisation of the member variables */
     sb->ref=1;
@@ -229,7 +266,7 @@ static ULONG WINAPI IShellBrowserImpl_Release(IShellBrowser * iface)
     TRACE("(%p,%lu)\n", This, ref + 1);
 
     if (!ref)
-        free(This);
+        heap_free(This);
 
     return ref;
 }
@@ -908,7 +945,7 @@ static HRESULT WINAPI IShellBrowserImpl_ICommDlgBrowser_IncludeObject(ICommDlgBr
 
     if (SUCCEEDED(IShellFolder_GetDisplayNameOf(fodInfos->Shell.FOIShellFolder, pidl, SHGDN_INFOLDER | SHGDN_FORPARSING, &str)))
     {
-      if (SUCCEEDED(StrRetToBufW(&str, pidl, szPathW, MAX_PATH)))
+      if (COMDLG32_StrRetToStrNW(szPathW, MAX_PATH, &str, pidl))
       {
 	  if (PathMatchSpecW(szPathW, fodInfos->ShellInfos.lpstrCurrentFilter))
           return S_OK;

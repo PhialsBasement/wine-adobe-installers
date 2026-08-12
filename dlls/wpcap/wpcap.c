@@ -23,6 +23,7 @@
 #include <malloc.h>
 
 #include "ntstatus.h"
+#define WIN32_NO_STATUS
 #include "windef.h"
 #include "winbase.h"
 #include "winternl.h"
@@ -63,8 +64,6 @@ struct pcap
 {
     UINT64 handle;
     struct pcap_pkthdr_win32 hdr;
-    unsigned char *buf;
-    UINT32 bufsize;
     char errbuf[PCAP_ERRBUF_SIZE];
 };
 
@@ -134,14 +133,12 @@ int CDECL pcap_can_set_rfmon( struct pcap *pcap )
 void CDECL pcap_close( struct pcap *pcap )
 {
     struct close_params params;
-    SIZE_T size = 0;
 
     TRACE( "%p\n", pcap );
 
     if (!pcap) return;
     params.handle = pcap->handle;
     PCAP_CALL( close, &params );
-    if (pcap->buf) NtFreeVirtualMemory( GetCurrentProcess(), (void **)&pcap->buf, &size, MEM_RELEASE );
     free( pcap );
 }
 
@@ -292,23 +289,17 @@ const char * CDECL pcap_datalink_val_to_name( int link )
     return (datalinks[link].name = params.buf);
 }
 
+void CDECL pcap_dump( unsigned char *user, const struct pcap_pkthdr_win32 *hdr, const unsigned char *packet )
+{
+    struct dump_params params = { user, hdr, packet };
+    TRACE( "%p, %p, %p\n", user, hdr, packet );
+    PCAP_CALL( dump, &params );
+}
+
 struct dumper
 {
     UINT64 handle;
 };
-
-void CDECL pcap_dump( unsigned char *user, const struct pcap_pkthdr_win32 *hdr, const unsigned char *packet )
-{
-    struct dump_params params;
-    struct dumper *dumper = (struct dumper *)user;
-
-    TRACE( "%p, %p, %p\n", user, hdr, packet );
-
-    params.handle = dumper->handle;
-    params.hdr = hdr;
-    params.packet = packet;
-    PCAP_CALL( dump, &params );
-}
 
 void CDECL pcap_dump_close( struct dumper *dumper )
 {
@@ -318,7 +309,7 @@ void CDECL pcap_dump_close( struct dumper *dumper )
 
     if (!dumper) return;
     params.handle = dumper->handle;
-    PCAP_CALL( dump_close, &params );
+    PCAP_CALL( dump, &params );
     free( dumper );
 }
 
@@ -353,6 +344,8 @@ struct dumper * CDECL pcap_dump_open( struct pcap *pcap, const char *filename )
         HeapFree( GetProcessHeap(), 0, params.name );
         return NULL;
     }
+
+    TRACE( "unix_path %s\n", debugstr_a(params.name) );
 
     params.handle     = pcap->handle;
     params.ret_handle = &dumper->handle;
@@ -949,17 +942,10 @@ int CDECL pcap_next_ex( struct pcap *pcap, struct pcap_pkthdr_win32 **hdr, const
     TRACE( "%p, %p, %p\n", pcap, hdr, data );
 
     if (!pcap) return PCAP_ERROR;
-    params.handle  = pcap->handle;
-    params.hdr     = &pcap->hdr;
-    params.buf     = pcap->buf;
-    params.bufsize = pcap->bufsize;
-    if ((ret = PCAP_CALL( next_ex, &params )) == 1)
-    {
-        *hdr = &pcap->hdr;
-        *data = params.data;
-        pcap->buf = params.buf;
-        pcap->bufsize = params.bufsize;
-    }
+    params.handle = pcap->handle;
+    params.hdr    = &pcap->hdr;
+    params.data   = data;
+    if ((ret = PCAP_CALL( next_ex, &params )) == 1) *hdr = &pcap->hdr;
     return ret;
 }
 
@@ -977,7 +963,7 @@ const unsigned char * CDECL pcap_next( struct pcap *pcap, struct pcap_pkthdr_win
 }
 
 int CDECL pcap_dispatch( struct pcap *pcap, int count,
-                         void (CDECL *callback)(unsigned char *, const struct pcap_pkthdr_win32 *, const unsigned char *),
+                         void (CALLBACK *callback)(unsigned char *, const struct pcap_pkthdr_win32 *, const unsigned char *),
                          unsigned char *user )
 {
     int processed = 0;
@@ -1010,7 +996,7 @@ int CDECL pcap_dispatch( struct pcap *pcap, int count,
 }
 
 int CDECL pcap_loop( struct pcap *pcap, int count,
-                     void (CDECL *callback)(unsigned char *, const struct pcap_pkthdr_win32 *, const unsigned char *),
+                     void (CALLBACK *callback)(unsigned char *, const struct pcap_pkthdr_win32 *, const unsigned char *),
                      unsigned char *user)
 {
     int processed = 0;
@@ -1175,18 +1161,6 @@ int CDECL pcap_set_datalink( struct pcap *pcap, int link )
     params.handle = pcap->handle;
     params.link   = link;
     return PCAP_CALL( set_datalink, &params );
-}
-
-int CDECL pcap_set_immediate_mode( struct pcap *pcap, int mode )
-{
-    struct set_immediate_mode_params params;
-
-    TRACE( "%p, %d\n", pcap, mode );
-
-    if (!pcap) return PCAP_ERROR;
-    params.handle = pcap->handle;
-    params.mode = mode;
-    return PCAP_CALL( set_immediate_mode, &params );
 }
 
 int CDECL pcap_set_promisc( struct pcap *pcap, int enable )
@@ -1476,7 +1450,7 @@ BOOL WINAPI DllMain( HINSTANCE hinst, DWORD reason, void *reserved )
     {
         DisableThreadLibraryCalls( hinst );
         if (__wine_init_unix_call()) ERR( "No pcap support, expect problems\n" );
-        else if (!PCAP_CALL( process_attach, NULL ))
+        else
         {
             char errbuf[PCAP_ERRBUF_SIZE];
             struct init_params params = { PCAP_CHAR_ENC_UTF_8, errbuf };

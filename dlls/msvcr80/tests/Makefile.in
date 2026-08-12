@@ -1,5 +1,4 @@
 TESTDLL   = msvcr80.dll
-IMPORTS   = msvcr80
 
 SOURCES = \
 	msvcr80.c \

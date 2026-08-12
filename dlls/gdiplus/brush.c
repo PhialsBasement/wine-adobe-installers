@@ -1060,9 +1060,9 @@ GpStatus WINGDIPAPI GdipGetPathGradientBlend(GpPathGradient *brush, REAL *blend,
     if(count < brush->blendcount)
         return InsufficientBuffer;
 
-    memcpy(blend, brush->blendfac, brush->blendcount*sizeof(REAL));
+    memcpy(blend, brush->blendfac, count*sizeof(REAL));
     if(brush->blendcount > 1){
-        memcpy(positions, brush->blendpos, brush->blendcount*sizeof(REAL));
+        memcpy(positions, brush->blendpos, count*sizeof(REAL));
     }
 
     return Ok;

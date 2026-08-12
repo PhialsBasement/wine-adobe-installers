@@ -1,5 +1,0 @@
-TESTDLL = dxcore.dll
-IMPORTS = user32 uuid
-
-SOURCES = \
-	dxcore.c

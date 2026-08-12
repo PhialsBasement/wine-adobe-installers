@@ -23,13 +23,18 @@
 #include "config.h"
 
 #include <assert.h>
+#include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdarg.h>
 #include <sys/types.h>
 #include <unistd.h>
+#ifdef HAVE_STDINT_H
+#include <stdint.h>
+#endif
 
 #include "ntstatus.h"
+#define WIN32_NO_STATUS
 #include "windef.h"
 #include "winternl.h"
 
@@ -69,9 +74,10 @@ struct sid_attrs
     unsigned int      attrs;
 };
 
+const struct sid owner_rights_sid = { SID_REVISION, 1, SECURITY_CREATOR_SID_AUTHORITY, { SECURITY_CREATOR_OWNER_RIGHTS_RID } };
 const struct sid world_sid = { SID_REVISION, 1, SECURITY_WORLD_SID_AUTHORITY, { SECURITY_WORLD_RID } };
 const struct sid local_system_sid = { SID_REVISION, 1, SECURITY_NT_AUTHORITY, { SECURITY_LOCAL_SYSTEM_RID } };
-const struct sid local_user_sid = { SID_REVISION, 5, SECURITY_NT_AUTHORITY, { SECURITY_NT_NON_UNIQUE, 0, 0, 0, 1000 } };
+      struct sid local_user_sid = { SID_REVISION, 5, SECURITY_NT_AUTHORITY, { SECURITY_NT_NON_UNIQUE, 0, 0, 0, 1000 } };
 const struct sid builtin_admins_sid = { SID_REVISION, 2, SECURITY_NT_AUTHORITY, { SECURITY_BUILTIN_DOMAIN_RID, DOMAIN_ALIAS_RID_ADMINS } };
 const struct sid builtin_users_sid = { SID_REVISION, 2, SECURITY_NT_AUTHORITY, { SECURITY_BUILTIN_DOMAIN_RID, DOMAIN_ALIAS_RID_USERS } };
 const struct sid domain_users_sid = { SID_REVISION, 5, SECURITY_NT_AUTHORITY, { SECURITY_NT_NON_UNIQUE, 0, 0, 0, DOMAIN_GROUP_RID_USERS } };
@@ -144,10 +150,11 @@ static const struct object_ops token_ops =
     no_add_queue,              /* add_queue */
     NULL,                      /* remove_queue */
     NULL,                      /* signaled */
+    NULL,                      /* get_esync_fd */
+    NULL,                      /* get_fsync_idx */
     NULL,                      /* satisfied */
     no_signal,                 /* signal */
     no_get_fd,                 /* get_fd */
-    default_get_sync,          /* get_sync */
     default_map_access,        /* map_access */
     default_get_sd,            /* get_sd */
     token_set_sd,              /* set_sd */
@@ -205,6 +212,35 @@ const struct sid *security_unix_uid_to_sid( uid_t uid )
         return &local_user_sid;
     else
         return &anonymous_logon_sid;
+}
+
+void init_user_sid(void)
+{
+    char machine_id[17];
+    uint64_t id;
+    size_t n;
+    FILE *f;
+
+    f = fopen( "/etc/machine-id", "r" );
+    if (!f)
+    {
+        fprintf( stderr, "Failed to open /etc/machine-id, error %s.\n", strerror( errno ));
+        return;
+    }
+
+    n = fread( machine_id, sizeof(*machine_id), 16, f );
+    fclose(f);
+
+    if (n != 16)
+    {
+        fprintf( stderr, "Failed to read /etc/machine-id, error %s.\n", strerror( errno ));
+        return;
+    }
+    machine_id[n] = 0;
+    id = strtoull( machine_id, NULL, 0x10 );
+    local_user_sid.sub_auth[1] = id >> 32;
+    local_user_sid.sub_auth[2] = id & 0xffffffff;
+    local_user_sid.sub_auth[3] = getuid();
 }
 
 static int acl_is_valid( const struct acl *acl, data_size_t size )
@@ -1540,14 +1576,7 @@ DECL_HANDLER(get_token_info)
         reply->session_id = token->session_id;
         reply->primary = token->primary;
         reply->impersonation_level = token->impersonation_level;
-        reply->elevation_type = token->elevation;
-        /* Tokens with TokenElevationTypeDefault are considered elevated for the
-           purposes of GetTokenInformation(TokenElevation) if they belong to the
-           admins group. */
-        if (token->elevation == TokenElevationTypeDefault)
-            reply->is_elevated = token_sid_present( token, &builtin_admins_sid, FALSE );
-        else
-            reply->is_elevated = token->elevation == TokenElevationTypeFull;
+        reply->elevation = token->elevation;
         reply->group_count = list_count( &token->groups );
         reply->privilege_count = list_count( &token->privileges );
         release_object( token );

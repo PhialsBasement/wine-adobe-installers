@@ -51,11 +51,7 @@ static BOOL ddraw_gdi_is_front(struct ddraw *ddraw)
     if (!ddraw->gdi_surface || !(surface = wined3d_texture_get_sub_resource_parent(ddraw->gdi_surface, 0)))
         return FALSE;
 
-    /* Check for DDSCAPS_PRIMARYSURFACE, not DDSCAPS_FRONTBUFFER.
-     * DDSCAPS_FRONTBUFFER is not actually set if there aren't any backbuffers,
-     * but DDSCAPS_PRIMARYSURFACE is always set on the frontbuffer (and not on
-     * the backbuffers). */
-    return surface->surface_desc.ddsCaps.dwCaps & DDSCAPS_PRIMARYSURFACE;
+    return surface->surface_desc.ddsCaps.dwCaps & DDSCAPS_FRONTBUFFER;
 }
 
 /* This is slow, of course. Also, in case of locks, we can't prevent other
@@ -68,6 +64,7 @@ HRESULT ddraw_surface_update_frontbuffer(struct ddraw_surface *surface,
     struct wined3d_texture *dst_texture, *wined3d_texture;
     struct ddraw *ddraw = surface->ddraw;
     HDC surface_dc, screen_dc;
+    HWND dest_window = NULL;
     int x, y, w, h;
     HRESULT hr;
     BOOL ret;
@@ -125,16 +122,7 @@ HRESULT ddraw_surface_update_frontbuffer(struct ddraw_surface *surface,
      *
      * This affects the "Deer Hunter" demo, which uses a popup window and GDI
      * draws to draw part of the user interface. See also the "fswindow"
-     * sample is the DirectX 7 SDK.
-     *
-     * This behaviour seems to have changed in modern Windows, which is not
-     * particularly surprising. Modern Windows will apparently always draw GDI
-     * windows on top, but won't draw a background for WS_POPUP windows if they
-     * were never drawn to. Adding to the confusion, Deer Hunter is actually
-     * broken; it creates a swapchain with 1 backbuffer and flips it every
-     * frame, which means that the GDI drawing can only work correctly 50% of
-     * the time. Testing the game Windows 98 shows this exact behaviour; the
-     * buttons often fail to highlight correctly when you mouse over them. */
+     * sample is the DirectX 7 SDK. */
     if (ddraw->swapchain_window && (!(ddraw->cooperative_level & DDSCL_EXCLUSIVE)
             || ddraw->swapchain_window == GetForegroundWindow() || ddraw_gdi_is_front(ddraw)))
     {
@@ -169,7 +157,9 @@ HRESULT ddraw_surface_update_frontbuffer(struct ddraw_surface *surface,
     if (surface->palette)
         wined3d_palette_apply_to_dc(surface->palette->wined3d_palette, surface_dc);
 
-    if (!(screen_dc = GetDC(NULL)))
+    if (ddraw->cooperative_level & DDSCL_EXCLUSIVE && ddraw->dest_window)
+        dest_window = ddraw->dest_window;
+    if (!(screen_dc = GetDCEx(dest_window, NULL, DCX_WINDOW | DCX_CACHE)))
     {
         wined3d_texture_release_dc(wined3d_texture, surface->sub_resource_idx, surface_dc);
         ERR("Failed to get screen DC.\n");
@@ -183,7 +173,7 @@ HRESULT ddraw_surface_update_frontbuffer(struct ddraw_surface *surface,
         ret = BitBlt(screen_dc, x, y, w, h,
                 surface_dc, x, y, SRCCOPY);
 
-    ReleaseDC(NULL, screen_dc);
+    ReleaseDC(dest_window, screen_dc);
     wined3d_texture_release_dc(wined3d_texture, surface->sub_resource_idx, surface_dc);
 
     if (!ret)
@@ -4641,8 +4631,7 @@ static HRESULT WINAPI ddraw_surface7_SetClipper(IDirectDrawSurface7 *iface,
     if (old_clipper && ddraw_clipper_is_valid(old_clipper))
         IDirectDrawClipper_Release(&old_clipper->IDirectDrawClipper_iface);
 
-    if ((This->surface_desc.ddsCaps.dwCaps & DDSCAPS_PRIMARYSURFACE) && This->ddraw->wined3d_swapchain
-            && !(This->ddraw->cooperative_level & DDSCL_EXCLUSIVE))
+    if ((This->surface_desc.ddsCaps.dwCaps & DDSCAPS_PRIMARYSURFACE) && This->ddraw->wined3d_swapchain)
     {
         clipWindow = NULL;
         if(clipper) {
@@ -4660,7 +4649,6 @@ static HRESULT WINAPI ddraw_surface7_SetClipper(IDirectDrawSurface7 *iface,
             ddraw_set_swapchain_window(This->ddraw, This->ddraw->dest_window);
         }
     }
-
     wined3d_mutex_unlock();
 
     return DD_OK;
@@ -5374,6 +5362,15 @@ static HRESULT WINAPI ddraw_gamma_control_SetGammaRamp(IDirectDrawGammaControl *
     {
         WARN("Invalid gamma_ramp passed.\n");
         return DDERR_INVALIDPARAMS;
+    }
+
+    {
+        const char *sgi = getenv("SteamGameId");
+        if (sgi && !strcmp(sgi, "3600700"))
+        {
+            FIXME("HACK: not applying gamma.\n");
+            return DD_OK;
+        }
     }
 
     wined3d_mutex_lock();

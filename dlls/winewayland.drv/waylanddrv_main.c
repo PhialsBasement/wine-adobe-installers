@@ -27,6 +27,7 @@
 #include <stdlib.h>
 
 #include "ntstatus.h"
+#define WIN32_NO_STATUS
 
 #include "waylanddrv.h"
 
@@ -34,18 +35,12 @@ char *process_name = NULL;
 
 static const struct user_driver_funcs waylanddrv_funcs =
 {
-    .pClipboardWindowProc = WAYLAND_ClipboardWindowProc,
     .pClipCursor = WAYLAND_ClipCursor,
     .pDesktopWindowProc = WAYLAND_DesktopWindowProc,
     .pDestroyWindow = WAYLAND_DestroyWindow,
-    .pSetIMECompositionRect = WAYLAND_SetIMECompositionRect,
     .pKbdLayerDescriptor = WAYLAND_KbdLayerDescriptor,
     .pReleaseKbdTables = WAYLAND_ReleaseKbdTables,
     .pSetCursor = WAYLAND_SetCursor,
-    .pSetCursorPos = WAYLAND_SetCursorPos,
-    .pSetLayeredWindowAttributes = WAYLAND_SetLayeredWindowAttributes,
-    .pSetWindowIcons = WAYLAND_SetWindowIcons,
-    .pSetWindowStyle = WAYLAND_SetWindowStyle,
     .pSetWindowText = WAYLAND_SetWindowText,
     .pSysCommand = WAYLAND_SysCommand,
     .pUpdateDisplayDevices = WAYLAND_UpdateDisplayDevices,
@@ -54,7 +49,7 @@ static const struct user_driver_funcs waylanddrv_funcs =
     .pWindowPosChanging = WAYLAND_WindowPosChanging,
     .pCreateWindowSurface = WAYLAND_CreateWindowSurface,
     .pVulkanInit = WAYLAND_VulkanInit,
-    .pOpenGLInit = WAYLAND_OpenGLInit,
+    .pwine_get_wgl_driver = WAYLAND_wine_get_wgl_driver,
 };
 
 static void wayland_init_process_name(void)
@@ -66,7 +61,7 @@ static void wayland_init_process_name(void)
     DWORD utf8_size;
     int i;
 
-    appname = RtlGetCurrentPeb()->ProcessParameters->ImagePathName.Buffer;
+    appname = NtCurrentTeb()->Peb->ProcessParameters->ImagePathName.Buffer;
     if ((p = wcsrchr(appname, '/'))) appname = p + 1;
     if ((p = wcsrchr(appname, '\\'))) appname = p + 1;
     appname_len = lstrlenW(appname);
@@ -112,20 +107,10 @@ static NTSTATUS waylanddrv_unix_read_events(void *arg)
     return STATUS_UNSUCCESSFUL;
 }
 
-static NTSTATUS waylanddrv_unix_init_clipboard(void *arg)
-{
-    /* If the compositor supports zwlr_data_control_manager_v1, we don't need
-     * per-process clipboard window and handling, we can use the default clipboard
-     * window from the desktop process. */
-    if (process_wayland.zwlr_data_control_manager_v1) return STATUS_UNSUCCESSFUL;
-    return STATUS_SUCCESS;
-}
-
 const unixlib_entry_t __wine_unix_call_funcs[] =
 {
     waylanddrv_unix_init,
     waylanddrv_unix_read_events,
-    waylanddrv_unix_init_clipboard,
 };
 
 C_ASSERT(ARRAYSIZE(__wine_unix_call_funcs) == waylanddrv_unix_func_count);
@@ -136,7 +121,6 @@ const unixlib_entry_t __wine_unix_call_wow64_funcs[] =
 {
     waylanddrv_unix_init,
     waylanddrv_unix_read_events,
-    waylanddrv_unix_init_clipboard,
 };
 
 C_ASSERT(ARRAYSIZE(__wine_unix_call_wow64_funcs) == waylanddrv_unix_func_count);

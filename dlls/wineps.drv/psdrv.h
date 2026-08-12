@@ -61,8 +61,13 @@ struct ps_brush_pattern
 };
 
 typedef struct {
+    INT		    index;
+    LPCSTR	    sz;
+} GLYPHNAME;
+
+typedef struct {
     LONG	    UV;
-    const char     *name;
+    const GLYPHNAME *name;
 } UNICODEGLYPH;
 
 typedef struct {
@@ -76,14 +81,19 @@ typedef struct _tagAFMLIGS {
 } AFMLIGS;
 
 typedef struct {
+    int			C;		/* character */
     LONG     	    	UV;
     float		WX;
+    const GLYPHNAME	*N;		/* name */
     AFMBBOX		B;
+    const AFMLIGS	*L;		/* Ligatures */
 } OLD_AFMMETRICS;
 
 typedef struct {
-    WCHAR    	    	UV; 	    	    	/* Unicode value */
-    SHORT   	    	WX; 	    	    	/* Advance width */
+    INT     	    	C;  	    	    	/* AFM encoding (or -1) */
+    LONG    	    	UV; 	    	    	/* Unicode value */
+    FLOAT   	    	WX; 	    	    	/* Advance width */
+    const GLYPHNAME 	*N; 	    	    	/* Glyph name */
 } AFMMETRICS;
 
 typedef struct {
@@ -92,18 +102,26 @@ typedef struct {
     SHORT   	    	sDescender; 	    	/* hhea:Descender */
     SHORT   	    	sLineGap;   	    	/* hhea:LineGap */
     SHORT   	    	sAvgCharWidth;	    	/* OS/2:xAvgCharWidth */
+    SHORT   	    	sTypoAscender;	    	/* OS/2:sTypoAscender */
+    SHORT   	    	sTypoDescender;     	/* OS/2:sTypoDescender */
+    SHORT   	    	sTypoLineGap;	    	/* OS/2:sTypeLineGap */
     USHORT  	    	usWinAscent;	    	/* OS/2:usWinAscent */
     USHORT  	    	usWinDescent;	    	/* OS/2:usWinDescent */
 } WINMETRICS;
 
 typedef struct _tagAFM {
     const char         *FontName;
+    const WCHAR        *FullName;
     const WCHAR        *FamilyName;
     const WCHAR        *EncodingScheme;
     LONG		Weight;			/* FW_NORMAL etc. */
     float		ItalicAngle;
     BOOL		IsFixedPitch;
+    float		UnderlinePosition;
+    float		UnderlineThickness;
     AFMBBOX		FontBBox;
+    float		Ascender;
+    float		Descender;
     WINMETRICS	    	WinMetrics;
     int			NumofMetrics;
     const AFMMETRICS	*Metrics;
@@ -355,6 +373,14 @@ typedef struct
 
 extern print_ctx *create_print_ctx( HDC hdc, const WCHAR *device,
         const DEVMODEW *devmode );
+
+/*
+ *  Every glyph name in the Adobe Glyph List and the 35 core PostScript fonts
+ */
+
+extern const INT    PSDRV_AGLGlyphNamesSize;
+extern GLYPHNAME    PSDRV_AGLGlyphNames[];
+
 
 /*
  *  The AGL encoding vector

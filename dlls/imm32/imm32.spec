@@ -7,7 +7,7 @@
 @ stub CtfImmGetGuidAtom
 @ stub CtfImmGetIMEFileName
 @ stub CtfImmGetTMAEFlags
-@ stdcall CtfImmHideToolbarWnd()
+@ stub CtfImmHideToolbarWnd
 @ stdcall CtfImmIsCiceroEnabled()
 @ stub CtfImmIsCiceroStartedInThread
 @ stub CtfImmIsGuidMapEnable
@@ -15,7 +15,7 @@
 @ stub CtfImmLastEnabledWndDestroy
 @ stub CtfImmLeaveCoInitCountSkipMode
 @ stub CtfImmNotify
-@ stdcall CtfImmRestoreToolbarWnd(long)
+@ stub CtfImmRestoreToolbarWnd
 @ stub CtfImmSetAppCompatFlags
 @ stub CtfImmSetCiceroStartInThread
 @ stub CtfImmSetDefaultRemoteKeyboardLayout

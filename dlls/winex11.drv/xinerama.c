@@ -46,7 +46,6 @@ static MONITORINFOEXW default_monitor =
 };
 
 static pthread_mutex_t xinerama_mutex = PTHREAD_MUTEX_INITIALIZER;
-static unsigned long xinerama_generation;
 static MONITORINFOEXW *monitors;
 static int nb_monitors;
 
@@ -126,7 +125,7 @@ static inline int query_screens(void)
 
 /* Get xinerama monitor indices required for _NET_WM_FULLSCREEN_MONITORS. Return FALSE if rect is
  * not fullscreen */
-BOOL xinerama_get_fullscreen_monitors( const RECT *rect, unsigned long *generation, long *indices )
+BOOL xinerama_get_fullscreen_monitors( const RECT *rect, long *indices )
 {
     RECT window_rect, intersected_rect, monitor_rect;
     BOOL ret = FALSE;
@@ -151,8 +150,10 @@ BOOL xinerama_get_fullscreen_monitors( const RECT *rect, unsigned long *generati
         offset.y = min( offset.y, monitors[i].rcMonitor.top );
     }
 
-    indices[0] = indices[1] = indices[2] = indices[3] = -1;
-    *generation = xinerama_generation;
+    indices[0] = -1;
+    indices[1] = -1;
+    indices[2] = -1;
+    indices[3] = -1;
     for (i = 0; i < nb_monitors; ++i)
     {
         SetRect( &monitor_rect, monitors[i].rcMonitor.left - offset.x,
@@ -161,18 +162,23 @@ BOOL xinerama_get_fullscreen_monitors( const RECT *rect, unsigned long *generati
         intersect_rect( &intersected_rect, &window_rect, &monitor_rect );
         if (EqualRect( &intersected_rect, &monitor_rect ))
         {
-            if (indices[0] == -1) indices[0] = indices[1] = indices[2] = indices[3] = i;
-            if (monitors[i].rcMonitor.top < monitors[indices[0]].rcMonitor.top) indices[0] = i;
-            if (monitors[i].rcMonitor.bottom > monitors[indices[1]].rcMonitor.bottom) indices[1] = i;
-            if (monitors[i].rcMonitor.left < monitors[indices[2]].rcMonitor.left) indices[2] = i;
-            if (monitors[i].rcMonitor.right > monitors[indices[3]].rcMonitor.right) indices[3] = i;
+            if (indices[0] == -1 || monitors[i].rcMonitor.top < monitors[indices[0]].rcMonitor.top)
+                indices[0] = i;
+            if (indices[1] == -1 || monitors[i].rcMonitor.bottom > monitors[indices[1]].rcMonitor.bottom)
+                indices[1] = i;
+            if (indices[2] == -1 || monitors[i].rcMonitor.left < monitors[indices[2]].rcMonitor.left)
+                indices[2] = i;
+            if (indices[3] == -1 || monitors[i].rcMonitor.right > monitors[indices[3]].rcMonitor.right)
+                indices[3] = i;
         }
     }
 
-    if (indices[0] != -1)
+    if (indices[0] != -1 && indices[1] != -1 && indices[2] != -1 && indices[3] != -1)
         ret = TRUE;
 
     pthread_mutex_unlock( &xinerama_mutex );
+    if (ret)
+        TRACE( "fullscreen monitors: %ld,%ld,%ld,%ld.\n", indices[0], indices[1], indices[2], indices[3] );
     return ret;
 }
 
@@ -185,6 +191,7 @@ static BOOL xinerama_get_gpus( struct x11drv_gpu **new_gpus, int *count, BOOL ge
     if (!gpus)
         return FALSE;
 
+    gpus[0].name = strdup( "Wine GPU" );
     *new_gpus = gpus;
     *count = 1;
 
@@ -353,7 +360,6 @@ void xinerama_init( unsigned int width, unsigned int height )
                (monitors[i].dwFlags & MONITORINFOF_PRIMARY) ? " (primary)" : "" );
     }
 
-    xinerama_generation++;
     pthread_mutex_unlock( &xinerama_mutex );
 
     handler.name = "Xinerama";

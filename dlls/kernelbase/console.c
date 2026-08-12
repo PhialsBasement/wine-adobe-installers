@@ -30,6 +30,7 @@
 #include <limits.h>
 
 #include "ntstatus.h"
+#define WIN32_NO_STATUS
 #include "windef.h"
 #include "winbase.h"
 #include "winnls.h"
@@ -108,15 +109,6 @@ static BOOL console_ioctl( HANDLE handle, DWORD code, void *in_buff, DWORD in_co
     }
     if (read) *read = 0;
     return set_ntstatus( status );
-}
-
-BOOL is_console_handle( HANDLE handle )
-{
-    IO_STATUS_BLOCK io;
-    DWORD mode;
-
-    return NtDeviceIoControlFile( handle, NULL, NULL, NULL, &io, IOCTL_CONDRV_GET_MODE,
-                                  NULL, 0, &mode, sizeof(mode) ) == STATUS_SUCCESS;
 }
 
 /* map input records to ASCII */
@@ -428,12 +420,7 @@ static BOOL alloc_console( BOOL headless )
     memset( &console_si, 0, sizeof(console_si) );
     console_si.StartupInfo.cb = sizeof(console_si);
     InitializeProcThreadAttributeList( NULL, 1, 0, &size );
-    if (!(console_si.lpAttributeList = HeapAlloc( GetProcessHeap(), 0, size )))
-    {
-        RtlLeaveCriticalSection( &console_section );
-        SetLastError( ERROR_NOT_ENOUGH_MEMORY );
-        return FALSE;
-    }
+    if (!(console_si.lpAttributeList = HeapAlloc( GetProcessHeap(), 0, size ))) return FALSE;
     InitializeProcThreadAttributeList( console_si.lpAttributeList, 1, 0, &size );
 
     if (!(server = create_console_server()) || !(console = create_console_reference( server ))) goto error;
@@ -473,7 +460,7 @@ static BOOL alloc_console( BOOL headless )
     if (headless) wcscat( cmd, L" --headless" );
     Wow64DisableWow64FsRedirection( &redir );
     ret = CreateProcessW( conhost_path, cmd, NULL, NULL, TRUE, DETACHED_PROCESS | EXTENDED_STARTUPINFO_PRESENT,
-                          NULL, system_dir, &console_si.StartupInfo, &pi );
+                          NULL, NULL, &console_si.StartupInfo, &pi );
     Wow64RevertWow64FsRedirection( redir );
 
     if (!ret || !create_console_connection( console)) goto error;
@@ -515,7 +502,7 @@ HANDLE WINAPI DECLSPEC_HOTPATCH CreateConsoleScreenBuffer( DWORD access, DWORD s
                                                            SECURITY_ATTRIBUTES *sa, DWORD flags,
                                                            void *data )
 {
-    OBJECT_ATTRIBUTES attr;
+    OBJECT_ATTRIBUTES attr = {sizeof(attr)};
     IO_STATUS_BLOCK iosb;
     UNICODE_STRING name = RTL_CONSTANT_STRING( L"\\Device\\ConDrv\\ScreenBuffer" );
     HANDLE handle;
@@ -529,7 +516,8 @@ HANDLE WINAPI DECLSPEC_HOTPATCH CreateConsoleScreenBuffer( DWORD access, DWORD s
 	return INVALID_HANDLE_VALUE;
     }
 
-    InitializeObjectAttributes( &attr, &name, 0, 0, sa ? sa->lpSecurityDescriptor : NULL );
+    attr.ObjectName = &name;
+    attr.SecurityDescriptor = sa ? sa->lpSecurityDescriptor : NULL;
     if (sa && sa->bInheritHandle) attr.Attributes |= OBJ_INHERIT;
     status = NtCreateFile( &handle, access, &attr, &iosb, NULL, FILE_ATTRIBUTE_NORMAL, 0, FILE_OPEN,
                            FILE_NON_DIRECTORY_FILE, NULL, 0 );
@@ -1076,6 +1064,14 @@ BOOL WINAPI DECLSPEC_HOTPATCH GetConsoleScreenBufferInfoEx( HANDLE handle,
     info->wPopupAttributes      = condrv_info.popup_attr;
     info->bFullscreenSupported  = FALSE;
     memcpy( info->ColorTable, condrv_info.color_map, sizeof(info->ColorTable) );
+    return TRUE;
+}
+
+
+BOOL WINAPI DECLSPEC_HOTPATCH GetConsoleSelectionInfo(CONSOLE_SELECTION_INFO *info)
+{
+    FIXME("stub (%p)\n", info);
+    info->dwFlags = CONSOLE_NO_SELECTION;
     return TRUE;
 }
 
@@ -2125,7 +2121,7 @@ BOOL WINAPI ReadConsoleW( HANDLE handle, void *buffer, DWORD length, DWORD *coun
                              tmp, sizeof(DWORD) + length * sizeof(WCHAR), count );
         if (ret)
         {
-            memcpy( &crc->dwControlKeyState, tmp, sizeof(DWORD) );
+            memcpy( &crc->dwConsoleKeyState, tmp, sizeof(DWORD) );
             *count -= sizeof(DWORD);
             memcpy( buffer, tmp + sizeof(DWORD), *count );
         }
@@ -2253,7 +2249,7 @@ static HANDLE create_pseudo_console( COORD size, HANDLE input, HANDLE output, HA
     }
     Wow64DisableWow64FsRedirection( &redir );
     res = CreateProcessW( conhost_path, cmd, NULL, NULL, TRUE, DETACHED_PROCESS | EXTENDED_STARTUPINFO_PRESENT,
-                          NULL, system_dir, &si.StartupInfo, &pi );
+                          NULL, NULL, &si.StartupInfo, &pi );
     HeapFree( GetProcessHeap(), 0, si.lpAttributeList );
     Wow64RevertWow64FsRedirection( redir );
     NtClose( server );
@@ -2339,8 +2335,8 @@ void WINAPI ClosePseudoConsole( HPCON handle )
  */
 HRESULT WINAPI ResizePseudoConsole( HPCON handle, COORD size )
 {
-    FIXME( "%p (%u,%u) stub, faking success\n", handle, size.X, size.Y );
-    return S_OK;
+    FIXME( "%p (%u,%u)\n", handle, size.X, size.Y );
+    return E_NOTIMPL;
 }
 
 static BOOL is_tty_handle( HANDLE handle )
@@ -2385,7 +2381,6 @@ void init_console( void )
         if (params->ConsoleHandle && create_console_connection( params->ConsoleHandle ))
         {
             init_console_std_handles( FALSE );
-            console_flags = 0;
         }
     }
     else if (params->ConsoleHandle == CONSOLE_HANDLE_ALLOC ||
@@ -2398,12 +2393,5 @@ void init_console( void )
             alloc_console( no_window );
     }
     else if (params->ConsoleHandle && params->ConsoleHandle != CONSOLE_HANDLE_SHELL_NO_WINDOW)
-    {
         create_console_connection( params->ConsoleHandle );
-        if (params->ConsoleFlags & 2)
-        {
-            init_console_std_handles( FALSE );
-            params->ConsoleFlags &= ~2;
-        }
-    }
 }

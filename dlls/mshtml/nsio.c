@@ -287,6 +287,50 @@ done:
     return NS_OK;
 }
 
+static nsresult fire_before_navigate(nsChannel *channel, HTMLOuterWindow *window, BOOL *cancel)
+{
+    BSTR frame_name = NULL;
+    OLECHAR *new_url;
+    BSTR uri_str;
+    HRESULT hres;
+
+    hres = IUri_GetDisplayUri(channel->uri->uri, &uri_str);
+    if(FAILED(hres))
+    {
+        ERR("IUri_GetDisplayUri failed, hres %#lx.\n", hres);
+        return NS_ERROR_FAILURE;
+    }
+    if(window->browser->doc->hostui)
+    {
+        hres = IDocHostUIHandler_TranslateUrl(window->browser->doc->hostui, 0, uri_str, &new_url);
+        if(hres == S_OK && new_url)
+        {
+            if(wcscmp(uri_str, new_url))
+            {
+                FIXME("TranslateUrl returned new URL %s -> %s.\n", debugstr_w(uri_str), debugstr_w(new_url));
+                CoTaskMemFree(new_url);
+                *cancel = TRUE;
+                SysFreeString(uri_str);
+                return NS_OK;
+            }
+            CoTaskMemFree(new_url);
+        }
+    }
+
+    hres = IHTMLWindow2_get_name(&window->base.IHTMLWindow2_iface, &frame_name);
+    if (FAILED(hres))
+    {
+        SysFreeString(uri_str);
+        return NS_ERROR_FAILURE;
+    }
+
+    hres = IDocObjectService_FireBeforeNavigate2(window->browser->doc->doc_object_service, NULL, uri_str, 0x40,
+            frame_name, NULL, 0, NULL, TRUE, cancel);
+    SysFreeString(frame_name);
+    SysFreeString(uri_str);
+    return SUCCEEDED(hres) ? NS_OK : NS_ERROR_FAILURE;
+}
+
 HRESULT load_nsuri(HTMLOuterWindow *window, nsWineURI *uri, nsIInputStream *post_stream,
         nsChannelBSC *channelbsc, DWORD flags)
 {
@@ -1000,22 +1044,6 @@ static void start_binding_task_destr(task_t *_task)
     IBindStatusCallback_Release(&task->bscallback->bsc.IBindStatusCallback_iface);
 }
 
-static nsresult fire_beforenavigate2(HTMLOuterWindow *window, BSTR url, BOOL *cancel)
-{
-    BSTR frame_name = NULL;
-    HRESULT hres;
-
-    hres = IHTMLWindow2_get_name(&window->base.IHTMLWindow2_iface, &frame_name);
-    if (FAILED(hres))
-        return NS_ERROR_UNEXPECTED;
-
-    hres = IDocObjectService_FireBeforeNavigate2(window->browser->doc->doc_object_service, NULL, url, 0, frame_name, NULL, 0, NULL, FALSE, cancel);
-    SysFreeString(frame_name);
-    if (*cancel)
-        return NS_BINDING_ABORTED;
-    return NS_OK;
-}
-
 static nsresult async_open(nsChannel *This, HTMLOuterWindow *window, BOOL is_doc_channel, UINT32 load_type,
         nsIStreamListener *listener, nsISupports *context)
 {
@@ -1074,8 +1102,6 @@ static nsresult NSAPI nsChannel_AsyncOpen(nsIHttpChannel *iface, nsIStreamListen
     BOOL is_document_channel;
     BOOL cancel = FALSE;
     nsresult nsres = NS_OK;
-    HRESULT hres;
-    BSTR uri_str;
 
     TRACE("(%p)->(%p %p)\n", This, aListener, aContext);
 
@@ -1083,6 +1109,9 @@ static nsresult NSAPI nsChannel_AsyncOpen(nsIHttpChannel *iface, nsIStreamListen
         return NS_ERROR_FAILURE;
 
     if(TRACE_ON(mshtml)) {
+        HRESULT hres;
+        BSTR uri_str;
+
         hres = IUri_GetDisplayUri(This->uri->uri, &uri_str);
         if(SUCCEEDED(hres)) {
             TRACE("opening %s\n", debugstr_w(uri_str));
@@ -1119,19 +1148,25 @@ static nsresult NSAPI nsChannel_AsyncOpen(nsIHttpChannel *iface, nsIStreamListen
                 This->content_type = strdupWtoA(window->browser->doc->mime);
             }
         }
-
-        if (!cancel && !This->uri->channel_bsc && window->browser->doc->doc_object_service)
+        else if (window->browser && window->frame_element && window->browser->doc
+                && window->browser->doc->doc_object_service)
         {
-            /* fire event for document navigations by Gecko */
-            hres = IUri_GetDisplayUri(This->uri->uri, &uri_str);
-            if (SUCCEEDED(hres))
+            IUnknown *unk;
+            if (SUCCEEDED(IHTMLFrameBase_QueryInterface(&window->frame_element->IHTMLFrameBase_iface,
+                    &IID_IHTMLIFrameElement, (void **)&unk)))
             {
-                nsres = fire_beforenavigate2(window, uri_str, &cancel);
-                SysFreeString(uri_str);
-            }else
-            {
-                cancel = TRUE;
-                WARN("GetDisplayUri failed: %08lx\n", hres);
+                IUnknown_Release(unk);
+                nsres = fire_before_navigate(This, window, &cancel);
+                if(NS_SUCCEEDED(nsres) && cancel)
+                {
+                    TRACE("canceled.\n");
+                    nsres = NS_BINDING_ABORTED;
+                }
+                else
+                {
+                    FIXME("fire_before_navigate returned error %#lx.\n", nsres);
+                    nsres = NS_OK;
+                }
             }
         }
     }

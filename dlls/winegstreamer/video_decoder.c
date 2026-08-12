@@ -36,6 +36,8 @@
 WINE_DEFAULT_DEBUG_CHANNEL(mfplat);
 WINE_DECLARE_DEBUG_CHANNEL(winediag);
 
+extern const GUID MFVideoFormat_theora;
+
 struct subtype_info
 {
     const GUID *subtype;
@@ -176,14 +178,10 @@ static ULONG WINAPI unknown_Release(IUnknown *iface)
             IMFMediaType_Release(decoder->input_type);
         if (decoder->output_type)
             IMFMediaType_Release(decoder->output_type);
-        if (decoder->stream_type)
-            IMFMediaType_Release(decoder->stream_type);
         if (decoder->output_attributes)
             IMFAttributes_Release(decoder->output_attributes);
         if (decoder->attributes)
             IMFAttributes_Release(decoder->attributes);
-        FreeMediaType(&decoder->dmo_input_type);
-        FreeMediaType(&decoder->dmo_output_type);
         wg_sample_queue_destroy(decoder->wg_sample_queue);
         free(decoder);
     }
@@ -332,6 +330,12 @@ static HRESULT try_create_wg_transform(struct video_decoder *decoder, IMFMediaTy
 
     if (SUCCEEDED(IMFAttributes_GetUINT32(decoder->attributes, &MF_LOW_LATENCY, &low_latency)))
         decoder->wg_transform_attrs.low_latency = !!low_latency;
+
+    {
+        const char *sgi;
+        if ((sgi = getenv("SteamGameId")) && (!strcmp(sgi, "2009100") || !strcmp(sgi, "2555360") || !strcmp(sgi, "1630110")))
+            decoder->wg_transform_attrs.low_latency = FALSE;
+    }
 
     return wg_transform_create_mf(decoder->input_type, output_type, &decoder->wg_transform_attrs, &decoder->wg_transform);
 }
@@ -1008,7 +1012,10 @@ static HRESULT WINAPI transform_ProcessOutput(IMFTransform *iface, DWORD flags, 
             duration = MulDiv(10000000, (UINT32)frame_rate, frame_rate >> 32);
         }
 
-        if (!preserve_timestamps)
+        if (FAILED(hr = IMFMediaType_GetGUID(decoder->input_type, &MF_MT_SUBTYPE, &subtype)))
+            return hr;
+
+        if (!preserve_timestamps && !IsEqualGUID(&subtype, &MFVideoFormat_theora))
         {
             if (FAILED(IMFSample_SetSampleTime(sample, decoder->sample_time)))
                 WARN("Failed to set sample time\n");
@@ -1215,7 +1222,6 @@ static HRESULT WINAPI media_object_SetInputType(IMediaObject *iface, DWORD index
 {
     struct video_decoder *decoder = impl_from_IMediaObject(iface);
     IMFMediaType *media_type;
-    unsigned int i;
 
     TRACE("iface %p, index %lu, type %p, flags %#lx.\n", iface, index, type, flags);
 
@@ -1241,12 +1247,6 @@ static HRESULT WINAPI media_object_SetInputType(IMediaObject *iface, DWORD index
     if (!IsEqualGUID(&type->majortype, &MEDIATYPE_Video))
         return DMO_E_TYPE_NOT_ACCEPTED;
 
-    for (i = 0; i < decoder->input_type_count; ++i)
-        if (IsEqualGUID(&type->subtype, get_dmo_subtype(decoder->input_types[i])))
-            break;
-    if (i == decoder->input_type_count)
-        return DMO_E_TYPE_NOT_ACCEPTED;
-
     if (FAILED(MFCreateMediaTypeFromRepresentation(AM_MEDIA_TYPE_REPRESENTATION,
             (void *)type, &media_type)))
         return DMO_E_TYPE_NOT_ACCEPTED;
@@ -1263,6 +1263,23 @@ static HRESULT WINAPI media_object_SetInputType(IMediaObject *iface, DWORD index
         decoder->wg_transform = 0;
     }
 
+{
+    const char *sgi = getenv("SteamGameId");
+    if (sgi && (0
+        || !strcmp(sgi, "802870")
+        || !strcmp(sgi, "1083650")
+        || !strcmp(sgi, "1097880")
+        || !strcmp(sgi, "1230140")
+        || !strcmp(sgi, "2515070")
+        || !strcmp(sgi, "3625380")
+    ))
+    {
+        VIDEOINFOHEADER *vih = (VIDEOINFOHEADER *)decoder->dmo_input_type.pbFormat;
+        decoder->dmo_input_type.subtype = MFVideoFormat_RGB24;
+        vih->bmiHeader.biCompression = BI_RGB;
+    }
+}
+
     return S_OK;
 }
 
@@ -1270,7 +1287,6 @@ static HRESULT WINAPI media_object_SetOutputType(IMediaObject *iface, DWORD inde
         const DMO_MEDIA_TYPE *type, DWORD flags)
 {
     struct video_decoder *decoder = impl_from_IMediaObject(iface);
-    wg_transform_t new_transform = 0;
     IMFMediaType *media_type;
     unsigned int i;
     HRESULT hr;
@@ -1313,48 +1329,35 @@ static HRESULT WINAPI media_object_SetOutputType(IMediaObject *iface, DWORD inde
         return DMO_E_TYPE_NOT_ACCEPTED;
     IMFMediaType_Release(media_type);
 
-    if (FAILED(hr = wg_transform_create_quartz(&decoder->dmo_input_type, type,
-            &decoder->wg_transform_attrs, &new_transform)))
-        return DMO_E_TYPE_NOT_ACCEPTED;
-
     if (flags & DMO_SET_TYPEF_TEST_ONLY)
-    {
-        wg_transform_destroy(new_transform);
         return S_OK;
-    }
 
     FreeMediaType(&decoder->dmo_output_type);
     CopyMediaType(&decoder->dmo_output_type, type);
 
     /* Set up wg_transform. */
-    if (decoder->wg_transform) wg_transform_destroy(decoder->wg_transform);
-    decoder->wg_transform = new_transform;
+    if (decoder->wg_transform)
+    {
+        wg_transform_destroy(decoder->wg_transform);
+        decoder->wg_transform = 0;
+    }
+    if (FAILED(hr = wg_transform_create_quartz(&decoder->dmo_input_type, type,
+            &decoder->wg_transform_attrs, &decoder->wg_transform)))
+        return hr;
 
     return S_OK;
 }
 
 static HRESULT WINAPI media_object_GetInputCurrentType(IMediaObject *iface, DWORD index, DMO_MEDIA_TYPE *type)
 {
-    struct video_decoder *decoder = impl_from_IMediaObject(iface);
-    TRACE("iface %p, index %lu, type %p stub!\n", iface, index, type);
-
-    if (index != 0) return DMO_E_INVALIDSTREAMINDEX;
-    if (!type) return E_POINTER;
-    if (IsEqualGUID(&decoder->dmo_input_type.majortype, &GUID_NULL)) return DMO_E_TYPE_NOT_SET;
-
-    return CopyMediaType(type, &decoder->dmo_input_type);
+    FIXME("iface %p, index %lu, type %p stub!\n", iface, index, type);
+    return E_NOTIMPL;
 }
 
 static HRESULT WINAPI media_object_GetOutputCurrentType(IMediaObject *iface, DWORD index, DMO_MEDIA_TYPE *type)
 {
-    struct video_decoder *decoder = impl_from_IMediaObject(iface);
-    TRACE("iface %p, index %lu, type %p stub!\n", iface, index, type);
-
-    if (index != 0) return DMO_E_INVALIDSTREAMINDEX;
-    if (!type) return E_POINTER;
-    if (IsEqualGUID(&decoder->dmo_output_type.majortype, &GUID_NULL)) return DMO_E_TYPE_NOT_SET;
-
-    return CopyMediaType(type, &decoder->dmo_output_type);
+    FIXME("iface %p, index %lu, type %p stub!\n", iface, index, type);
+    return E_NOTIMPL;
 }
 
 static HRESULT WINAPI media_object_GetInputSizeInfo(IMediaObject *iface, DWORD index, DWORD *size,
@@ -1430,8 +1433,8 @@ static HRESULT WINAPI media_object_Discontinuity(IMediaObject *iface, DWORD inde
 
 static HRESULT WINAPI media_object_AllocateStreamingResources(IMediaObject *iface)
 {
-    TRACE("iface %p.\n", iface);
-    return S_OK;
+    FIXME("iface %p stub!\n", iface);
+    return E_NOTIMPL;
 }
 
 static HRESULT WINAPI media_object_FreeStreamingResources(IMediaObject *iface)
@@ -1484,12 +1487,9 @@ static HRESULT WINAPI media_object_ProcessOutput(IMediaObject *iface, DWORD flag
 
     if (SUCCEEDED(hr))
         wg_sample_queue_flush(decoder->wg_sample_queue, false);
-    else if (hr == MF_E_TRANSFORM_NEED_MORE_INPUT)
-    {
-        buffers[0].dwStatus = 0;
-        hr = S_FALSE;
-    }
 
+    if (hr == MF_E_TRANSFORM_NEED_MORE_INPUT)
+        return S_FALSE;
     return hr;
 }
 
@@ -1661,6 +1661,12 @@ static HRESULT video_decoder_create_with_types(const GUID *const *input_types, U
                     &MFT_DECODER_EXPOSE_OUTPUT_TYPES_IN_NATIVE_ORDER, FALSE)))
         goto failed;
 
+    {
+        const char *sgi;
+        if ((sgi = getenv("SteamGameId")) && ((!strcmp(sgi, "2009100")) || (!strcmp(sgi, "2555360"))))
+            IMFAttributes_SetUINT32(decoder->attributes, &MF_SA_D3D11_AWARE, FALSE);
+    }
+
     if (FAILED(hr = MFCreateAttributes(&decoder->output_attributes, 0)))
         goto failed;
     if (FAILED(hr = wg_sample_queue_create(&decoder->wg_sample_queue)))
@@ -1800,6 +1806,9 @@ static const GUID *const wmv_decoder_input_types[] =
     &MEDIASUBTYPE_WVC1,
     &MEDIASUBTYPE_WMV3,
     &MEDIASUBTYPE_VC1S,
+    &MFVideoFormat_theora,
+    &MFVideoFormat_AV1,
+    &MFVideoFormat_VP90,
 };
 static const GUID *const wmv_decoder_output_types[] =
 {
@@ -1820,28 +1829,10 @@ static const GUID *const wmv_decoder_output_types[] =
 
 HRESULT wmv_decoder_create(IUnknown *outer, IUnknown **out)
 {
-    const MFVIDEOFORMAT output_format =
-    {
-        .dwSize = sizeof(MFVIDEOFORMAT),
-        .videoInfo = {.dwWidth = 1920, .dwHeight = 1080},
-        .guidFormat = MFVideoFormat_I420,
-    };
-    const MFVIDEOFORMAT input_format =
-    {
-        .dwSize = sizeof(MFVIDEOFORMAT),
-        .videoInfo = {.dwWidth = 1920, .dwHeight = 1080},
-        .guidFormat = MFVideoFormat_WMV3,
-    };
     struct video_decoder *decoder;
     HRESULT hr;
 
     TRACE("outer %p, out %p.\n", outer, out);
-
-    if (FAILED(hr = check_video_transform_support(&input_format, &output_format)))
-    {
-        ERR_(winediag)("GStreamer doesn't support WMV decoding, please install appropriate plugins\n");
-        return hr;
-    }
 
     if (FAILED(hr = video_decoder_create_with_types(wmv_decoder_input_types, ARRAY_SIZE(wmv_decoder_input_types),
             wmv_decoder_output_types, ARRAY_SIZE(wmv_decoder_output_types), outer, &decoder)))

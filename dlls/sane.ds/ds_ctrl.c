@@ -186,10 +186,6 @@ TW_UINT16 SANE_ProcessEvent (pTW_IDENTITY pOrigin,
         twRC = TWRC_FAILURE;
         activeDS.twCC = TWCC_SEQERROR;
     }
-    else if (UI_IsDialogMessage(pMsg))
-    {
-        twRC = TWRC_DSEVENT;
-    }
 
     return twRC;
 }
@@ -203,8 +199,6 @@ TW_UINT16 SANE_PendingXfersEndXfer (pTW_IDENTITY pOrigin,
 
     TRACE("DG_CONTROL/DAT_PENDINGXFERS/MSG_ENDXFER\n");
 
-    activeDS.scannedImages++;
-
     if (activeDS.currentState != 6 && activeDS.currentState != 7)
     {
         twRC = TWRC_FAILURE;
@@ -212,32 +206,14 @@ TW_UINT16 SANE_PendingXfersEndXfer (pTW_IDENTITY pOrigin,
     }
     else
     {
-        pPendingXfers->Count = activeDS.capXferCount==-1 ? -1 :
-          activeDS.capXferCount - activeDS.scannedImages;
-	if (!pPendingXfers->Count ||
-            !activeDS.feederEnabled ||
-            activeDS.userCancelled)
+        pPendingXfers->Count = -1;
+        activeDS.currentState = 6;
+        if (SANE_CALL( start_device, NULL ))
         {
-            /* All requested images transfered. Stop scanning */
             pPendingXfers->Count = 0;
             activeDS.currentState = 5;
-            SANE_Cancel();
-        }
-        else
-        {
-            /* To find out if there are more Xfers waiting for us,
-             * we need to call sane_start.
-             * On success, this will prepare the next frame and
-             * bring us back into currentState==7
-             */
-            activeDS.currentState = 6;
-            if (SANE_Start())
-            {
-                /* No more frames... tell the application */
-                pPendingXfers->Count = 0;
-                activeDS.currentState = 5;
-                SANE_Cancel();
-            }
+            /* Notify the application that it can close the data source */
+            SANE_Notify(MSG_CLOSEDSREQ);
         }
         twRC = TWRC_SUCCESS;
         activeDS.twCC = TWCC_SUCCESS;
@@ -260,38 +236,11 @@ TW_UINT16 SANE_PendingXfersGet (pTW_IDENTITY pOrigin,
         twRC = TWRC_FAILURE;
         activeDS.twCC = TWCC_SEQERROR;
     }
-    else if (activeDS.currentState < 6)
-    {
-        /* We have not yet started scanning */
-        pPendingXfers->Count = activeDS.capXferCount;
-        twRC = TWRC_SUCCESS;
-        activeDS.twCC = TWCC_SUCCESS;
-
-    }
-    else if (activeDS.capXferCount != -1)
-    {
-        /* The application gave us a counter with CAP_XFERCOUNT */
-        pPendingXfers->Count = activeDS.capXferCount - activeDS.scannedImages;
-        twRC = TWRC_SUCCESS;
-        activeDS.twCC = TWCC_SUCCESS;
-    }
-    else if (activeDS.currentState == 7)
-    {
-        /* We are already scanning a frame, so there obviously is one */
-        pPendingXfers->Count = -1;
-        twRC = TWRC_SUCCESS;
-        activeDS.twCC = TWCC_SUCCESS;
-    }
     else
     {
         pPendingXfers->Count = -1;
-        if (SANE_Start())
-        {
-            /* No more frames... tell the application */
+        if (SANE_CALL( start_device, NULL ))
             pPendingXfers->Count = 0;
-            activeDS.currentState = 5;
-            SANE_Cancel();
-        }
         twRC = TWRC_SUCCESS;
         activeDS.twCC = TWCC_SUCCESS;
     }
@@ -377,8 +326,6 @@ TW_UINT16 SANE_DisableDSUserInterface (pTW_IDENTITY pOrigin,
     }
     else
     {
-        UI_Destroy();
-
         activeDS.currentState = 4;
         twRC = TWRC_SUCCESS;
         activeDS.twCC = TWCC_SUCCESS;
@@ -405,35 +352,26 @@ TW_UINT16 SANE_EnableDSUserInterface (pTW_IDENTITY pOrigin,
     else
     {
         activeDS.hwndOwner = pUserInterface->hParent;
-        activeDS.ShowUI = pUserInterface->ShowUI;
-        activeDS.ModalUI = FALSE;
         if (pUserInterface->ShowUI)
         {
+            BOOL rc;
             activeDS.currentState = 5; /* Transitions to state 5 */
-            if (!DoScannerUI())
+            rc = DoScannerUI();
+            pUserInterface->ModalUI = TRUE;
+            if (!rc)
             {
-                twRC = TWRC_FAILURE;
-                activeDS.twCC = TWCC_BUMMER;
+                SANE_Notify(MSG_CLOSEDSREQ);
             }
-
-            /* Since Twain 1.9, the ModalUI value set by the application has a meaning,
-             * before that, that struct member was only used for DS -> App. */
-            activeDS.ModalUI = pUserInterface->ModalUI
-              && activeDS.hwndOwner
-              && (pOrigin->ProtocolMajor * 100 + pOrigin->ProtocolMinor)>=109
-              && IsWindowEnabled(activeDS.hwndOwner);
-
-            pUserInterface->ModalUI = activeDS.ModalUI;
-
-            if (activeDS.ModalUI)
+            else
             {
-                EnableWindow(activeDS.hwndOwner, FALSE);
+                get_sane_params( &activeDS.frame_params );
             }
         }
         else
         {
             /* no UI will be displayed, so source is ready to transfer data */
-            SANE_XferReady();
+            activeDS.currentState = 6; /* Transitions to state 6 directly */
+            SANE_Notify(MSG_XFERREADY);
         }
 
         twRC = TWRC_SUCCESS;

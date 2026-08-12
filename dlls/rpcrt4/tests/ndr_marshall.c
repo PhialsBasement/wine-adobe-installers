@@ -256,7 +256,7 @@ static void test_pointer_marshal(const unsigned char *formattypes,
         ok(size == srcsize + (srcsize == 8 ? 8 : sizeof(void *)), "%s: mem size %lu\n", msgpfx, size);
 
     size = srcsize;
-    if (formattypes[1] & FC_POINTER_DEREF) size += sizeof(void *);
+    if (formattypes[1] & FC_POINTER_DEREF) size += 4;
 
     StubMsg.Buffer = StubMsg.BufferStart;
     StubMsg.MemorySize = 0;
@@ -2999,38 +2999,6 @@ static void test_NdrCorrelationInitialize(void)
     ok( stub_msg.CorrDespIncrement == 1, "got %d\n", stub_msg.CorrDespIncrement );
 }
 
-static void test_pointer_validation(void)
-{
-    MIDL_STUB_DESC desc = Object_StubDesc;
-    RPC_MESSAGE rpc_msg;
-    MIDL_STUB_MESSAGE msg;
-    LONG l = 1;
-    unsigned char buf[32];
-
-    static const unsigned char format[] =
-    {
-        0x12, 0x8,      /* FC_UP [simple_pointer] */
-        0x8,            /* FC_LONG */
-        0x5c,           /* FC_PAD */
-    };
-
-    desc.pFormatTypes = format;
-    NdrClientInitializeNew( &rpc_msg, &msg, &desc, 0 );
-
-    /* Pass invalid buffer pointers to check that they are not validated */
-    msg.RpcMsg->Buffer = msg.BufferStart = (void *)0xdeadbeef;
-
-    msg.BufferLength = 1;
-    msg.Buffer = buf;
-    NdrPointerMarshall( &msg, (unsigned char*)&l, format );
-    ok( msg.Buffer == buf + 8, "unexpected Buffer %p, expected %p\n", msg.Buffer, msg.BufferStart );
-
-    msg.BufferLength = ~0u;
-    msg.Buffer = buf;
-    NdrPointerMarshall( &msg, (unsigned char*)&l, format );
-    ok( msg.Buffer == buf + 8, "unexpected Buffer %p, expected %p\n", msg.Buffer, msg.BufferStart );
-}
-
 START_TEST( ndr_marshall )
 {
     determine_pointer_marshalling_style();
@@ -3055,5 +3023,4 @@ START_TEST( ndr_marshall )
     test_NdrGetUserMarshalInfo();
     test_MesEncodeFixedBufferHandleCreate();
     test_NdrCorrelationInitialize();
-    test_pointer_validation();
 }

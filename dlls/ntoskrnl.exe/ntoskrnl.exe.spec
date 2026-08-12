@@ -52,16 +52,12 @@
 @ stdcall -fastcall IofCompleteRequest(ptr long)
 @ stdcall -arch=!i386 KeAcquireInStackQueuedSpinLock(ptr ptr)
 @ stdcall -fastcall KeAcquireInStackQueuedSpinLockAtDpcLevel(ptr ptr)
-@ stdcall -fastcall KeAcquireGuardedMutexUnsafe(ptr)
-@ stdcall -fastcall KeAcquireGuardedMutex(ptr)
 @ stdcall KeEnterGuardedRegion()
 @ stdcall KeExpandKernelStackAndCallout(ptr ptr long)
 @ stdcall KeExpandKernelStackAndCalloutEx(ptr ptr long long ptr)
 @ stdcall KeLeaveGuardedRegion()
 @ stdcall -arch=!i386 KeReleaseInStackQueuedSpinLock(ptr)
 @ stdcall -fastcall KeReleaseInStackQueuedSpinLockFromDpcLevel(ptr)
-@ stdcall -fastcall KeReleaseGuardedMutexUnsafe(ptr)
-@ stdcall -fastcall KeReleaseGuardedMutex(ptr)
 @ stub KeSetTimeUpdateNotifyRoutine
 @ stub KefAcquireSpinLockAtDpcLevel
 @ stub KefReleaseSpinLockFromDpcLevel
@@ -237,7 +233,7 @@
 @ stub FsRtlFastUnlockSingle
 @ stub FsRtlFindInTunnelCache
 @ stub FsRtlFreeFileLock
-@ stdcall FsRtlGetFileSize(ptr ptr)
+@ stub FsRtlGetFileSize
 @ stub FsRtlGetNextFileLock
 @ stub FsRtlGetNextLargeMcbEntry
 @ stub FsRtlGetNextMcbEntry
@@ -407,7 +403,6 @@
 @ stdcall IoGetCurrentProcess()
 @ stub IoGetDeviceAttachmentBaseRef
 @ stub IoGetDeviceInterfaceAlias
-@ stdcall IoGetDeviceInterfacePropertyData(ptr ptr long long long ptr ptr ptr)
 @ stdcall IoGetDeviceInterfaces(ptr ptr long ptr)
 @ stdcall IoGetDeviceObjectPointer(ptr long ptr ptr)
 @ stdcall IoGetDeviceProperty(ptr long long ptr ptr)
@@ -475,7 +470,6 @@
 @ stub IoRequestDeviceEject
 @ stdcall IoReuseIrp(ptr long)
 @ stub IoSetCompletionRoutineEx
-@ stdcall IoSetDeviceInterfacePropertyData(ptr ptr long long long long ptr)
 @ stdcall IoSetDeviceInterfaceState(ptr long)
 @ stdcall IoSetDevicePropertyData(ptr ptr long long long long ptr)
 @ stub IoSetDeviceToVerify
@@ -526,7 +520,6 @@
 @ stub IoWriteOperationCount
 @ stub IoWritePartitionTableEx
 @ stub IoWriteTransferCount
-@ stdcall KdChangeOption(long long ptr long ptr ptr)
 @ extern KdDebuggerEnabled
 @ stub KdDebuggerNotPresent
 @ stdcall KdDisableDebugger()
@@ -588,7 +581,7 @@
 @ stub KeInitializeInterrupt
 @ stub KeInitializeMutant
 @ stdcall KeInitializeMutex(ptr long)
-@ stdcall -fastcall KeInitializeGuardedMutex(ptr)
+@ stdcall KeInitializeGuardedMutex(ptr)
 @ stub KeInitializeQueue
 @ stdcall KeInitializeSemaphore(ptr long long)
 @ stdcall KeInitializeSpinLock(ptr) NTOSKRNL_KeInitializeSpinLock
@@ -743,7 +736,7 @@
 @ stub MmLockPagableImageSection
 @ stdcall MmLockPagableSectionByHandle(ptr)
 @ stdcall MmMapIoSpace(int64 long long)
-@ stdcall MmMapLockedPages(ptr long)
+@ stub MmMapLockedPages
 @ stdcall MmMapLockedPagesSpecifyCache(ptr long long ptr long long)
 @ stub MmMapLockedPagesWithReservedMapping
 @ stub MmMapMemoryDumpMdl
@@ -834,7 +827,6 @@
 @ stdcall NtRequestWaitReplyPort(ptr ptr ptr)
 @ stdcall NtSetEaFile(long ptr ptr long)
 @ stdcall NtSetEvent(long ptr)
-@ stdcall NtSetEventBoostPriority(long)
 @ stdcall NtSetInformationFile(long ptr ptr long long)
 @ stdcall NtSetInformationProcess(long long ptr long)
 @ stdcall NtSetInformationThread(long long ptr long)
@@ -1059,12 +1051,12 @@
 @ stdcall RtlDecompressBuffer(long ptr long ptr long ptr)
 @ stub RtlDecompressChunks
 @ stdcall RtlDecompressFragment(long ptr long ptr long long ptr ptr)
-@ stdcall RtlDelete(ptr)
+@ stub RtlDelete
 @ stdcall RtlDeleteAce(ptr long)
 @ stdcall RtlDeleteAtomFromAtomTable(ptr long)
-@ stdcall RtlDeleteElementGenericTable(ptr ptr)
+@ stub RtlDeleteElementGenericTable
 @ stub RtlDeleteElementGenericTableAvl
-@ stdcall RtlDeleteNoSplay(ptr ptr)
+@ stub RtlDeleteNoSplay
 @ stub RtlDeleteOwnersRanges
 @ stub RtlDeleteRange
 @ stdcall RtlDeleteRegistryValue(long ptr ptr)
@@ -1078,7 +1070,7 @@
 @ stdcall -arch=win32 -ret64 RtlEnlargedIntegerMultiply(long long)
 @ stdcall -arch=win32 RtlEnlargedUnsignedDivide(int64 long ptr)
 @ stdcall -arch=win32 -ret64 RtlEnlargedUnsignedMultiply(long long)
-@ stdcall RtlEnumerateGenericTable(ptr long)
+@ stub RtlEnumerateGenericTable
 @ stub RtlEnumerateGenericTableAvl
 @ stub RtlEnumerateGenericTableLikeADirectory
 @ stdcall RtlEnumerateGenericTableWithoutSplaying(ptr ptr)
@@ -1158,7 +1150,7 @@
 @ stub RtlInitializeRangeList
 @ stdcall RtlInitializeSid(ptr ptr long)
 @ stub RtlInitializeUnicodePrefix
-@ stdcall RtlInsertElementGenericTable(ptr ptr long ptr)
+@ stub RtlInsertElementGenericTable
 @ stdcall RtlInsertElementGenericTableAvl(ptr ptr long ptr)
 @ stub RtlInsertElementGenericTableFull
 @ stub RtlInsertElementGenericTableFullAvl
@@ -1184,7 +1176,7 @@
 @ stdcall RtlIpv6StringToAddressExA(str ptr ptr ptr)
 @ stdcall RtlIpv6StringToAddressExW(wstr ptr ptr ptr)
 @ stdcall RtlIpv6StringToAddressW(wstr ptr ptr)
-@ stdcall RtlIsGenericTableEmpty(ptr)
+@ stub RtlIsGenericTableEmpty
 @ stub RtlIsGenericTableEmptyAvl
 @ stdcall RtlIsNameLegalDOS8Dot3(ptr ptr ptr)
 @ stdcall RtlIsNormalizedString(long wstr long ptr)
@@ -1248,8 +1240,8 @@
 @ stdcall RtlRaiseStatus(long)
 @ stdcall RtlRandom(ptr)
 @ stdcall RtlRandomEx(ptr)
-@ stdcall RtlRealPredecessor(ptr)
-@ stdcall RtlRealSuccessor(ptr)
+@ stub RtlRealPredecessor
+@ stub RtlRealSuccessor
 @ stub RtlRemoveUnicodePrefix
 @ stub RtlReserveChunk
 @ cdecl -arch=!i386 RtlRestoreContext(ptr ptr)
@@ -1273,12 +1265,12 @@
 @ stdcall RtlSetSaclSecurityDescriptor(ptr long ptr long)
 @ stdcall RtlSetTimeZoneInformation(ptr)
 @ stdcall RtlSizeHeap(long long ptr)
-@ stdcall RtlSplay(ptr)
+@ stub RtlSplay
 @ stdcall RtlStringFromGUID(ptr ptr)
 @ stdcall RtlSubAuthorityCountSid(ptr)
 @ stdcall RtlSubAuthoritySid(ptr long)
-@ stdcall RtlSubtreePredecessor(ptr)
-@ stdcall RtlSubtreeSuccessor(ptr)
+@ stub RtlSubtreePredecessor
+@ stub RtlSubtreeSuccessor
 @ stdcall RtlSystemTimeToLocalTime(ptr ptr)
 @ stub RtlTestBit
 @ stdcall RtlTimeFieldsToTime(ptr ptr)
@@ -1445,7 +1437,7 @@
 @ stdcall -private ZwFlushBuffersFile(long ptr) NtFlushBuffersFile
 @ stdcall -private ZwFlushInstructionCache(long ptr long) NtFlushInstructionCache
 @ stdcall -private ZwFlushKey(long) NtFlushKey
-@ stdcall -private ZwFlushVirtualMemory(long ptr ptr ptr) NtFlushVirtualMemory
+@ stdcall -private ZwFlushVirtualMemory(long ptr ptr long) NtFlushVirtualMemory
 @ stdcall -private ZwFreeVirtualMemory(long ptr ptr long) NtFreeVirtualMemory
 @ stdcall -private ZwFsControlFile(long long ptr ptr ptr long ptr long ptr long) NtFsControlFile
 @ stdcall -private ZwImpersonateAnonymousToken(long) NtImpersonateAnonymousToken
@@ -1524,7 +1516,6 @@
 @ stdcall -private ZwSetDefaultUILanguage(long) NtSetDefaultUILanguage
 @ stdcall -private ZwSetEaFile(long ptr ptr long) NtSetEaFile
 @ stdcall ZwSetEvent(long ptr) NtSetEvent
-@ stdcall -private ZwSetEventBoostPriority(long) NtSetEventBoostPriority
 @ stdcall -private ZwSetInformationFile(long ptr ptr long long) NtSetInformationFile
 @ stdcall -private ZwSetInformationJobObject(long long ptr long) NtSetInformationJobObject
 @ stdcall -private ZwSetInformationKey(long long ptr long) NtSetInformationKey

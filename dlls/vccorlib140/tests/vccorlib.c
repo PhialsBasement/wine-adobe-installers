@@ -22,14 +22,11 @@
 #define COBJMACROS
 
 #include <stdbool.h>
-#include <stdint.h>
 
 #include "initguid.h"
 #include "activation.h"
 #include "objbase.h"
 #include "weakreference.h"
-#include "restrictederrorinfo.h"
-#include "roapi.h"
 #define WIDL_using_Windows_Foundation
 #include "windows.foundation.h"
 #include "winstring.h"
@@ -75,7 +72,6 @@ struct thiscall_thunk
 #pragma pack( pop )
 
 static ULONG_PTR (WINAPI *call_thiscall_func1)(void *func, void *this);
-static ULONG_PTR (WINAPI *call_thiscall_func2)(void *func, void *this, void *arg1);
 
 static void init_thiscall_thunk(void)
 {
@@ -86,19 +82,16 @@ static void init_thiscall_thunk(void)
     thunk->push_eax = 0x50;   /* pushl %eax */
     thunk->jmp_edx  = 0xe2ff; /* jmp  *%edx */
     call_thiscall_func1 = (void *)thunk;
-    call_thiscall_func2 = (void *)thunk;
 }
 
 #define __thiscall __stdcall
 #define call_func1(func,_this) call_thiscall_func1(func,_this)
-#define call_func2(func,_this,arg1) call_thiscall_func2(func, _this, arg1)
 
 #else
 
 #define init_thiscall_thunk()
 #define __thiscall __cdecl
 #define call_func1(func,_this) func(_this)
-#define call_func2(func,_this,arg1) func(_this,arg1)
 
 #endif /* __i386__ */
 
@@ -113,32 +106,10 @@ DEFINE_EXPECT(PostInitialize);
 DEFINE_EXPECT(PreUninitialize);
 DEFINE_EXPECT(PostUninitialize);
 
-#define WINRT_EXCEPTIONS                                     \
-    WINRT_EXCEPTION(AccessDenied, E_ACCESSDENIED)            \
-    WINRT_EXCEPTION(ChangedState, E_CHANGED_STATE)           \
-    WINRT_EXCEPTION(ClassNotRegistered, REGDB_E_CLASSNOTREG) \
-    WINRT_EXCEPTION(Disconnected, RPC_E_DISCONNECTED)        \
-    WINRT_EXCEPTION(Failure, E_FAIL)                         \
-    WINRT_EXCEPTION(InvalidArgument, E_INVALIDARG)           \
-    WINRT_EXCEPTION(InvalidCast, E_NOINTERFACE)              \
-    WINRT_EXCEPTION(NotImplemented, E_NOTIMPL)               \
-    WINRT_EXCEPTION(NullReference, E_POINTER)                \
-    WINRT_EXCEPTION(ObjectDisposed, RO_E_CLOSED)             \
-    WINRT_EXCEPTION(OperationCanceled, E_ABORT)              \
-    WINRT_EXCEPTION(OutOfBounds, E_BOUNDS)                   \
-    WINRT_EXCEPTION(OutOfMemory, E_OUTOFMEMORY)              \
-    WINRT_EXCEPTION(WrongThread, RPC_E_WRONG_THREAD)
-
 struct __abi_type_descriptor
 {
     const WCHAR *name;
     int type_id;
-};
-
-struct EventLock
-{
-    SRWLOCK targets_ptr_lock;
-    SRWLOCK add_remove_lock;
 };
 
 static HRESULT (__cdecl *pInitializeData)(int);
@@ -155,60 +126,11 @@ static int (__cdecl *p_platform_type_GetTypeCode)(void *);
 static HSTRING (__cdecl *p_platform_type_ToString)(void *);
 static HSTRING (__cdecl *p_platform_type_get_FullName)(void *);
 static void *(WINAPI *pCreateValue)(int type, const void *);
-static void *(__cdecl *pCreateException)(HRESULT);
-static void *(__cdecl *pCreateExceptionWithMessage)(HRESULT, HSTRING);
-static HSTRING (__cdecl *p_platform_exception_get_Message)(void *);
-static HSTRING (__cdecl *p_platform_exception_ToString)(void *);
-static void *(__cdecl *pAllocateException)(size_t);
-static void *(__cdecl *pAllocateExceptionWithWeakRef)(ptrdiff_t, size_t);
-static void (__cdecl *pFreeException)(void *);
-static void *(__cdecl *p_platform_Exception_ctor)(void *, HRESULT);
-static void *(__cdecl *p_platform_Exception_hstring_ctor)(void *, HRESULT, HSTRING);
-static void *(__cdecl *p_platform_COMException_ctor)(void *, HRESULT);
-static void *(__cdecl *p_platform_COMException_hstring_ctor)(void *, HRESULT, HSTRING);
-#define WINRT_EXCEPTION(name, ...)                                                     \
-    static void *(__cdecl *p_platform_##name##Exception_ctor)(void *);         \
-    static void *(__cdecl *p_platform_##name##Exception_hstring_ctor)(void *, HSTRING);
-WINRT_EXCEPTIONS
-#undef WINRT_EXCEPTION
-static IWeakReference *(WINAPI *p_GetWeakReference)(IUnknown *);
-static IUnknown *(WINAPI *p_ResolveWeakReference)(const GUID *, IWeakReference **);
-static void *(WINAPI *p__abi_ObjectToString)(void *, bool stringable);
-static HSTRING (*__cdecl p_Boolean_ToString)(const boolean *);
-static HSTRING (*__cdecl p_Guid_ToString)(const GUID *);
-static HSTRING (__cdecl *p_char16_ToString)(const WCHAR *);
-static HSTRING (__cdecl *p_float32_ToString)(const FLOAT *);
-static HSTRING (__cdecl *p_float64_ToString)(const DOUBLE *);
-static HSTRING (__cdecl *p_int16_ToString)(const INT16 *);
-static HSTRING (__cdecl *p_int32_ToString)(const INT32 *);
-static HSTRING (__cdecl *p_int64_ToString)(const INT64 *);
-static HSTRING (__cdecl *p_int8_ToString)(const INT8 *);
-static HSTRING (__cdecl *p_uint16_ToString)(const UINT16 *);
-static HSTRING (__cdecl *p_uint32_ToString)(const UINT32 *);
-static HSTRING (__cdecl *p_uint64_ToString)(const UINT64 *);
-static HSTRING (__cdecl *p_uint8_ToString)(const UINT8 *);
-static void *(__cdecl *p_Delegate_ctor)(IInspectable *);
-static void (WINAPI *p_EventSourceInitialize)(IInspectable **);
-static void (WINAPI *p_EventSourceUninitialize)(IInspectable **);
-static EventRegistrationToken (WINAPI *p_EventSourceAdd)(IInspectable **, struct EventLock *, IUnknown *);
-static void (WINAPI *p_EventSourceRemove)(IInspectable **, struct EventLock *, EventRegistrationToken);
-static IInspectable *(WINAPI *p_EventSourceGetTargetArray)(IInspectable *, struct EventLock *);
-static IInspectable *(WINAPI *p_EventSourceGetTargetArrayEvent)(IInspectable *, ULONG, const GUID *, EventRegistrationToken *);
-static ULONG (WINAPI *p_EventSourceGetTargetArraySize)(IInspectable *);
-
-static void *(__cdecl *p__RTtypeid)(const void *);
-static const char *(__thiscall *p_type_info_name)(void *);
-static const char *(__thiscall *p_type_info_raw_name)(void *);
-static int (__thiscall *p_type_info_opequals_equals)(void *, void *);
-static int (__thiscall *p_type_info_opnot_equals)(void *, void *);
-
-static HMODULE hmod;
 
 static BOOL init(void)
 {
-    HMODULE msvcrt = LoadLibraryA("msvcrt.dll");
+    HMODULE hmod = LoadLibraryA("vccorlib140.dll");
 
-    hmod = LoadLibraryA("vccorlib140.dll");
     if (!hmod)
     {
         win_skip("vccorlib140.dll not available\n");
@@ -221,8 +143,6 @@ static BOOL init(void)
     pUninitializeData = (void *)GetProcAddress(hmod,
             "?UninitializeData@Details@Platform@@YAXH@Z");
     ok(pUninitializeData != NULL, "UninitializeData not available\n");
-    p__RTtypeid = (void *)GetProcAddress(msvcrt, "__RTtypeid");
-    ok(p__RTtypeid != NULL, "__RTtypeid not available\n");
 
 #ifdef __arm__
     pGetActivationFactoryByPCWSTR = (void *)GetProcAddress(hmod,
@@ -240,67 +160,6 @@ static BOOL init(void)
     p_platform_type_ToString = (void *)GetProcAddress(hmod, "?ToString@Type@Platform@@U$AAAP$AAVString@2@XZ");
     p_platform_type_get_FullName = (void *)GetProcAddress(hmod, "?get@FullName@Type@Platform@@Q$AAAP$AAVString@3@XZ");
     pCreateValue = (void *)GetProcAddress(hmod, "?CreateValue@Details@Platform@@YAP$AAVObject@2@W4TypeCode@2@PBX@Z");
-    pCreateException = (void *)GetProcAddress(hmod, "?CreateException@Exception@Platform@@SAP$AAV12@H@Z");
-    pCreateExceptionWithMessage = (void *)GetProcAddress(hmod,
-            "?CreateException@Exception@Platform@@SAP$AAV12@HP$AAVString@2@@Z");
-    p_platform_exception_get_Message = (void *)GetProcAddress(hmod,
-            "?get@Message@Exception@Platform@@Q$AAAP$AAVString@3@XZ");
-    p_platform_exception_ToString = (void *)GetProcAddress(hmod,
-            "?ToString@Exception@Platform@@U$AAAP$AAVString@2@XZ");
-    pAllocateException = (void *)GetProcAddress(hmod, "?AllocateException@Heap@Details@Platform@@SAPAXI@Z");
-    pAllocateExceptionWithWeakRef = (void *)GetProcAddress(hmod,
-            "?AllocateException@Heap@Details@Platform@@SAPAXII@Z");
-    pFreeException = (void *)GetProcAddress(hmod, "?FreeException@Heap@Details@Platform@@SAXPAX@Z");
-    p_platform_Exception_ctor = (void *)GetProcAddress(hmod, "??0Exception@Platform@@Q$AAA@H@Z");
-    p_platform_Exception_hstring_ctor = (void *)GetProcAddress(hmod, "??0Exception@Platform@@Q$AAA@HP$AAVString@1@@Z");
-    p_platform_COMException_ctor = (void *)GetProcAddress(hmod, "??0COMException@Platform@@Q$AAA@H@Z");
-    p_platform_COMException_hstring_ctor = (void *)GetProcAddress(hmod,
-            "??0COMException@Platform@@Q$AAA@HP$AAVString@1@@Z");
-#define WINRT_EXCEPTION(name, ...) do { \
-    p_platform_##name##Exception_ctor = (void *)GetProcAddress(hmod, \
-        "??0" #name "Exception@Platform@@Q$AAA@XZ");                         \
-    p_platform_##name##Exception_hstring_ctor = (void *)GetProcAddress(hmod, \
-        "??0" #name "Exception@Platform@@Q$AAA@P$AAVString@1@@Z");           \
-    } while(0);
-    WINRT_EXCEPTIONS
-#undef WINRT_EXCEPTION
-    p_GetWeakReference = (void *)GetProcAddress(hmod,
-            "?GetWeakReference@Details@Platform@@YAPAU__abi_IUnknown@@Q$ADVObject@2@@Z");
-    p_ResolveWeakReference = (void *)GetProcAddress(hmod,
-            "?ResolveWeakReference@Details@Platform@@YAP$AAVObject@2@ABU_GUID@@PAPAU__abi_IUnknown@@@Z");
-    p__abi_ObjectToString = (void *)GetProcAddress(hmod,
-            "?__abi_ObjectToString@__abi_details@@YAP$AAVString@Platform@@P$AAVObject@3@_N@Z");
-    p_Boolean_ToString = (void *)GetProcAddress(hmod, "?ToString@Boolean@Platform@@QAAP$AAVString@2@XZ");
-    p_Guid_ToString = (void *)GetProcAddress(hmod, "?ToString@Guid@Platform@@QAAP$AAVString@2@XZ");
-    p_char16_ToString = (void *)GetProcAddress(hmod, "?ToString@char16@default@@QAAP$AAVString@Platform@@XZ");
-    p_float32_ToString = (void *)GetProcAddress(hmod, "?ToString@float32@default@@QAAP$AAVString@Platform@@XZ");
-    p_float64_ToString = (void *)GetProcAddress(hmod, "?ToString@float64@default@@QAAP$AAVString@Platform@@XZ");
-    p_int16_ToString = (void *)GetProcAddress(hmod, "?ToString@int16@default@@QAAP$AAVString@Platform@@XZ");
-    p_int32_ToString = (void *)GetProcAddress(hmod, "?ToString@int32@default@@QAAP$AAVString@Platform@@XZ");
-    p_int64_ToString = (void *)GetProcAddress(hmod, "?ToString@int64@default@@QAAP$AAVString@Platform@@XZ");
-    p_int8_ToString = (void *)GetProcAddress(hmod, "?ToString@int8@default@@QAAP$AAVString@Platform@@XZ");
-    p_uint16_ToString = (void *)GetProcAddress(hmod, "?ToString@uint16@default@@QAAP$AAVString@Platform@@XZ");
-    p_uint32_ToString = (void *)GetProcAddress(hmod, "?ToString@uint32@default@@QAAP$AAVString@Platform@@XZ");
-    p_uint64_ToString = (void *)GetProcAddress(hmod, "?ToString@uint64@default@@QAAP$AAVString@Platform@@XZ");
-    p_uint8_ToString = (void *)GetProcAddress(hmod, "?ToString@uint8@default@@QAAP$AAVString@Platform@@XZ");
-    p_Delegate_ctor = (void *)GetProcAddress(hmod, "??0Delegate@Platform@@Q$AAA@XZ");
-    p_EventSourceInitialize = (void *)GetProcAddress(hmod, "?EventSourceInitialize@Details@Platform@@YAXPAPAX@Z");
-    p_EventSourceUninitialize = (void *)GetProcAddress(hmod, "?EventSourceUninitialize@Details@Platform@@YAXPAPAX@Z");
-    p_EventSourceAdd = (void *)GetProcAddress(hmod,
-            "?EventSourceAdd@Details@Platform@@YA?AVEventRegistrationToken@Foundation@Windows@@PAPAXPAUEventLock@12@P$AAVDelegate@2@@Z");
-    p_EventSourceRemove = (void *)GetProcAddress(hmod,
-            "?EventSourceRemove@Details@Platform@@YAXPAPAXPAUEventLock@12@VEventRegistrationToken@Foundation@Windows@@@Z");
-    p_EventSourceGetTargetArray = (void *)GetProcAddress(hmod,
-            "?EventSourceGetTargetArray@Details@Platform@@YAPAXPAXPAUEventLock@12@@Z");
-    p_EventSourceGetTargetArrayEvent = (void *)GetProcAddress(hmod,
-            "?EventSourceGetTargetArrayEvent@Details@Platform@@YAPAXPAXIPBXPA_J@Z");
-    p_EventSourceGetTargetArraySize = (void *)GetProcAddress(hmod,
-            "?EventSourceGetTargetArraySize@Details@Platform@@YAIPAX@Z");
-
-    p_type_info_name = (void *)GetProcAddress(msvcrt, "?name@type_info@@QBAPBDXZ");
-    p_type_info_raw_name = (void *)GetProcAddress(msvcrt, "?raw_name@type_info@@QBAPBDXZ");
-    p_type_info_opequals_equals = (void *)GetProcAddress(msvcrt, "??8type_info@@QBAHABV0@@Z");
-    p_type_info_opnot_equals = (void *)GetProcAddress(msvcrt, "??9type_info@@QBAHABV0@@Z");
 #else
     if (sizeof(void *) == 8)
     {
@@ -322,71 +181,6 @@ static BOOL init(void)
                 "?get@FullName@Type@Platform@@QE$AAAPE$AAVString@3@XZ");
         pCreateValue = (void *)GetProcAddress(hmod,
                 "?CreateValue@Details@Platform@@YAPE$AAVObject@2@W4TypeCode@2@PEBX@Z");
-        pCreateException = (void *)GetProcAddress(hmod,
-                "?CreateException@Exception@Platform@@SAPE$AAV12@H@Z");
-        pCreateExceptionWithMessage = (void *)GetProcAddress(hmod,
-                "?CreateException@Exception@Platform@@SAPE$AAV12@HPE$AAVString@2@@Z");
-        p_platform_exception_get_Message = (void *)GetProcAddress(hmod,
-                "?get@Message@Exception@Platform@@QE$AAAPE$AAVString@3@XZ");
-        p_platform_exception_ToString = (void *)GetProcAddress(hmod,
-                "?ToString@Exception@Platform@@UE$AAAPE$AAVString@2@XZ");
-        pAllocateException = (void *)GetProcAddress(hmod, "?AllocateException@Heap@Details@Platform@@SAPEAX_K@Z");
-        pAllocateExceptionWithWeakRef = (void *)GetProcAddress(hmod,
-                "?AllocateException@Heap@Details@Platform@@SAPEAX_K0@Z");
-        pFreeException = (void *)GetProcAddress(hmod, "?FreeException@Heap@Details@Platform@@SAXPEAX@Z");
-        p_platform_Exception_ctor = (void *)GetProcAddress(hmod, "??0Exception@Platform@@QE$AAA@H@Z");
-        p_platform_Exception_hstring_ctor = (void *)GetProcAddress(hmod,
-               "??0Exception@Platform@@QE$AAA@HPE$AAVString@1@@Z");
-        p_platform_COMException_ctor = (void *)GetProcAddress(hmod, "??0COMException@Platform@@QE$AAA@H@Z");
-        p_platform_COMException_hstring_ctor = (void *)GetProcAddress(hmod,
-            "??0COMException@Platform@@QE$AAA@HPE$AAVString@1@@Z");
-#define WINRT_EXCEPTION(name, ...) do { \
-    p_platform_##name##Exception_ctor = (void *)GetProcAddress(hmod, \
-            "??0" #name "Exception@Platform@@QE$AAA@XZ");                    \
-    p_platform_##name##Exception_hstring_ctor = (void *)GetProcAddress(hmod, \
-            "??0" #name "Exception@Platform@@QE$AAA@PE$AAVString@1@@Z");     \
-    } while(0);
-        WINRT_EXCEPTIONS
-#undef WINRT_EXCEPTION
-        p_GetWeakReference = (void *)GetProcAddress(hmod,
-                "?GetWeakReference@Details@Platform@@YAPEAU__abi_IUnknown@@QE$ADVObject@2@@Z");
-        p_ResolveWeakReference = (void *)GetProcAddress(hmod,
-                "?ResolveWeakReference@Details@Platform@@YAPE$AAVObject@2@AEBU_GUID@@PEAPEAU__abi_IUnknown@@@Z");
-        p__abi_ObjectToString = (void *)GetProcAddress(hmod,
-                "?__abi_ObjectToString@__abi_details@@YAPE$AAVString@Platform@@PE$AAVObject@3@_N@Z");
-        p_Boolean_ToString = (void *)GetProcAddress(hmod, "?ToString@Boolean@Platform@@QEAAPE$AAVString@2@XZ");
-        p_Guid_ToString = (void *)GetProcAddress(hmod, "?ToString@Guid@Platform@@QEAAPE$AAVString@2@XZ");
-        p_char16_ToString = (void *)GetProcAddress(hmod, "?ToString@char16@default@@QEAAPE$AAVString@Platform@@XZ");
-        p_float32_ToString = (void *)GetProcAddress(hmod, "?ToString@float32@default@@QEAAPE$AAVString@Platform@@XZ");
-        p_float64_ToString = (void *)GetProcAddress(hmod, "?ToString@float64@default@@QEAAPE$AAVString@Platform@@XZ");
-        p_int16_ToString = (void *)GetProcAddress(hmod, "?ToString@int16@default@@QEAAPE$AAVString@Platform@@XZ");
-        p_int32_ToString = (void *)GetProcAddress(hmod, "?ToString@int32@default@@QEAAPE$AAVString@Platform@@XZ");
-        p_int64_ToString = (void *)GetProcAddress(hmod, "?ToString@int64@default@@QEAAPE$AAVString@Platform@@XZ");
-        p_int8_ToString = (void *)GetProcAddress(hmod, "?ToString@int8@default@@QEAAPE$AAVString@Platform@@XZ");
-        p_uint16_ToString = (void *)GetProcAddress(hmod, "?ToString@uint16@default@@QEAAPE$AAVString@Platform@@XZ");
-        p_uint32_ToString = (void *)GetProcAddress(hmod, "?ToString@uint32@default@@QEAAPE$AAVString@Platform@@XZ");
-        p_uint64_ToString = (void *)GetProcAddress(hmod, "?ToString@uint64@default@@QEAAPE$AAVString@Platform@@XZ");
-        p_uint8_ToString = (void *)GetProcAddress(hmod, "?ToString@uint8@default@@QEAAPE$AAVString@Platform@@XZ");
-        p_Delegate_ctor = (void *)GetProcAddress(hmod, "??0Delegate@Platform@@QE$AAA@XZ");
-        p_EventSourceInitialize = (void *)GetProcAddress(hmod,
-                "?EventSourceInitialize@Details@Platform@@YAXPEAPEAX@Z");
-        p_EventSourceUninitialize = (void *)GetProcAddress(hmod,
-                "?EventSourceUninitialize@Details@Platform@@YAXPEAPEAX@Z");
-        p_EventSourceAdd = (void *)GetProcAddress(hmod,
-                "?EventSourceAdd@Details@Platform@@YA?AVEventRegistrationToken@Foundation@Windows@@PEAPEAXPEAUEventLock@12@PE$AAVDelegate@2@@Z");
-        p_EventSourceRemove = (void *)GetProcAddress(hmod,
-                "?EventSourceRemove@Details@Platform@@YAXPEAPEAXPEAUEventLock@12@VEventRegistrationToken@Foundation@Windows@@@Z");
-        p_EventSourceGetTargetArray = (void *)GetProcAddress(hmod,
-                "?EventSourceGetTargetArray@Details@Platform@@YAPEAXPEAXPEAUEventLock@12@@Z");
-        p_EventSourceGetTargetArrayEvent = (void *)GetProcAddress(hmod,
-                "?EventSourceGetTargetArrayEvent@Details@Platform@@YAPEAXPEAXIPEBXPEA_J@Z");
-        p_EventSourceGetTargetArraySize = (void *)GetProcAddress(hmod,
-                "?EventSourceGetTargetArraySize@Details@Platform@@YAIPEAX@Z");
-
-        p_type_info_name = (void *)GetProcAddress(msvcrt, "?name@type_info@@QEBAPEBDXZ");
-        p_type_info_raw_name = (void *)GetProcAddress(msvcrt, "?raw_name@type_info@@QEBAPEBDXZ");
-        p_type_info_opequals_equals = (void *)GetProcAddress(msvcrt, "??8type_info@@QEBAHAEBV0@@Z");
-        p_type_info_opnot_equals = (void *)GetProcAddress(msvcrt, "??9type_info@@QEBAHAEBV0@@Z");
     }
     else
     {
@@ -407,70 +201,6 @@ static BOOL init(void)
                 "?get@FullName@Type@Platform@@Q$AAAP$AAVString@3@XZ");
         pCreateValue = (void *)GetProcAddress(hmod,
                 "?CreateValue@Details@Platform@@YGP$AAVObject@2@W4TypeCode@2@PBX@Z");
-        pCreateException = (void *)GetProcAddress(hmod,
-                "?CreateException@Exception@Platform@@SAP$AAV12@H@Z");
-        pCreateExceptionWithMessage = (void *)GetProcAddress(hmod,
-                "?CreateException@Exception@Platform@@SAP$AAV12@HP$AAVString@2@@Z");
-        p_platform_exception_get_Message = (void *)GetProcAddress(hmod,
-                    "?get@Message@Exception@Platform@@Q$AAAP$AAVString@3@XZ");
-        p_platform_exception_ToString = (void *)GetProcAddress(hmod,
-                    "?ToString@Exception@Platform@@U$AAAP$AAVString@2@XZ");
-        pAllocateException = (void *)GetProcAddress(hmod, "?AllocateException@Heap@Details@Platform@@SAPAXI@Z");
-        pAllocateExceptionWithWeakRef = (void *)GetProcAddress(hmod,
-                    "?AllocateException@Heap@Details@Platform@@SAPAXII@Z");
-        pFreeException = (void *)GetProcAddress(hmod, "?FreeException@Heap@Details@Platform@@SAXPAX@Z");
-        p_platform_Exception_ctor = (void *)GetProcAddress(hmod, "??0Exception@Platform@@Q$AAA@H@Z");
-        p_platform_Exception_hstring_ctor = (void *)GetProcAddress(hmod,
-                "??0Exception@Platform@@Q$AAA@HP$AAVString@1@@Z");
-        p_platform_COMException_ctor = (void *)GetProcAddress(hmod, "??0COMException@Platform@@Q$AAA@H@Z");
-        p_platform_COMException_hstring_ctor = (void *)GetProcAddress(hmod,
-                "??0COMException@Platform@@Q$AAA@HP$AAVString@1@@Z");
-#define WINRT_EXCEPTION(name, ...) do { \
-    p_platform_##name##Exception_ctor = (void *)GetProcAddress(hmod, \
-            "??0" #name "Exception@Platform@@Q$AAA@XZ");                     \
-    p_platform_##name##Exception_hstring_ctor = (void *)GetProcAddress(hmod, \
-            "??0" #name "Exception@Platform@@Q$AAA@P$AAVString@1@@Z");       \
-    } while(0);
-        WINRT_EXCEPTIONS
-#undef WINRT_EXCEPTION
-        p_GetWeakReference = (void *)GetProcAddress(hmod,
-               "?GetWeakReference@Details@Platform@@YGPAU__abi_IUnknown@@Q$ADVObject@2@@Z");
-        p_ResolveWeakReference = (void *)GetProcAddress(hmod,
-                "?ResolveWeakReference@Details@Platform@@YGP$AAVObject@2@ABU_GUID@@PAPAU__abi_IUnknown@@@Z");
-        p__abi_ObjectToString = (void *)GetProcAddress(hmod,
-                "?__abi_ObjectToString@__abi_details@@YGP$AAVString@Platform@@P$AAVObject@3@_N@Z");
-        p_Boolean_ToString = (void *)GetProcAddress(hmod, "?ToString@Boolean@Platform@@QAAP$AAVString@2@XZ");
-        p_Guid_ToString = (void *)GetProcAddress(hmod, "?ToString@Guid@Platform@@QAAP$AAVString@2@XZ");
-        p_char16_ToString = (void *)GetProcAddress(hmod, "?ToString@char16@default@@QAAP$AAVString@Platform@@XZ");
-        p_float32_ToString = (void *)GetProcAddress(hmod, "?ToString@float32@default@@QAAP$AAVString@Platform@@XZ");
-        p_float64_ToString = (void *)GetProcAddress(hmod, "?ToString@float64@default@@QAAP$AAVString@Platform@@XZ");
-        p_int16_ToString = (void *)GetProcAddress(hmod, "?ToString@int16@default@@QAAP$AAVString@Platform@@XZ");
-        p_int32_ToString = (void *)GetProcAddress(hmod, "?ToString@int32@default@@QAAP$AAVString@Platform@@XZ");
-        p_int64_ToString = (void *)GetProcAddress(hmod, "?ToString@int64@default@@QAAP$AAVString@Platform@@XZ");
-        p_int8_ToString = (void *)GetProcAddress(hmod, "?ToString@int8@default@@QAAP$AAVString@Platform@@XZ");
-        p_uint16_ToString = (void *)GetProcAddress(hmod, "?ToString@uint16@default@@QAAP$AAVString@Platform@@XZ");
-        p_uint32_ToString = (void *)GetProcAddress(hmod, "?ToString@uint32@default@@QAAP$AAVString@Platform@@XZ");
-        p_uint64_ToString = (void *)GetProcAddress(hmod, "?ToString@uint64@default@@QAAP$AAVString@Platform@@XZ");
-        p_uint8_ToString = (void *)GetProcAddress(hmod, "?ToString@uint8@default@@QAAP$AAVString@Platform@@XZ");
-        p_Delegate_ctor = (void *)GetProcAddress(hmod, "??0Delegate@Platform@@Q$AAA@XZ");
-        p_EventSourceInitialize = (void *)GetProcAddress(hmod, "?EventSourceInitialize@Details@Platform@@YGXPAPAX@Z");
-        p_EventSourceUninitialize = (void *)GetProcAddress(hmod,
-                "?EventSourceUninitialize@Details@Platform@@YGXPAPAX@Z");
-        p_EventSourceAdd = (void *)GetProcAddress(hmod,
-                "?EventSourceAdd@Details@Platform@@YG?AVEventRegistrationToken@Foundation@Windows@@PAPAXPAUEventLock@12@P$AAVDelegate@2@@Z");
-        p_EventSourceRemove = (void *)GetProcAddress(hmod,
-                "?EventSourceRemove@Details@Platform@@YGXPAPAXPAUEventLock@12@VEventRegistrationToken@Foundation@Windows@@@Z");
-        p_EventSourceGetTargetArray = (void *)GetProcAddress(hmod,
-                "?EventSourceGetTargetArray@Details@Platform@@YGPAXPAXPAUEventLock@12@@Z");
-        p_EventSourceGetTargetArrayEvent = (void *)GetProcAddress(hmod,
-                "?EventSourceGetTargetArrayEvent@Details@Platform@@YGPAXPAXIPBXPA_J@Z");
-        p_EventSourceGetTargetArraySize = (void *)GetProcAddress(hmod,
-                "?EventSourceGetTargetArraySize@Details@Platform@@YGIPAX@Z");
-
-        p_type_info_name = (void *)GetProcAddress(msvcrt, "?name@type_info@@QBEPBDXZ");
-        p_type_info_raw_name = (void *)GetProcAddress(msvcrt, "?raw_name@type_info@@QBEPBDXZ");
-        p_type_info_opequals_equals = (void *)GetProcAddress(msvcrt, "??8type_info@@QBEHABV0@@Z");
-        p_type_info_opnot_equals = (void *)GetProcAddress(msvcrt, "??9type_info@@QBEHABV0@@Z");
     }
 #endif
     ok(pGetActivationFactoryByPCWSTR != NULL, "GetActivationFactoryByPCWSTR not available\n");
@@ -485,51 +215,6 @@ static BOOL init(void)
     ok(p_platform_type_ToString != NULL, "Platform::Type::ToString not available\n");
     ok(p_platform_type_get_FullName != NULL, "Platform::Type::FullName not available\n");
     ok(pCreateValue != NULL, "CreateValue not available\n");
-    ok(pCreateException != NULL, "CreateException not available\n");
-    ok(pCreateExceptionWithMessage != NULL, "CreateExceptionWithMessage not available\n");
-    ok(p_platform_exception_get_Message != NULL, "Platform::Exception::Message::get not available\n");
-    ok(p_platform_exception_ToString != NULL, "Platform::Exception::ToString not available\n");
-    ok(pAllocateException != NULL, "AllocateException not available\n");
-    ok(pAllocateExceptionWithWeakRef != NULL, "AllocateExceptionWithWeakRef not available.\n");
-    ok(pFreeException != NULL, "FreeException not available\n");
-    ok(p_platform_Exception_ctor != NULL, "Platform::Exception not available.\n");
-    ok(p_platform_Exception_hstring_ctor != NULL, "Platform::Exception(HRESULT, HSTRING) not available.\n");
-    ok(p_platform_COMException_ctor != NULL, "Platform::COMException not available.\n");
-    ok(p_platform_COMException_hstring_ctor != NULL, "Platform::COMException(HRESULT, HSTRING) not available.\n");
-#define WINRT_EXCEPTION(name, ...) do {                                                                              \
-    ok(p_platform_##name##Exception_ctor != NULL, "Platform::" #name "Exception not available.\n");          \
-    ok(p_platform_##name##Exception_hstring_ctor != NULL, "Platform::" #name "Exception(HSTRING) not available.\n"); \
-    } while(0);
-    WINRT_EXCEPTIONS
-#undef WINRT_EXCEPTION
-    ok(p_GetWeakReference != NULL, "GetWeakReference not available.\n");
-    ok(p_ResolveWeakReference != NULL, "ResolveWeakReference is not available.\n");
-    ok(p__abi_ObjectToString != NULL, "__abi_ObjectToString not available.\n");
-    ok(p_Boolean_ToString != NULL, "Platform::Boolean::ToString not available.\n");
-    ok(p_Guid_ToString != NULL, "Platform::Guid::ToString not available.\n");
-    ok(p_char16_ToString != NULL, "default::char16::ToString not available.\n");
-    ok(p_float32_ToString != NULL, "default::float32::ToString not available.\n");
-    ok(p_float64_ToString != NULL, "default::float64::ToString not available.\n");
-    ok(p_int16_ToString != NULL, "default::int16::ToString not available.\n");
-    ok(p_int32_ToString != NULL, "default::int32::ToString not available.\n");
-    ok(p_int64_ToString != NULL, "default::int64::ToString not available.\n");
-    ok(p_int8_ToString != NULL, "default::int8::ToString not available.\n");
-    ok(p_uint16_ToString != NULL, "default::uint16::ToString not available.\n");
-    ok(p_uint32_ToString != NULL, "default::uint32::ToString not available.\n");
-    ok(p_uint64_ToString != NULL, "default::uint64::ToString not available.\n");
-    ok(p_uint8_ToString != NULL, "default::uint8::ToString not available.\n");
-    ok(p_Delegate_ctor != NULL, "Platform::Delegate not available.\n");
-    ok(p_EventSourceInitialize != NULL, "Platform::EventSourceInitialize not available.\n");
-    ok(p_EventSourceAdd != NULL, "Platform::Details::EventSourceAdd not available.\n");
-    ok(p_EventSourceRemove != NULL, "Platform::Details::EventSourceRemove not available.\n");
-    ok(p_EventSourceGetTargetArray != NULL, "Platform::Details::EventSourceGetTargetArray not available.\n");
-    ok(p_EventSourceGetTargetArrayEvent != NULL, "Platform::Details::EventSourceGetTargetArrayEvent not available.\n");
-    ok(p_EventSourceGetTargetArraySize != NULL, "Platform::Details::EventSourceGetTargetArrayEvent not available.\n");
-
-    ok(p_type_info_name != NULL, "type_info::name not available\n");
-    ok(p_type_info_raw_name != NULL, "type_info::raw_name not available\n");
-    ok(p_type_info_opequals_equals != NULL, "type_info::operator== not available\n");
-    ok(p_type_info_opnot_equals != NULL, "type_info::operator!= not available\n");
 
     init_thiscall_thunk();
 
@@ -704,7 +389,7 @@ static void test_GetActivationFactoryByPCWSTR(void)
 
 static void test_GetIidsFn(void)
 {
-    const GUID guids_src[] = {IID_IUnknown, IID_IInspectable, IID_IAgileObject, IID_IMarshal, guid_null};
+    static const GUID guids_src[] = {IID_IUnknown, IID_IInspectable, IID_IAgileObject, IID_IMarshal, guid_null};
     GUID *guids_dest;
     UINT32 copied;
     HRESULT hr;
@@ -729,7 +414,7 @@ static void test_GetIidsFn(void)
 
 static void test_Allocate(void)
 {
-    void *addr, **ptr, **base;
+    void *addr;
 
     addr = pAllocate(0);
     ok(!!addr, "got addr %p\n", addr);
@@ -739,34 +424,6 @@ static void test_Allocate(void)
     ok(!!addr, "got addr %p\n", addr);
     pFree(addr);
     pFree(NULL);
-
-    /* AllocateException allocates additional space for two pointer-width fields, with the second field used as the
-     * back-pointer to the exception data. */
-    addr = pAllocateException(0);
-    ok(!!addr, "got addr %p\n", addr);
-    ptr = (void **)((ULONG_PTR)addr - sizeof(void *));
-    *ptr = NULL; /* The write should succeed. */
-    base = (void **)((ULONG_PTR)addr - 2 * sizeof(void *));
-    *base = NULL;
-    /* Since base is the actual allocation base, Free(base) should succeed. */
-    pFree(base);
-
-    addr = pAllocateException(sizeof(void *));
-    ok(!!addr, "got addr %p\n", addr);
-    ptr = (void **)((ULONG_PTR)addr - sizeof(void *));
-    *ptr = NULL;
-    base = (void **)((ULONG_PTR)addr - 2 * sizeof(void *));
-    *base = NULL;
-    /* FreeException will derive the allocation base itself. */
-    pFreeException(addr);
-
-    /* Do what AllocateException does, manually. */
-    base = pAllocate(sizeof(void *) * 2 + sizeof(UINT32));
-    ok(!!base, "got base %p\n", base);
-    /* addr is what AllocateException would return. */
-    addr = (void *)((ULONG_PTR)base + sizeof(void *) * 2);
-    /* FreeException should succeed with addr. */
-    pFreeException(addr);
 }
 
 #define test_refcount(a, b) test_refcount_(__LINE__, (a), (b))
@@ -786,10 +443,9 @@ struct control_block
     LONG ref_strong;
     IUnknown *object;
     bool is_inline;
-    bool unknown;
-    bool is_exception;
+    UINT16 unknown;
 #ifdef _WIN32
-    char _padding[5];
+    char _padding[4];
 #endif
 };
 
@@ -921,7 +577,6 @@ static void test_AllocateWithWeakRef_inline(void)
     ok(object->weakref->object == &object->IUnknown_iface, "got object %p != %p\n", object->weakref->object,
        &object->IUnknown_iface);
     ok(object->weakref->unknown == 0, "got unknown %d\n", object->weakref->unknown);
-    ok(!object->weakref->is_exception, "got is_exception %d\n", object->weakref->is_exception);
     /* The object is allocate within the weakref. */
     ok((char *)object->weakref == ((char *)object - sizeof(struct control_block)), "got %p != %p\n", object->weakref,
        (char *)object - sizeof(struct control_block));
@@ -979,7 +634,6 @@ static void test_AllocateWithWeakRef(void)
     ok(object->weakref->object == &object->IUnknown_iface, "got object %p != %p\n", object->weakref->object,
        &object->IUnknown_iface);
     ok(object->weakref->unknown == 0, "got unknown %d\n", object->weakref->unknown);
-    ok(!object->weakref->is_exception, "got is_exception %d\n", object->weakref->is_exception);
 
     hr = IWeakReference_Resolve(weakref, &IID_IAgileObject, (IInspectable **)&out);
     ok(hr == S_OK, "got hr %#lx\n", hr);
@@ -1004,158 +658,6 @@ static void test_AllocateWithWeakRef(void)
     ok(out == (IUnknown *)0xdeadbeef, "got out %p\n", out);
     count = IWeakReference_Release(weakref);
     ok(count == 0, "got count %lu\n", count);
-
-    /* AllocateExceptionWithWeakRef will not store the control block inline, regardless of the size. */
-    object = pAllocateExceptionWithWeakRef(offsetof(struct unknown_impl, weakref), sizeof(struct unknown_impl));
-    ok(object != NULL, "got object %p\n", object);
-
-    object->strong_ref_free_val = -100;
-    ok(object->weakref != NULL, "got weakref %p\n", object->weakref);
-    object->IUnknown_iface.lpVtbl = &unknown_impl_vtbl;
-    weakref = &object->weakref->IWeakReference_iface;
-
-    test_refcount(weakref, 1);
-    ok(!object->weakref->is_inline, "got is_inline %d\n", object->weakref->is_inline);
-    ok(object->weakref->ref_strong == 1, "got ref_strong %lu\n", object->weakref->ref_strong);
-    ok(object->weakref->object == &object->IUnknown_iface, "got object %p != %p\n", object->weakref->object,
-       &object->IUnknown_iface);
-    ok(object->weakref->unknown == 0, "got unknown %d\n", object->weakref->unknown);
-    ok(object->weakref->is_exception, "got is_exception %d\n", object->weakref->is_exception);
-
-    hr = IWeakReference_Resolve(weakref, &IID_IAgileObject, (IInspectable **)&out);
-    ok(hr == S_OK, "got hr %#lx\n", hr);
-    test_refcount(&object->IUnknown_iface, 2);
-    IUnknown_Release(out);
-
-    call_func1(pReleaseTarget, object->weakref);
-    hr = IWeakReference_Resolve(weakref, &IID_IAgileObject, (IInspectable **)&out);
-    ok(hr == S_OK, "got hr %#lx\n", hr);
-    test_refcount(&object->IUnknown_iface, 2);
-    IUnknown_Release(out);
-
-    count = IWeakReference_AddRef(weakref);
-    ok(count == 2, "got count %lu\n", count);
-
-    count = IUnknown_Release(&object->IUnknown_iface);
-    ok(count == 0, "got count %lu\n", count);
-    test_refcount(weakref, 1);
-    out = (IUnknown *)0xdeadbeef;
-    hr = IWeakReference_Resolve(weakref, &IID_IAgileObject, (IInspectable **)&out);
-    ok(hr == S_OK, "got hr %#lx\n", hr);
-    ok(out == (IUnknown *)0xdeadbeef, "got out %p\n", out);
-    count = IWeakReference_Release(weakref);
-    ok(count == 0, "got count %lu\n", count);
-}
-
-struct weakref_src_impl
-{
-    IWeakReferenceSource IWeakReferenceSource_iface;
-    struct control_block *block;
-};
-
-static inline struct weakref_src_impl *impl_from_IWeakReferenceSource(IWeakReferenceSource *iface)
-{
-    return CONTAINING_RECORD(iface, struct weakref_src_impl, IWeakReferenceSource_iface);
-}
-
-static HRESULT WINAPI weakref_src_QueryInterface(IWeakReferenceSource *iface, const GUID *iid, void **out)
-{
-    struct weakref_src_impl *impl = impl_from_IWeakReferenceSource(iface);
-
-    if (IsEqualGUID(iid, &IID_IUnknown) || IsEqualGUID(iid, &IID_IWeakReferenceSource))
-    {
-        IWeakReferenceSource_AddRef((*out = &impl->IWeakReferenceSource_iface));
-        return S_OK;
-    }
-
-    *out = NULL;
-    return E_NOINTERFACE;
-}
-
-static ULONG WINAPI weakref_src_AddRef(IWeakReferenceSource *iface)
-{
-    struct weakref_src_impl *impl = impl_from_IWeakReferenceSource(iface);
-    return InterlockedIncrement(&impl->block->ref_strong);
-}
-
-static ULONG WINAPI weakref_src_Release(IWeakReferenceSource *iface)
-{
-    struct weakref_src_impl *impl = impl_from_IWeakReferenceSource(iface);
-    ULONG ref = InterlockedDecrement(&impl->block->ref_strong);
-
-    if (!ref)
-    {
-        struct control_block *block = impl->block;
-        /* ReleaseTarget only frees the object if ref_strong < 0. */
-        WriteNoFence(&impl->block->ref_strong, -1);
-        call_func1(pReleaseTarget, block);
-        IWeakReference_Release(&block->IWeakReference_iface);
-    }
-    return ref;
-}
-
-static HRESULT WINAPI weakref_src_GetWeakReference(IWeakReferenceSource *iface, IWeakReference **out)
-{
-    struct weakref_src_impl *impl = impl_from_IWeakReferenceSource(iface);
-    IWeakReference_AddRef((*out = &impl->block->IWeakReference_iface));
-    return S_OK;
-}
-
-static const IWeakReferenceSourceVtbl weakref_src_vtbl =
-{
-    weakref_src_QueryInterface,
-    weakref_src_AddRef,
-    weakref_src_Release,
-    weakref_src_GetWeakReference,
-};
-
-static void test_GetWeakReference(void)
-{
-    struct weakref_src_impl *obj;
-    struct control_block *block;
-    IWeakReference *weakref;
-    IUnknown *unk;
-    ULONG count;
-    HRESULT hr;
-
-    obj = pAllocateWithWeakRef(offsetof(struct weakref_src_impl, block), sizeof(*obj));
-    ok(obj != NULL, "got impl %p\n", obj);
-    obj->IWeakReferenceSource_iface.lpVtbl = &weakref_src_vtbl;
-    block = obj->block;
-
-    /* This is just a wrapper around QueryInterface(IID_IWeakReferenceSource) + IWeakReferenceSource::GetWeakReference. */
-    weakref = p_GetWeakReference((IUnknown *)&obj->IWeakReferenceSource_iface);
-    ok(weakref == &obj->block->IWeakReference_iface, "got weakref %p != %p\n", weakref,
-                 &obj->block->IWeakReference_iface);
-    ok(obj->block->ref_weak == 2, "got ref_weak %lu\n", obj->block->ref_weak);
-    ok(obj->block->ref_strong == 1, "got ref_strong %lu\n", obj->block->ref_strong);
-
-    hr = IWeakReference_Resolve(weakref, &IID_IUnknown, (IInspectable **)&unk);
-    ok(hr == S_OK, "got hr %#lx\n", hr);
-    ok(unk != NULL, "got unk %p\n", unk);
-    count = IUnknown_Release(unk);
-    ok(count == 1, "got count %lu\n", count);
-
-    /* Wrapper around IWeakReference_Resolve(*weakref, ...). */
-    unk = p_ResolveWeakReference(&IID_IUnknown, &weakref);
-    ok(unk != NULL, "got unk %p\n", unk);
-    IUnknown_Release(unk);
-    count = IUnknown_Release(unk);
-    ok(count == 0, "got count %lu\n", count);
-    ok(block->ref_weak == 1, "got ref_weak %lu\n", block->ref_weak);
-
-    unk = NULL;
-    hr = IWeakReference_Resolve(weakref, &IID_IUnknown, (IInspectable **)&unk);
-    ok(hr == S_OK, "got hr %#lx\n", hr);
-    ok(unk == NULL, "got unk %p\n", unk);
-
-    count = IWeakReference_Release(weakref);
-    ok(count == 0, "got count %lu\n", count);
-
-    /* ResolveWeakReference returns NULL if *weakref is NULL. */
-    weakref = NULL;
-    unk = p_ResolveWeakReference(&IID_IUnknown, &weakref);
-    ok(unk == NULL, "got unk %p.\n", unk);
 }
 
 #define check_interface(o, i) check_interface_(__LINE__, (o), (i))
@@ -1176,11 +678,9 @@ DEFINE_GUID(IID_IPrintable,0xde0cbaeb,0x8065,0x4a45,0x96,0xb1,0xc9,0xd4,0x43,0xf
 static void test___abi_make_type_id(void)
 {
     const struct __abi_type_descriptor desc = {L"foo", 0xdeadbeef}, desc2 = {L"foo", 0xdeadbeef}, desc3 = {NULL, 1};
-    void *type_obj, *type_obj2, *type_info, *type_info2;
-    const char *name, *raw_name;
-    IClosable *closable;
-    int typecode, ret;
+    void *type_obj, *type_obj2;
     const WCHAR *buf;
+    int typecode;
     HSTRING str;
     ULONG count;
     bool equals;
@@ -1199,7 +699,7 @@ static void test___abi_make_type_id(void)
     check_interface(type_obj, &IID_IMarshal);
     check_interface(type_obj, &IID_IAgileObject);
     todo_wine check_interface(type_obj, &IID_IEquatable);
-    check_interface(type_obj, &IID_IPrintable);
+    todo_wine check_interface(type_obj, &IID_IPrintable);
 
     hr = IInspectable_GetRuntimeClassName(type_obj, &str);
     ok(hr == S_OK, "got hr %#lx\n", hr);
@@ -1226,50 +726,16 @@ static void test___abi_make_type_id(void)
     ok(buf && !wcscmp(buf, L"foo"), "got buf %s != %s\n", debugstr_w(buf), debugstr_w(L"foo"));
     WindowsDeleteString(str);
 
-    str = p__abi_ObjectToString(type_obj, FALSE);
-    buf = WindowsGetStringRawBuffer(str, NULL);
-    ok(buf && !wcscmp(buf, L"Platform.Type"), "got buf %s != %s\n", debugstr_w(buf), debugstr_w(L"Platform.Type"));
-    WindowsDeleteString(str);
-
-    str = p__abi_ObjectToString(type_obj, TRUE);
-    buf = WindowsGetStringRawBuffer(str, NULL);
-    ok(buf && !wcscmp(buf, L"foo"), "got buf %s != %s\n", debugstr_w(buf), debugstr_w(L"foo"));
-    WindowsDeleteString(str);
-
     type_obj2 = p___abi_make_type_id(&desc);
     ok(type_obj2 != NULL, "got type_obj %p\n", type_obj);
     ok(type_obj2 != type_obj, "got type_obj2 %p\n", type_obj2);
-
-    type_info = p__RTtypeid(type_obj);
-    ok(type_info != NULL, "got type_info %p\n", type_info);
-    name = (char *)call_func1(p_type_info_name, type_info);
-    ok(!strcmp(name, "class Platform::Type"), "got name %s\n", debugstr_a(name));
-    raw_name = (char *)call_func1(p_type_info_raw_name, type_info);
-    ok(!strcmp(raw_name, ".?AVType@Platform@@"), "got raw_name %s\n", debugstr_a(raw_name));
-
-    hr = IInspectable_QueryInterface(type_obj, &IID_IClosable, (void **)&closable);
-    ok(hr == S_OK, "got hr %#lx\n", hr);
-    type_info2 = p__RTtypeid(closable);
-    ok(type_info2 != NULL, "got type_info %p\n", type_info2);
-    name = (char *)call_func1(p_type_info_name, type_info2);
-    ok(!strcmp(name, "class Platform::Type"), "got name %s\n", debugstr_a(name));
-
-    raw_name = (char *)call_func1(p_type_info_raw_name, type_info2);
-    ok(!strcmp(raw_name, ".?AVType@Platform@@"), "got raw_name %s\n", debugstr_a(raw_name));
-
-    ret = call_func2(p_type_info_opequals_equals, type_info, type_info2);
-    ok(ret, "got ret %d\n", ret);
-    ret = call_func2(p_type_info_opnot_equals, type_info, type_info2);
-    ok(!ret, "got ret %d\n", ret);
-
-    IClosable_Release(closable);
 
     check_interface(type_obj2, &IID_IInspectable);
     check_interface(type_obj2, &IID_IClosable);
     check_interface(type_obj2, &IID_IMarshal);
     check_interface(type_obj2, &IID_IAgileObject);
     todo_wine check_interface(type_obj2, &IID_IEquatable);
-    check_interface(type_obj2, &IID_IPrintable);
+    todo_wine check_interface(type_obj2, &IID_IPrintable);
 
     equals = p_platform_type_Equals_Object(type_obj2, type_obj);
     ok(equals, "got equals %d\n", equals);
@@ -1351,31 +817,29 @@ static void test_CreateValue(void)
         Size size;
         Rect rect;
     };
-    const struct {
+    static const struct {
         int typecode;
         union value value;
         PropertyType exp_winrt_type;
         SIZE_T size;
-        const WCHAR *exp_str;
     } test_cases[] = {
-        {TYPECODE_BOOLEAN, {.boolean = true}, PropertyType_Boolean, sizeof(boolean), L"true"},
-        {TYPECODE_CHAR16, {.uint16 = 0xbeef}, PropertyType_Char16, sizeof(UINT16), L"\xbeef"},
-        {TYPECODE_UINT8, {.uint8 = 0xbe}, PropertyType_UInt8, sizeof(UINT8), L"190"},
-        {TYPECODE_INT16, {.uint16 = 0xbeef}, PropertyType_Int16, sizeof(INT16), L"-16657"},
-        {TYPECODE_UINT16, {.uint16 = 0xbeef}, PropertyType_UInt16, sizeof(UINT16), L"48879"},
-        {TYPECODE_INT32, {.uint32 = 0xdeadbeef}, PropertyType_Int32, sizeof(INT32), L"-559038737"},
-        {TYPECODE_UINT32, {.uint32 = 0xdeadbeef}, PropertyType_UInt32, sizeof(UINT32), L"3735928559"},
-        {TYPECODE_INT64, {.uint64 = 0xdeadbeefdeadbeef}, PropertyType_Int64, sizeof(INT64), L"-2401053088876216593"},
-        {TYPECODE_UINT64, {.uint64 = 0xdeadbeefdeadbeef}, PropertyType_UInt64, sizeof(UINT64), L"16045690984833335023"},
-        {TYPECODE_SINGLE, {.single = 2.71828}, PropertyType_Single, sizeof(FLOAT), L"2.71828"},
-        {TYPECODE_SINGLE, {.single = 2.71828182}, PropertyType_Single, sizeof(FLOAT), L"2.71828"},
-        {TYPECODE_DOUBLE, {.dbl = 2.7182818284}, PropertyType_Double, sizeof(DOUBLE), L"2.71828"},
+        {TYPECODE_BOOLEAN, {.boolean = true}, PropertyType_Boolean, sizeof(boolean)},
+        {TYPECODE_CHAR16, {.uint16 = 0xbeef}, PropertyType_Char16, sizeof(UINT16)},
+        {TYPECODE_UINT8, {.uint8 = 0xbe}, PropertyType_UInt8, sizeof(UINT8)},
+        {TYPECODE_INT16, {.uint16 = 0xbeef}, PropertyType_Int16, sizeof(INT16)},
+        {TYPECODE_UINT16, {.uint16 = 0xbeef}, PropertyType_UInt16, sizeof(UINT16)},
+        {TYPECODE_INT32, {.uint32 = 0xdeadbeef}, PropertyType_Int32, sizeof(INT32)},
+        {TYPECODE_UINT32, {.uint32 = 0xdeadbeef}, PropertyType_UInt32, sizeof(UINT32)},
+        {TYPECODE_INT64, {.uint64 = 0xdeadbeefdeadbeef}, PropertyType_Int64, sizeof(INT64)},
+        {TYPECODE_UINT64, {.uint64 = 0xdeadbeefdeadbeef}, PropertyType_UInt64, sizeof(UINT64)},
+        {TYPECODE_SINGLE, {.single = 2.71828}, PropertyType_Single, sizeof(FLOAT)},
+        {TYPECODE_DOUBLE, {.dbl = 2.7182818284}, PropertyType_Double, sizeof(DOUBLE)},
         {TYPECODE_DATETIME, {.time = {0xdeadbeefdeadbeef}}, PropertyType_DateTime, sizeof(DateTime)},
         {TYPECODE_TIMESPAN, {.span = {0xdeadbeefdeadbeef}}, PropertyType_TimeSpan, sizeof(TimeSpan)},
         {TYPECODE_POINT, {.point = {2.71828, 3.14159}}, PropertyType_Point, sizeof(Point)},
         {TYPECODE_SIZE, {.size = {2.71828, 3.14159}}, PropertyType_Size, sizeof(Size)},
         {TYPECODE_RECT, {.rect = {2.71828, 3.14159, 23.140692, 0.20787}}, PropertyType_Rect, sizeof(Rect)},
-        {TYPECODE_GUID, {.guid = IID_IInspectable}, PropertyType_Guid, sizeof(GUID), L"{af86e2e0-b12d-4c6a-9c5a-d7aa65101e90}"},
+        {TYPECODE_GUID, {.guid = IID_IInspectable}, PropertyType_Guid, sizeof(GUID)},
     };
     static const int null_typecodes[] = {0, 1, 2, 5,15, 17};
     PropertyType type;
@@ -1391,9 +855,6 @@ static void test_CreateValue(void)
     for (i = 0; i < ARRAY_SIZE(test_cases); i++)
     {
         union value value = {0};
-        const WCHAR *exp_str;
-        HSTRING name = NULL;
-
         type = PropertyType_Empty;
 
         winetest_push_context("test_cases[%lu]", i);
@@ -1403,28 +864,6 @@ static void test_CreateValue(void)
 
         check_interface(obj, &IID_IInspectable);
         check_interface(obj, &IID_IPropertyValue);
-
-        if (!(exp_str = test_cases[i].exp_str))
-        {
-            /* For record-like values, __abi_ObjectToString returns the string from GetRuntimeClassName. */
-            hr = IPropertyValue_GetRuntimeClassName(obj, &name);
-            todo_wine ok(hr == S_OK, "got hr %#lx\n", hr);
-            exp_str = WindowsGetStringRawBuffer(name, NULL);
-        }
-
-        if (wcslen(exp_str))
-        {
-            str = p__abi_ObjectToString(obj, FALSE);
-            buf = WindowsGetStringRawBuffer(str, NULL);
-            ok(!wcscmp(buf, exp_str), "got str %s != %s\n", debugstr_hstring(str), debugstr_w(exp_str));
-            WindowsDeleteString(str);
-
-            str = p__abi_ObjectToString(obj, TRUE);
-            buf = WindowsGetStringRawBuffer(str, NULL);
-            ok(!wcscmp(buf, exp_str), "got str %s != %s\n", debugstr_hstring(str), debugstr_w(exp_str));
-            WindowsDeleteString(str);
-        }
-        WindowsDeleteString(name);
 
         hr = IPropertyValue_get_Type(obj, &type);
         ok(hr == S_OK, "got hr %#lx\n", hr);
@@ -1512,17 +951,6 @@ static void test_CreateValue(void)
         buf = WindowsGetStringRawBuffer(str, NULL);
         ok(buf && !wcscmp(buf, L"foo"), "got buf %s\n", debugstr_w(buf));
         WindowsDeleteString(str);
-
-        str = p__abi_ObjectToString(obj, TRUE);
-        buf = WindowsGetStringRawBuffer(str, NULL);
-        ok(!wcscmp(buf, L"foo"), "got buf %s\n", debugstr_w(buf));
-        WindowsDeleteString(str);
-
-        str = p__abi_ObjectToString(obj, FALSE);
-        buf = WindowsGetStringRawBuffer(str, NULL);
-        ok(!wcscmp(buf, L"foo"), "got buf %s\n", debugstr_w(buf));
-        WindowsDeleteString(str);
-
         count = IPropertyValue_Release(obj);
         ok(count == 0, "got count %lu\n", count);
     }
@@ -1533,1094 +961,7 @@ static void test_CreateValue(void)
         ok(obj == NULL, "got obj %p\n", obj);
     }
 
-    pUninitializeData(1);
-}
-
-#define CLASS_IS_SIMPLE_TYPE          1
-#define CLASS_HAS_VIRTUAL_BASE_CLASS  4
-#define CLASS_IS_IUNKNOWN             8
-
-#define TYPE_FLAG_CONST      1
-#define TYPE_FLAG_VOLATILE   2
-#define TYPE_FLAG_REFERENCE  8
-#define TYPE_FLAG_IUNKNOWN  16
-
-typedef struct __type_info
-{
-    const void *vtable;
-    char *name;
-    char mangled[128];
-} rtti_type_info;
-
-typedef struct
-{
-    UINT flags;
-    unsigned int type_info;
-    DWORD offsets[3];
-    unsigned int size;
-    unsigned int copy_ctor;
-} cxx_type_info;
-
-typedef struct
-{
-    UINT count;
-    unsigned int info[1];
-} cxx_type_info_table;
-
-typedef struct
-{
-    UINT flags;
-    unsigned int destructor;
-    unsigned int custom_handler;
-    unsigned int type_info_table;
-} cxx_exception_type;
-
-struct exception_inner
-{
-    /* This only gets set when the exception is thrown. */
-    BSTR description;
-    /* Likewise, but can also be set by CreateExceptionWithMessage. */
-    BSTR restricted_desc;
-    void *unknown1;
-    void *unknown2;
-    HRESULT hr;
-    /* Only gets set when the exception is thrown. */
-    IRestrictedErrorInfo *error_info;
-    const cxx_exception_type *exception_type;
-    UINT32 unknown3;
-    /* Called before the exception is thrown by _CxxThrowException. */
-    void (*WINAPI set_exception_info)(struct exception_inner **);
-};
-
-struct platform_exception
-{
-    IInspectable IInspectable_iface;
-    const void *IPrintable_iface;
-    const void *IEquatable_iface;
-    IClosable IClosable_iface;
-    struct exception_inner inner;
-    /* Exceptions use the weakref control block for reference counting, even though they don't implement
-     * IWeakReferenceSource. */
-    struct control_block *control_block;
-    /* This is lazily initialized, i.e, only when QueryInterface(IID_IMarshal) gets called.
-     * The default value is UINTPTR_MAX/-1 */
-    IUnknown *marshal;
-};
-
-static void test_interface_layout_(int line, IUnknown *iface, const GUID *iid, const void *exp_ptr)
-{
-    IUnknown *out = NULL;
-    HRESULT hr;
-
-    hr = IUnknown_QueryInterface(iface, iid, (void **)&out);
-    ok_(__FILE__, line)(hr == S_OK, "got hr %#lx\n", hr);
-    if (SUCCEEDED(hr))
-    {
-        ok_(__FILE__, line)((ULONG_PTR)out == (ULONG_PTR)exp_ptr, "got out %p != %p\n", out, exp_ptr);
-        IUnknown_Release(out);
-    }
-}
-#define test_interface_layout(iface, iid, exp_ptr) test_interface_layout_(__LINE__, (IUnknown *)(iface), iid, exp_ptr)
-
-static void test_exceptions(void)
-{
-#define EXCEPTION_RTTI_NAME(name) (sizeof(void *) == 8) ? \
-    ".PE$AAV" #name "Exception@Platform@@" : ".P$AAV" #name "Exception@Platform@@"
-#define WINRT_EXCEPTION(name, hr)                \
-    {hr,                                         \
-     L"Platform." #name "Exception",             \
-     ".?AV" #name "Exception@Platform@@",        \
-     "class Platform::" #name "Exception",       \
-     EXCEPTION_RTTI_NAME(name),                  \
-     p_platform_##name##Exception_ctor,  \
-     p_platform_##name##Exception_hstring_ctor},
-    const struct exception_test_case
-    {
-        HRESULT hr;
-        const WCHAR *exp_winrt_name;
-        const char *exp_rtti_mangled_name;
-        const char *exp_rtti_name;
-        /* The mangled RTTI name of the cxx_exception_type received by the exception handler/filter. */
-        const char *exp_exception_rtti_mangled_name;
-        void *(__cdecl *ctor)(void *); /* The default constructor for this exception class */
-        void *(__cdecl *hstring_ctor)(void *, HSTRING);
-    } test_cases[] = {
-        WINRT_EXCEPTIONS
-        /* Generic exceptions */
-        {E_HANDLE, L"Platform.COMException", ".?AVCOMException@Platform@@",
-            "class Platform::COMException", EXCEPTION_RTTI_NAME(COM)},
-        {0xdeadbeef, L"Platform.COMException", ".?AVCOMException@Platform@@",
-            "class Platform::COMException", EXCEPTION_RTTI_NAME(COM)},
-    };
-#undef EXCEPTION_RTTI_NAME
-#undef WINRT_EXCEPTION
-
-#ifdef __i386__
-    const ULONG_PTR base = 0;
-#else
-    const ULONG_PTR base = (ULONG_PTR)hmod;
-#endif
-    const struct exception_test_case *cur_test;
-    static const WCHAR *msg_bufW = L"foo";
-    HSTRING_HEADER hdr;
-    HSTRING msg;
-    HRESULT hr;
-    ULONG i;
-
-    hr = WindowsCreateStringReference(msg_bufW, wcslen(msg_bufW), &hdr, &msg);
-    ok(hr == S_OK, "got hr %#lx\n", hr);
-
-    for (i = 0; i < ARRAY_SIZE(test_cases); i++)
-    {
-        const cxx_type_info_table *type_info_table;
-        const char *rtti_name, *rtti_raw_name;
-        const struct exception_inner *inner;
-        IRestrictedErrorInfo *error_info;
-        const rtti_type_info *rtti_info;
-        const cxx_exception_type *type;
-        struct platform_exception *obj;
-        const cxx_type_info *cxx_info;
-        IInspectable *inspectable;
-        const WCHAR *bufW;
-        INT32 j, ret = 0;
-        void *type_info;
-        WCHAR buf[256];
-        BOOL desc_todo;
-        IUnknown *out;
-        HSTRING str;
-        ULONG count;
-        HRESULT hr;
-        GUID *iids;
-
-        winetest_push_context("test_cases[%lu]", i);
-
-        cur_test = &test_cases[i];
-        obj = pCreateException(cur_test->hr);
-        ok(obj != NULL, "got obj %p\n", obj);
-
-        inspectable = (IInspectable *)obj;
-        /* Verify that the IMarshal field is lazily-initialized. */
-        ok((ULONG_PTR)obj->marshal == UINTPTR_MAX, "got marshal %p\n", obj->marshal);
-        check_interface(inspectable, &IID_IMarshal);
-        ok(obj->marshal != NULL && (ULONG_PTR)obj->marshal != UINTPTR_MAX, "got marshal %p\n", obj->marshal);
-
-        test_interface_layout(obj, &IID_IUnknown, &obj->IInspectable_iface);
-        test_interface_layout(obj, &IID_IInspectable, &obj->IInspectable_iface);
-        test_interface_layout(obj, &IID_IAgileObject, &obj->IInspectable_iface);
-        test_interface_layout(obj, &IID_IPrintable, &obj->IPrintable_iface);
-        todo_wine test_interface_layout(obj, &IID_IEquatable, &obj->IEquatable_iface);
-        test_interface_layout(obj, &IID_IClosable, &obj->IClosable_iface);
-
-        hr = IInspectable_GetRuntimeClassName(inspectable, &str);
-        ok(hr == S_OK, "got hr %#lx\n", hr);
-        bufW = WindowsGetStringRawBuffer(str, NULL);
-        ok(!wcscmp(cur_test->exp_winrt_name, bufW), "got str %s != %s\n", debugstr_hstring(str),
-           debugstr_w(cur_test->exp_winrt_name));
-        WindowsDeleteString(str);
-
-        str = p__abi_ObjectToString(obj, FALSE);
-        ok(hr == S_OK, "got hr %#lx\n", hr);
-        bufW = WindowsGetStringRawBuffer(str, NULL);
-        ok(!wcscmp(cur_test->exp_winrt_name, bufW), "got str %s != %s\n", debugstr_hstring(str),
-           debugstr_w(cur_test->exp_winrt_name));
-        WindowsDeleteString(str);
-
-        /* Verify control block fields. */
-        ok(!obj->control_block->is_inline, "got is_inline %d\n", obj->control_block->is_inline);
-        ok(obj->control_block->ref_strong == 1, "got ref_strong %lu\n", obj->control_block->ref_strong);
-        ok(obj->control_block->object == (IUnknown *)&obj->IInspectable_iface, "got object %p != %p\n",
-           obj->control_block->object, &obj->IInspectable_iface);
-        ok(obj->control_block->unknown == 0, "got unknown %d\n", obj->control_block->unknown);
-        ok(obj->control_block->is_exception, "got is_exception %d\n", obj->control_block->is_exception);
-        test_refcount(obj->control_block, 1);
-        count = IInspectable_AddRef(inspectable);
-        ok(count == 2, "got count %lu\n", count);
-        ok(obj->control_block->ref_strong == 2, "got ref_strong %lu\n", obj->control_block->ref_strong);
-        count = IInspectable_Release(inspectable);
-        ok(count == 1, "got count %lu\n", count);
-        ok(obj->control_block->ref_strong == 1, "got ref_strong %lu\n", obj->control_block->ref_strong);
-
-        /* While Exceptions do *not* implement IWeakReferenceSource, the control block vtable still implements
-         * IWeakReference. */
-        hr = IInspectable_QueryInterface(inspectable, &IID_IWeakReferenceSource, (void **)&out);
-        ok(hr == E_NOINTERFACE, "got hr %#lx\n", hr);
-
-        hr = IWeakReference_Resolve(&obj->control_block->IWeakReference_iface,
-                &IID_IAgileObject, (IInspectable **)&out);
-        ok(hr == S_OK, "got hr %#lx\n", hr);
-        test_refcount(inspectable, 2);
-        count = IUnknown_Release(out);
-        ok(count == 1, "got count %lu\n", count);
-        test_refcount(inspectable, 1);
-        ok(obj->control_block->ref_strong == 1, "got ref_strong %lu\n", obj->control_block->ref_strong);
-
-        count = 1;
-        iids = (void*)0xdeadbeef;
-        /* GetIids does not return any IIDs for Platform::Exception objects. */
-        hr = IInspectable_GetIids(inspectable, &count, &iids);
-        ok(hr == S_OK, "got hr %#lx\n", hr);
-        ok(count == 0, "got count %lu\n", count);
-        ok(!iids, "iids = %p\n", iids);
-
-        type_info = p__RTtypeid(obj);
-        ok(type_info != NULL, "got type_info %p\n", type_info);
-        rtti_name = (char *)call_func1(p_type_info_name, type_info);
-        ok(rtti_name && !strcmp(rtti_name, cur_test->exp_rtti_name), "got rtti_name %s != %s\n",
-           debugstr_a(rtti_name), debugstr_a(cur_test->exp_rtti_name));
-        rtti_raw_name = (char *)call_func1(p_type_info_raw_name, type_info);
-        ok(rtti_raw_name && !strcmp(rtti_raw_name, cur_test->exp_rtti_mangled_name), "got rtti_raw_name %s != %s\n",
-           debugstr_a(rtti_raw_name), debugstr_a(cur_test->exp_rtti_mangled_name));
-
-        /* By default, the message returned is from FormatMessageW. */
-        str = p_platform_exception_get_Message(obj);
-        ret = FormatMessageW(FORMAT_MESSAGE_FROM_SYSTEM, NULL, cur_test->hr, 0, buf, ARRAY_SIZE(buf), NULL);
-        ok(!!str == !!ret, "got str %s\n", debugstr_hstring(str));
-        desc_todo = !ret;
-        if(ret)
-        {
-            bufW = WindowsGetStringRawBuffer(str, NULL);
-            ok(!wcscmp(bufW, buf), "got str %s != %s\n", debugstr_hstring(str), debugstr_w(buf));
-            WindowsDeleteString(str);
-
-            str = p__abi_ObjectToString(obj, TRUE);
-            bufW = WindowsGetStringRawBuffer(str, NULL);
-            ok(!wcscmp(bufW, buf), "got str %s != %s\n", debugstr_hstring(str), debugstr_w(buf));
-            WindowsDeleteString(str);
-
-            str = p_platform_exception_ToString(obj);
-            bufW = WindowsGetStringRawBuffer(str, NULL);
-            todo_wine ok(!wcscmp(bufW, buf), "got str %s != %s\n", debugstr_hstring(str), debugstr_w(buf));
-        }
-
-        inner = *(const struct exception_inner **)((ULONG_PTR)obj - sizeof(ULONG_PTR));
-        ok(inner == &obj->inner, "got inner %p != %p\n", inner, &obj->inner);
-        ok(inner->description == NULL, "got description %p\n", inner->description);
-        ok(inner->restricted_desc == NULL, "got restricted_desc %p\n", inner->restricted_desc);
-        ok(inner->unknown1 == NULL, "got unknown1 %p\n", inner->unknown1);
-        ok(inner->unknown2 == NULL, "got unknown2 %p\n", inner->unknown2);
-        ok(inner->hr == cur_test->hr, "got hr %#lx != %#lx\n", inner->hr, cur_test->hr);
-        ok(inner->error_info == NULL, "got error_info %p\n", inner->error_info);
-        ok(inner->exception_type != NULL, "got exception_type %p\n", inner->exception_type);
-        if (sizeof(void *) == 8)
-            ok(inner->unknown3 == 64, "got unknown3 %u\n", inner->unknown3);
-        else
-            ok(inner->unknown3 == 32, "got unknown3 %u \n", inner->unknown3);
-        ok(obj->inner.set_exception_info != NULL, "got inner.set_exception_info %p\n",
-            obj->inner.set_exception_info);
-        obj->inner.set_exception_info((struct exception_inner **)((ULONG_PTR)obj - sizeof(ULONG_PTR)));
-        todo_wine_if(desc_todo)
-        ok(inner->description != NULL, "got description %p\n", inner->description);
-        todo_wine_if(desc_todo)
-        ok(inner->restricted_desc != NULL, "got restricted_desc %p\n", inner->restricted_desc);
-        todo_wine ok(inner->error_info != NULL, "got error_info %p\n", inner->error_info);
-        if ((error_info = inner->error_info))
-        {
-            BSTR desc, restricted_desc, sid;
-            HRESULT code;
-
-            IRestrictedErrorInfo_AddRef(error_info);
-            test_refcount(error_info, 2);
-
-            hr = IRestrictedErrorInfo_GetErrorDetails(error_info, &desc, &code, &restricted_desc, &sid);
-            ok(hr == S_OK, "got hr %#lx\n", hr);
-            ok(!wcscmp(desc, inner->description), "got desc %s != %s\n", debugstr_w(desc), debugstr_w(inner->description));
-            ok(!wcscmp(restricted_desc, inner->restricted_desc), "got restricted_desc %s != %s\n",
-                debugstr_w(restricted_desc), debugstr_w(inner->restricted_desc));
-            ok(code == inner->hr, "got code %#lx != %#lx\n", code, inner->hr);
-            SysFreeString(desc);
-            SysFreeString(restricted_desc);
-            SysFreeString(sid);
-        }
-
-        type = inner->exception_type;
-        ok(type->flags == TYPE_FLAG_IUNKNOWN, "got flags %#x\n", type->flags);
-        /* There is no destructor, presumbly because COMException objects already have COM semantics? */
-        ok(type->destructor == 0, "got destructor %#x\n", type->destructor);
-        ok(type->custom_handler == 0, "got custom_handler %#x\n", type->custom_handler);
-        ok(type->type_info_table != 0, "got type_info_table %#x\n", type->type_info_table);
-
-        type_info_table = (cxx_type_info_table *)(base + type->type_info_table);
-        ok(type_info_table->count != 0, "got count %u\n", type_info_table->count);
-
-        for (j = 0; j < type_info_table->count; j++)
-        {
-            winetest_push_context("j=%u", j);
-
-            cxx_info = (cxx_type_info *)(base + type_info_table->info[j]);
-            if (j == type_info_table->count - 1)
-                ok(cxx_info->flags == CLASS_IS_SIMPLE_TYPE, "got flags %u\n", cxx_info->flags);
-            else
-                ok(cxx_info->flags == (CLASS_IS_SIMPLE_TYPE | CLASS_IS_IUNKNOWN), "got flags %u\n", cxx_info->flags);
-            ok(cxx_info->size == sizeof(void *), "got size %u\n", cxx_info->size);
-            ok(cxx_info->copy_ctor == 0, "got copy_ctor %#x\n", cxx_info->copy_ctor);
-            ok(cxx_info->type_info != 0, "got type_info");
-
-            winetest_pop_context();
-        }
-
-        cxx_info = (cxx_type_info *)(base + type_info_table->info[0]);
-        rtti_info = (rtti_type_info *)(base + cxx_info->type_info);
-        ok(!strcmp(rtti_info->mangled, cur_test->exp_exception_rtti_mangled_name), "got mangled %s != %s\n",
-           debugstr_a(rtti_info->mangled), debugstr_a(cur_test->exp_exception_rtti_mangled_name));
-
-        count = IInspectable_Release(inspectable);
-        ok(count == 0, "got count %lu\n", count);
-
-        if (error_info)
-        {
-            count = IRestrictedErrorInfo_Release(error_info);
-            ok(count == 0, "got count %lu\n", count);
-        }
-
-        /* Create an Exception object with a custom message. */
-        inspectable = pCreateExceptionWithMessage(cur_test->hr, msg);
-        ok(inspectable != NULL, "got excp %p\n", inspectable);
-        str = p_platform_exception_get_Message(inspectable);
-        hr = WindowsCompareStringOrdinal(str, msg, &ret);
-        ok(hr == S_OK, "got hr %#lx\n", hr);
-        ok(!ret, "got str %s != %s\n", debugstr_hstring(str), debugstr_hstring(msg));
-        WindowsDeleteString(str);
-
-        str = p__abi_ObjectToString(inspectable, FALSE);
-        bufW = WindowsGetStringRawBuffer(str, NULL);
-        ok(!wcscmp(cur_test->exp_winrt_name, bufW), "got str %s != %s\n", debugstr_hstring(str),
-           debugstr_w(cur_test->exp_winrt_name));
-        WindowsDeleteString(str);
-
-        str = p__abi_ObjectToString(inspectable, TRUE);
-        hr = WindowsCompareStringOrdinal(str, msg, &ret);
-        ok(hr == S_OK, "got hr %#lx\n", hr);
-        ok(!ret, "got str %s != %s\n", debugstr_hstring(str), debugstr_hstring(msg));
-        WindowsDeleteString(str);
-
-        str = p_platform_exception_ToString(inspectable);
-        hr = WindowsCompareStringOrdinal(str, msg, &ret);
-        ok(hr == S_OK, "got hr %#lx\n", hr);
-        todo_wine ok(!ret, "got str %s != %s\n", debugstr_hstring(str), debugstr_hstring(msg));
-        WindowsDeleteString(str);
-
-        inner = (const struct exception_inner *)*(ULONG_PTR *)((ULONG_PTR)inspectable - sizeof(ULONG_PTR));
-        ok(inner->description == NULL, "got description %p\n", inner->description);
-        ok(inner->restricted_desc != NULL, "got restricted_desc %p\n", inner->restricted_desc);
-        ok(inner->unknown1 == NULL, "got unknown3 %p\n", inner->unknown1);
-        ok(inner->unknown2 == NULL, "got unknown4 %p\n", inner->unknown2);
-        ok(!wcscmp(inner->restricted_desc, msg_bufW), "got restricted_desc %s != %s\n", debugstr_w(inner->restricted_desc),
-           debugstr_w(msg_bufW));
-        ret = SysStringLen(inner->restricted_desc); /* Verify that restricted_desc is a BSTR. */
-        ok(ret == wcslen(msg_bufW), "got ret %u != %Iu\n", ret, wcslen(msg_bufW));
-
-        count = IInspectable_Release(inspectable);
-        ok(count == 0, "got count %lu\n", count);
-
-        /* Test the constructors for this class. */
-        if (cur_test->ctor)
-        {
-            obj = pAllocateExceptionWithWeakRef(offsetof(struct platform_exception, control_block), sizeof(*obj));
-            inspectable = (IInspectable *)obj;
-            ok(obj != NULL, "got obj %p\n", obj);
-            /* Zero out all the fields that the constructor will initialize, including the back-pointer. */
-            memset((char *)obj - sizeof(void *), 0, sizeof(void *) + offsetof(struct platform_exception, control_block));
-            obj->marshal = NULL;
-
-            cur_test->ctor(obj);
-            test_interface_layout(obj, &IID_IUnknown, &obj->IInspectable_iface);
-            test_interface_layout(obj, &IID_IInspectable, &obj->IInspectable_iface);
-            test_interface_layout(obj, &IID_IAgileObject, &obj->IInspectable_iface);
-            test_interface_layout(obj, &IID_IPrintable, &obj->IPrintable_iface);
-            todo_wine test_interface_layout(obj, &IID_IEquatable, &obj->IEquatable_iface);
-            test_interface_layout(obj, &IID_IClosable, &obj->IClosable_iface);
-            ok((ULONG_PTR)obj->marshal == UINTPTR_MAX, "got marshal %p\n", obj->marshal);
-
-            inner = *(const struct exception_inner **)((ULONG_PTR)obj - sizeof(ULONG_PTR));
-            ok(inner == &obj->inner, "got inner %p != %p\n", inner, &obj->inner);
-            ok(inner->description == NULL, "got description %p\n", inner->description);
-            ok(inner->restricted_desc == NULL, "got restricted_desc %p\n", inner->restricted_desc);
-            ok(inner->unknown1 == NULL, "got unknown1 %p\n", inner->unknown1);
-            ok(inner->unknown2 == NULL, "got unknown2 %p\n", inner->unknown2);
-            ok(inner->error_info == NULL, "got error_info %p\n", inner->error_info);
-            ok(obj->inner.exception_type == type, "got inner.exception_type %p != %p\n", obj->inner.exception_type,
-               type);
-            ok(obj->inner.hr == cur_test->hr, "got inner.hr %#lx != %#lx", obj->inner.hr, cur_test->hr);
-            ok(obj->inner.set_exception_info != NULL, "got inner.set_exception_info %p\n",
-               obj->inner.set_exception_info);
-
-            obj->inner.set_exception_info((struct exception_inner **)((ULONG_PTR)obj - sizeof(ULONG_PTR)));
-            todo_wine_if(desc_todo)
-            ok(inner->description != NULL, "got description %p\n", inner->description);
-            todo_wine_if(desc_todo)
-            ok(inner->restricted_desc != NULL, "got restricted_desc %p\n", inner->restricted_desc);
-            todo_wine ok(inner->error_info != NULL, "got error_info %p\n", inner->error_info);
-            if (inner->error_info)
-            {
-                BSTR desc, restricted_desc, sid;
-                HRESULT code;
-
-                hr = IRestrictedErrorInfo_GetErrorDetails(inner->error_info, &desc, &code, &restricted_desc, &sid);
-                ok(hr == S_OK, "got hr %#lx\n", hr);
-                ok(!wcscmp(desc, inner->description), "got desc %s != %s\n", debugstr_w(desc), debugstr_w(inner->description));
-                ok(!wcscmp(restricted_desc, inner->restricted_desc), "got restricted_desc %s != %s\n",
-                   debugstr_w(restricted_desc), debugstr_w(inner->restricted_desc));
-                ok(code == inner->hr, "got code %#lx != %#lx\n", code, inner->hr);
-                SysFreeString(desc);
-                SysFreeString(restricted_desc);
-                SysFreeString(sid);
-            }
-
-            count = IInspectable_Release(inspectable);
-            ok(count == 0, "got count %lu\n", count);
-        }
-        if (cur_test->hstring_ctor)
-        {
-            obj = pAllocateExceptionWithWeakRef(offsetof(struct platform_exception, control_block), sizeof(*obj));
-            inspectable = (IInspectable *)obj;
-            ok(obj != NULL, "got obj %p\n", obj);
-            /* Zero out all the fields that the constructor will initialize, including the back-pointer. */
-            memset((char *)obj - sizeof(void *), 0, sizeof(void *) + offsetof(struct platform_exception, control_block));
-            obj->marshal = NULL;
-
-            cur_test->hstring_ctor(obj, msg);
-            test_interface_layout(obj, &IID_IUnknown, &obj->IInspectable_iface);
-            test_interface_layout(obj, &IID_IInspectable, &obj->IInspectable_iface);
-            test_interface_layout(obj, &IID_IAgileObject, &obj->IInspectable_iface);
-            test_interface_layout(obj, &IID_IPrintable, &obj->IPrintable_iface);
-            todo_wine test_interface_layout(obj, &IID_IEquatable, &obj->IEquatable_iface);
-            test_interface_layout(obj, &IID_IClosable, &obj->IClosable_iface);
-            ok((ULONG_PTR)obj->marshal == UINTPTR_MAX, "got marshal %p\n", obj->marshal);
-
-            inner = *(const struct exception_inner **)((ULONG_PTR)obj - sizeof(ULONG_PTR));
-            ok(inner == &obj->inner, "got inner %p != %p\n", inner, &obj->inner);
-            ok(inner->description == NULL, "got description %p\n", inner->description);
-            ok(inner->restricted_desc != NULL, "got restricted_desc %p\n", inner->restricted_desc);
-            ok(!wcscmp(inner->restricted_desc, msg_bufW), "got restricted_desc %s != %s\n",
-               debugstr_w(inner->restricted_desc), debugstr_w(msg_bufW));
-            ret = SysStringLen(inner->restricted_desc); /* Verify that restricted_desc is a BSTR. */
-            ok(ret == wcslen(msg_bufW), "got ret %u != %Iu\n", ret, wcslen(msg_bufW));
-            ok(inner->unknown1 == NULL, "got unknown1 %p\n", inner->unknown1);
-            ok(inner->unknown2 == NULL, "got unknown2 %p\n", inner->unknown2);
-            ok(inner->error_info == NULL, "got error_info %p\n", inner->error_info);
-            ok(obj->inner.exception_type == type, "got inner.exception_type %p != %p\n", obj->inner.exception_type,
-               type);
-            ok(obj->inner.hr == cur_test->hr, "got inner.hr %#lx != %#lx", obj->inner.hr, cur_test->hr);
-            ok(obj->inner.set_exception_info != NULL, "got inner.set_exception_info %p\n",
-                obj->inner.set_exception_info);
-
-            obj->inner.set_exception_info((struct exception_inner **)((ULONG_PTR)obj - sizeof(ULONG_PTR)));
-            todo_wine_if(desc_todo)
-            ok(inner->description != NULL, "got description %p\n", inner->description);
-            ok(inner->restricted_desc != NULL, "got restricted_desc %p\n", inner->restricted_desc);
-            /* restricted_desc should not change. */
-            ok(!wcscmp(inner->restricted_desc, msg_bufW), "got restricted_desc %s != %s\n",
-               debugstr_w(inner->restricted_desc), debugstr_w(msg_bufW));
-            todo_wine ok(inner->error_info != NULL, "got error_info %p\n", inner->error_info);
-            if (inner->error_info)
-            {
-                BSTR desc, restricted_desc, sid;
-                HRESULT code;
-
-                hr = IRestrictedErrorInfo_GetErrorDetails(inner->error_info, &desc, &code, &restricted_desc, &sid);
-                ok(hr == S_OK, "got hr %#lx\n", hr);
-                ok(!wcscmp(desc, inner->description), "got desc %s != %s\n", debugstr_w(desc),
-                   debugstr_w(inner->description));
-                ok(!wcscmp(restricted_desc, inner->restricted_desc), "got restricted_desc %s != %s\n",
-                   debugstr_w(restricted_desc), debugstr_w(inner->restricted_desc));
-                ok(code == inner->hr, "got code %#lx != %#lx\n", code, inner->hr);
-                SysFreeString(desc);
-                SysFreeString(restricted_desc);
-                SysFreeString(sid);
-            }
-
-            count = IInspectable_Release(inspectable);
-            ok(count == 0, "got count %lu\n", count);
-        }
-
-        winetest_pop_context();
-    }
-}
-
-struct tostring_impl
-{
-    IStringable IStringable_iface;
-    bool have_inspectable;
-    bool have_stringable;
-    bool have_printable;
-    LONG ref;
-};
-
-static inline struct tostring_impl *impl_tostring_from_IStringable(IStringable *iface)
-{
-    return CONTAINING_RECORD(iface, struct tostring_impl, IStringable_iface);
-}
-
-static HRESULT WINAPI tostring_QueryInterface(IStringable *iface, const GUID *iid, void **out)
-{
-    struct tostring_impl *impl = impl_tostring_from_IStringable(iface);
-
-    if (IsEqualGUID(iid, &IID_IUnknown) ||
-        (impl->have_inspectable && IsEqualGUID(iid, &IID_IInspectable)) ||
-        (impl->have_stringable && IsEqualGUID(iid, &IID_IStringable)) ||
-        (impl->have_printable && IsEqualGUID(iid, &IID_IPrintable)))
-    {
-        IStringable_AddRef((*out = iface));
-        return S_OK;
-    }
-
-    *out = NULL;
-    return E_NOINTERFACE;
-}
-
-static ULONG WINAPI tostring_AddRef(IStringable *iface)
-{
-    struct tostring_impl *impl = impl_tostring_from_IStringable(iface);
-
-    return InterlockedIncrement(&impl->ref);
-}
-
-static ULONG WINAPI tostring_Release(IStringable *iface)
-{
-    struct tostring_impl *impl = impl_tostring_from_IStringable(iface);
-
-    return InterlockedDecrement(&impl->ref);
-}
-
-static HRESULT WINAPI tostring_GetIIds(IStringable *iface, ULONG *count, GUID **iids)
-{
-    ok(0, "unexpected call\n");
-    return E_NOTIMPL;
-}
-
-static HRESULT WINAPI tostring_GetRuntimeClassName(IStringable *iface, HSTRING *name)
-{
-    const WCHAR *buf = L"ClassName.Foo";
-    return WindowsCreateString(buf, wcslen(buf), name);
-}
-
-static HRESULT WINAPI tostring_GetTrustLevel(IStringable *iface, TrustLevel *level)
-{
-    ok(0, "unexpected call\n");
-    return E_NOTIMPL;
-}
-
-static HRESULT WINAPI tostring_ToString(IStringable *iface, HSTRING *out)
-{
-    const WCHAR *buf = L"ToString.Foo";
-    return WindowsCreateString(buf, wcslen(buf), out);
-}
-
-static const IStringableVtbl tostring_stringable_vtbl =
-{
-    /* IUnknown */
-    tostring_QueryInterface,
-    tostring_AddRef,
-    tostring_Release,
-    /* IInspectable */
-    tostring_GetIIds,
-    tostring_GetRuntimeClassName,
-    tostring_GetTrustLevel,
-    /* IStringable */
-    tostring_ToString,
-};
-
-static void test___abi_ObjectToString(void)
-{
-    static const WCHAR *class_name = L"ClassName.Foo", *stringable_val = L"ToString.Foo";
-    struct tostring_impl impl = {{&tostring_stringable_vtbl}};
-    const WCHAR *buf;
-    HSTRING str;
-
-    str = p__abi_ObjectToString(NULL, TRUE);
-    ok(str == NULL, "got str %p\n", str);
-    str = p__abi_ObjectToString(NULL, FALSE);
-    ok(str == NULL, "got str %p\n", str);
-
-    impl.ref = 1;
-    impl.have_inspectable = impl.have_stringable = impl.have_printable = FALSE;
-    str = p__abi_ObjectToString(&impl.IStringable_iface, TRUE);
-    ok(str == NULL, "got str %p\n", str);
-    str = p__abi_ObjectToString(&impl.IStringable_iface, FALSE);
-    ok(str == NULL, "got str %p\n", str);
-
-    /* If only IInspectable is available, ObjectToString uses the value returned by GetRuntimeClassName. */
-    impl.have_inspectable = TRUE;
-    str = p__abi_ObjectToString(&impl.IStringable_iface, TRUE);
-    buf = WindowsGetStringRawBuffer(str, NULL);
-    ok(!wcscmp(buf, class_name), "Got str %s\n", debugstr_hstring(str));
-    WindowsDeleteString(str);
-    str = p__abi_ObjectToString(&impl.IStringable_iface, FALSE);
-    buf = WindowsGetStringRawBuffer(str, NULL);
-    ok(!wcscmp(buf, class_name), "Got str %s\n", debugstr_hstring(str));
-    WindowsDeleteString(str);
-
-    /* The second parameter controls whether the IStringable/IPrintable interfaces should be used for getting the string
-     * value. */
-    impl.have_stringable = TRUE;
-    str = p__abi_ObjectToString(&impl.IStringable_iface, TRUE);
-    buf = WindowsGetStringRawBuffer(str, NULL);
-    ok(!wcscmp(buf, stringable_val), "Got str %s\n", debugstr_hstring(str));
-    WindowsDeleteString(str);
-    str = p__abi_ObjectToString(&impl.IStringable_iface, FALSE);
-    buf = WindowsGetStringRawBuffer(str, NULL);
-    ok(!wcscmp(buf, class_name), "Got str %s\n", debugstr_hstring(str));
-    WindowsDeleteString(str);
-
-    /* IPrintable seems to be a C++/CX specific alias for IStringable. */
-    impl.have_stringable = FALSE;
-    impl.have_printable = TRUE;
-    str = p__abi_ObjectToString(&impl.IStringable_iface, TRUE);
-    buf = WindowsGetStringRawBuffer(str, NULL);
-    ok(!wcscmp(buf, stringable_val), "Got str %s\n", debugstr_hstring(str));
-    WindowsDeleteString(str);
-    str = p__abi_ObjectToString(&impl.IStringable_iface, FALSE);
-    buf = WindowsGetStringRawBuffer(str, NULL);
-    ok(!wcscmp(buf, class_name), "Got str %s\n", debugstr_hstring(str));
-    WindowsDeleteString(str);
-
-    ok(impl.ref == 1, "got ref %lu\n", impl.ref);
-}
-
-#define test_hstring(str, exp_str) test_hstring_(__LINE__, str, (exp_str))
-static void test_hstring_(int line, HSTRING str, const WCHAR *exp_str)
-{
-    const WCHAR *buf;
-    buf = WindowsGetStringRawBuffer(str, NULL);
-    ok_(__FILE__, line)(!wcscmp(buf, exp_str), "got str %s != %s\n", debugstr_hstring(str), debugstr_w(exp_str));
-    WindowsDeleteString(str);
-}
-
-static void test_ToString(void)
-{
-    static const UINT64 uint64 = 0xdeadbeefdeadbeef;
-    static const INT64 int64 = 0xdeadbeefdeadbeef;
-    const GUID guid = IID_IInspectable;
-    static const DOUBLE float64 = 2.71828182;
-    static const FLOAT float32 = 2.71828182;
-    static const UINT32 uint32 = 0xdeadbeef;
-    static const INT32 int32 = 0xdeadbeef;
-    static const UINT16 uint16 = 0xbeef;
-    static const INT16 int16 = 0xbeef;
-    static const WCHAR char16 = L'a';
-    static const UINT8 uint8 = 0xff;
-    static const INT8 int8 = 0xff;
-    boolean bool_val = true;
-    HSTRING str;
-
-    str = p_uint64_ToString(&uint64);
-    test_hstring(str, L"16045690984833335023");
-    str = p_int64_ToString(&int64);
-    test_hstring(str, L"-2401053088876216593");
-    str = p_float64_ToString(&float64);
-    test_hstring(str, L"2.71828");
-    str = p_float32_ToString(&float32);
-    test_hstring(str, L"2.71828");
-    str = p_uint32_ToString(&uint32);
-    test_hstring(str, L"3735928559");
-    str = p_int32_ToString(&int32);
-    test_hstring(str, L"-559038737");
-    str = p_uint16_ToString(&uint16);
-    test_hstring(str, L"48879");
-    str = p_int16_ToString(&int16);
-    test_hstring(str, L"-16657");
-    str = p_int8_ToString(&int8);
-    test_hstring(str, L"-1");
-    str = p_uint8_ToString(&uint8);
-    test_hstring(str, L"255");
-    str = p_char16_ToString(&char16);
-    test_hstring(str, L"a");
-
-    str = p_Boolean_ToString(&bool_val);
-    test_hstring(str, L"true");
-    bool_val = false;
-    str = p_Boolean_ToString(&bool_val);
-    test_hstring(str, L"false");
-
-    str = p_Guid_ToString(&guid);
-    test_hstring(str, L"{af86e2e0-b12d-4c6a-9c5a-d7aa65101e90}");
-}
-
-#define test_rtti_names(obj, pretty, mangled) test_rtti_names_(__LINE__, obj, pretty, mangled)
-static void test_rtti_names_(int line, void *obj, const char *exp_pretty_name, const char *exp_mangled_name)
-{
-    const char *pretty_name, *mangled_name;
-    void *type_info;
-
-    type_info = p__RTtypeid(obj);
-    ok_(__FILE__, line)(type_info != NULL, "got type_info %p\n", type_info);
-
-    pretty_name = (char *)call_func1(p_type_info_name, type_info);
-    ok(!strcmp(pretty_name, exp_pretty_name), "got pretty_name %s != %s.\n", debugstr_a(pretty_name),
-       debugstr_a(exp_pretty_name));
-
-    mangled_name = (char *)call_func1(p_type_info_raw_name, type_info);
-    ok(!strcmp(mangled_name, exp_mangled_name), "got mangled_name %s != %s.\n", debugstr_a(mangled_name),
-       debugstr_a(exp_mangled_name));
-}
-
-static void test_Delegate(void)
-{
-    IInspectable delegate = {.lpVtbl = NULL};
-
-    p_Delegate_ctor(&delegate);
-    todo_wine ok(delegate.lpVtbl != NULL, "got lpVtbl %p.\n", delegate.lpVtbl);
-    if (!delegate.lpVtbl)
-    {
-        skip("Platform::Delegate failed.\n");
-        return;
-    }
-    test_rtti_names(&delegate, "class Platform::Delegate", ".?AVDelegate@Platform@@");
-}
-
-struct delegate
-{
-    IInspectable IInspectable_iface;
-    bool agile;
-    LONG ref;
-};
-
-static inline struct delegate *impl_delegate_from_IInspectable(IInspectable *iface)
-{
-    return CONTAINING_RECORD(iface, struct delegate, IInspectable_iface);
-}
-
-static HRESULT WINAPI delegate_QueryInterface(IInspectable *iface, const GUID *iid, void **out)
-{
-    struct delegate *impl = impl_delegate_from_IInspectable(iface);
-
-    if (IsEqualGUID(iid, &IID_IUnknown) ||
-        IsEqualGUID(iid, &IID_IInspectable) ||
-        (impl->agile && IsEqualGUID(iid, &IID_IAgileObject)))
-    {
-        IInspectable_AddRef((*out = &impl->IInspectable_iface));
-        return S_OK;
-    }
-
-    *out = NULL;
-    return E_NOINTERFACE;
-}
-
-static ULONG WINAPI delegate_AddRef(IInspectable *iface)
-{
-    struct delegate *impl = impl_delegate_from_IInspectable(iface);
-    return InterlockedIncrement(&impl->ref);
-}
-
-static ULONG WINAPI delegate_Release(IInspectable *iface)
-{
-    struct delegate *impl = impl_delegate_from_IInspectable(iface);
-    ULONG ref = InterlockedDecrement(&impl->ref);
-
-    if (!ref) pFree(impl);
-    return ref;
-}
-
-static HRESULT WINAPI delegate_GetIids(IInspectable *iface, ULONG *count, GUID **iids)
-{
-    ok(0, "Unexpected call\n");
-    return E_NOTIMPL;
-}
-
-static HRESULT WINAPI delegate_GetRuntimeClassName(IInspectable *iface, HSTRING *str)
-{
-    ok(0, "Unexpected call\n");
-    return E_NOTIMPL;
-}
-
-static HRESULT WINAPI delegate_GetTrustLevel(IInspectable *iface, TrustLevel *level)
-{
-    ok(0, "Unexpected call\n");
-    return E_NOTIMPL;
-}
-
-static const IInspectableVtbl delegate_vtbl =
-{
-    /* IUnknown */
-    delegate_QueryInterface,
-    delegate_AddRef,
-    delegate_Release,
-    /* IInspectable */
-    delegate_GetIids,
-    delegate_GetRuntimeClassName,
-    delegate_GetTrustLevel
-};
-
-static IInspectable *delegate_create(bool agile)
-{
-    struct delegate *impl;
-
-    impl = pAllocate(sizeof(*impl));
-    /* Using the Platform::Delegate constructor doesn't seem to be necessary. */
-    impl->IInspectable_iface.lpVtbl = &delegate_vtbl;
-    impl->agile = agile;
-    impl->ref = 1;
-    return &impl->IInspectable_iface;
-}
-
-static void test_EventSource(void)
-{
-    IInspectable *event_source = (IInspectable *)0xdeadbeef, *obj, *old, *delegate1, *delegate2;
-    struct EventLock lock = {SRWLOCK_INIT, SRWLOCK_INIT};
-    EventRegistrationToken token1 = {0}, token2 = {0};
-    HSTRING str;
-    ULONG count;
-    HRESULT hr;
-    IID *iids;
-
-    /* EventSourceTargetAdd will marshal stored delegate, so COM needs to be initialized. */
-    hr = RoInitialize(RO_INIT_MULTITHREADED);
-    ok(hr == S_OK, "got hr %#lx.\n", hr);
-
-    p_EventSourceInitialize(&event_source);
-    ok(event_source == NULL, "got event_source %p.\n", event_source);
-
-    event_source = NULL;
-    delegate1 = delegate_create(FALSE);
-    token1 = p_EventSourceAdd(&event_source, &lock, (IUnknown *)delegate1);
-    ok(token1.value != 0, "got token1.value {%#I64x}\n", token1.value);
-    ok(event_source != NULL, "got event_source %p\n", event_source);
-    /* EventSourceAdd takes a reference to the delegate. */
-    todo_wine test_refcount(delegate1, 2);
-    delegate2 = delegate_create(FALSE);
-    old = event_source;
-    IInspectable_AddRef(old);
-    /* EventSourceAdd/Remove have CoW semantics and create a new object on modification, releasing the old one. */
-    token2 = p_EventSourceAdd(&event_source, &lock, (IUnknown *)delegate2);
-    ok(event_source != old, "got event_source %p\n", event_source);
-    ok(token1.value != token2.value, "got token.value {%#I64x}\n", token1.value);
-    ok(event_source && event_source != old, "got event_source %p\n", event_source);
-    count = IInspectable_Release(old);
-    ok(count == 0, "got count %lu\n", count);
-    todo_wine test_refcount(delegate1, 2);
-    count = IInspectable_Release(delegate2);
-    todo_wine ok(count == 1, "got count %lu\n", count);
-
-    test_rtti_names(event_source, "class Platform::Details::EventTargetArray",
-        ".?AVEventTargetArray@Details@Platform@@");
-    test_refcount(event_source, 1);
-    check_interface(event_source, &IID_IUnknown);
-    check_interface(event_source, &IID_IInspectable);
-    check_interface(event_source, &IID_IAgileObject);
-    check_interface(event_source, &IID_IWeakReferenceSource);
-    check_interface(event_source, &IID_IMarshal);
-
-    hr = IInspectable_GetIids(event_source, &count, &iids);
-    ok(hr == S_OK, "got hr %#lx\n", hr);
-    ok(count == 2, "got count %lu\n", count);
-    ok(iids != NULL, "got iids %p\n", iids);
-    ok(IsEqualGUID(&iids[0], &IID_IInspectable), "got iids[0] %s\n", debugstr_guid(&iids[0]));
-    ok(IsEqualGUID(&iids[1], &IID_IWeakReferenceSource), "got iids[1] %s\n", debugstr_guid(&iids[1]));
-
-    hr = IInspectable_GetRuntimeClassName(event_source, &str);
-    ok(hr == S_OK, "got hr %#lx\n", hr);
-    ok(WindowsIsStringEmpty(str), "got str %s\n", debugstr_hstring(str));
-    WindowsDeleteString(str);
-
-    IInspectable_AddRef((old = event_source));
-    /* Similarly, EventSourceRemove should create a new object, releasing the old one. */
-    p_EventSourceRemove(&event_source, &lock, token1);
-    ok(event_source != old, "got event_source %p\n", event_source);
-    test_refcount(event_source, 1);
-    test_refcount(old, 1);
-    /* The older object should still have a reference to delegate1. */
-    todo_wine test_refcount(delegate1, 2);
-    /* EventSourceUninitialize calls Release, and sets the argument to NULL. */
-    IInspectable_AddRef((obj = old));
-    p_EventSourceUninitialize(&obj);
-    ok(obj == NULL, "got obj %p\n", obj);
-    count = IInspectable_Release(old);
-    ok(count == 0, "got count %lu\n", count);
-    /* Releasing an EventSource also releases the delegates it holds references to. */
-    count = IInspectable_Release(delegate1);
-    ok(count == 0, "got count %lu\n", count);
-    /* Unintializing an empty EventSource should not fail. */
-    obj = NULL;
-    p_EventSourceUninitialize(&obj);
-
-    /* Passing invalid token values should do nothing. */
-    old = event_source;
-    p_EventSourceRemove(&event_source, &lock, token1);
-    ok(event_source == old, "got event_source %p != %p\n", event_source, old);
-    test_refcount(event_source, 1);
-    token1.value = 0;
-    p_EventSourceRemove(&event_source, &lock, token1);
-    ok(event_source == old, "got event_source %p != %p\n", event_source, old);
-    /* Calling EventSourceRemove on an empty EventSource should not fail. */
-    obj = NULL;
-    p_EventSourceRemove(&obj, &lock, token1);
-    ok(obj == NULL, "got obj %p\n", obj);
-
-    /* Verifies targets_ptr_lock is not acquired exclusively. */
-    AcquireSRWLockShared(&lock.targets_ptr_lock);
-    /* Verifies add_remove_lock is not acquired. */
-    AcquireSRWLockExclusive(&lock.add_remove_lock);
-    /* All this seems to do is increase the reference count. */
-    obj = p_EventSourceGetTargetArray(event_source, &lock);
-    ReleaseSRWLockExclusive(&lock.add_remove_lock);
-    ReleaseSRWLockShared(&lock.targets_ptr_lock);
-    ok(obj == event_source, "got obj %p != %p\n", obj, event_source);
-    count = IInspectable_Release(obj);
-    ok(count == 1, "got count == %lu\n", count);
-    /* Passing NULL should not fail. */
-    obj = p_EventSourceGetTargetArray(NULL, &lock);
-    ok(obj == NULL, "got obj %p\n", obj);
-
-    /* Returns the number of delegates stored. */
-    count = p_EventSourceGetTargetArraySize(event_source);
-    ok(count == 1, "got count %lu\n", count);
-
-    token1.value = 0;
-    /* Returns a stored delegate and the assoicated token through its index. */
-    obj = p_EventSourceGetTargetArrayEvent(event_source, 0, &IID_IUnknown, &token1);
-    /* We're in the same apartment/thread, so we should get back the same interface pointer. */
-    ok(obj == delegate2, "got obj %p != %p\n", obj, delegate2);
-    ok(token1.value == token2.value, "got token1 {%#I64x} != {%#I64x}\n", token1.value, token2.value);
-    /* EventSourceGetTargetArrayEvent should increase the refcount on the returned delegate. */
-    count = IInspectable_Release(obj);
-    todo_wine ok(count == 1, "got count %lu\n", count);
-
-    IInspectable_AddRef(delegate2);
-    p_EventSourceRemove(&event_source, &lock, token2);
-    ok(event_source == NULL, "got event_source %p\n", event_source);
-    /* Ensure no delegate references have leaked. */
-    count = IInspectable_Release(delegate2);
-    ok(count == 0, "got count %lu\n", count);
-
-    RoUninitialize();
-}
-
-static void flush_events(void)
-{
-    int diff = 200;
-    DWORD time;
-    MSG msg;
-
-    time = GetTickCount() + diff;
-    while (diff > 0)
-    {
-        if (MsgWaitForMultipleObjects(0, NULL, FALSE, 100, QS_ALLINPUT) == WAIT_TIMEOUT)
-            break;
-        while (PeekMessageA(&msg, 0, 0, 0, PM_REMOVE))
-            DispatchMessageA(&msg);
-        diff = time - GetTickCount();
-    }
-}
-
-struct test_EventSource_marshal_data
-{
-    RO_INIT_TYPE from_apt;
-    RO_INIT_TYPE to_apt;
-    IInspectable *source;
-    EventRegistrationToken agile_token;
-    EventRegistrationToken non_agile_token;
-    void *agile_delegate;
-    void *non_agile_delegate;
-};
-
-static CALLBACK DWORD test_EventSource_marshal_proc(void *params)
-{
-    struct test_EventSource_marshal_data *data = params;
-    EventRegistrationToken token = {0};
-    ULONG count;
-    IInspectable *delegate;
-    HRESULT hr;
-
-    winetest_push_context("from_apt=%d: to_apt=%d", data->from_apt, data->to_apt);
-    hr = RoInitialize(data->to_apt);
-    ok(hr == S_OK, "got hr %#lx.\n", hr);
-
-    /* Get the agile delegate. */
-    delegate = p_EventSourceGetTargetArrayEvent(data->source, 0, &IID_IUnknown, &token);
-    ok(token.value == data->agile_token.value, "got token {%#I64x} != {%#I64x}\n", token.value,
-       data->agile_token.value);
-    /* Because the delegate implemented IAgileObject, we should get the same pointer, regardless of the apartment it
-     * belongs to. */
-    ok(delegate == data->agile_delegate, "got delegate %p != %p\n", delegate, data->agile_delegate);
-    count = IInspectable_Release(delegate);
-    ok(count == 1, "got count %lu\n", count);
-
-    /* Get the non-agile delegate. */
-    token.value = 0;
-    delegate = p_EventSourceGetTargetArrayEvent(data->source, 1, &IID_IUnknown, &token);
-    ok(token.value == data->non_agile_token.value, "got token {%#I64x} != {%#I64x}\n", token.value,
-       data->agile_token.value);
-    /* If the object belongs to a STA or a different apartment type, we should get back a marshaled pointer. */
-    if (data->from_apt == RO_INIT_SINGLETHREADED || data->from_apt != data->to_apt)
-    {
-        ok(delegate != data->non_agile_delegate, "got delegate %p\n", delegate);
-        count = IInspectable_Release(delegate);
-        ok(count == 0, "got count %lu\n", count);
-    }
-    else /* Otherwise, we get back the same pointer. */
-    {
-        ok(delegate == data->non_agile_delegate, "got delegate %p\n", delegate);
-        count = IInspectable_Release(delegate);
-        todo_wine ok(count == 1, "got count %lu\n", count);
-    }
-
-    RoUninitialize();
-    winetest_pop_context();
-    return 0;
-}
-
-static void test_EventSource_marshaling(void)
-{
-    RO_INIT_TYPE from_apt, to_apt;
-
-    for (from_apt = RO_INIT_SINGLETHREADED; from_apt <= RO_INIT_MULTITHREADED; from_apt++)
-    {
-        HRESULT hr;
-
-        winetest_push_context("from_apt=%d", from_apt);
-        hr = RoInitialize(from_apt);
-        ok(hr == S_OK, "got hr %#lx\n", hr);
-
-        for (to_apt = RO_INIT_SINGLETHREADED; to_apt <= RO_INIT_MULTITHREADED; to_apt++)
-        {
-            struct EventLock lock = {SRWLOCK_INIT, SRWLOCK_INIT};
-            struct test_EventSource_marshal_data data = {0};
-            DWORD count, ret;
-            HANDLE thread;
-
-            data.from_apt = from_apt;
-            data.to_apt = to_apt;
-            winetest_push_context("to_apt=%d", to_apt);
-            p_EventSourceInitialize(&data.source);
-
-            data.agile_delegate = delegate_create(TRUE);
-            data.agile_token = p_EventSourceAdd(&data.source, &lock, (IUnknown *)data.agile_delegate);
-            ok(data.source != NULL, "got source %p\n", data.source);
-            ok(data.agile_token.value != 0, "got agile_token {%#I64x}\n", data.agile_token.value);
-            count = IInspectable_Release(data.agile_delegate);
-            ok(count == 1, "got count %lu\n", count);
-
-            data.non_agile_delegate = delegate_create(FALSE);
-            data.non_agile_token = p_EventSourceAdd(&data.source, &lock, (IUnknown *)data.non_agile_delegate);
-            ok(data.non_agile_token.value != 0, "got non_agile_token {%#I64x}\n", data.non_agile_token.value);
-            count = IInspectable_Release(data.non_agile_delegate);
-            todo_wine ok(count == 1, "got count %lu\n", count);
-
-            count = p_EventSourceGetTargetArraySize(data.source);
-            ok(count == 2, "got size %lu\n", count);
-
-            thread = CreateThread(NULL, 0, test_EventSource_marshal_proc, &data, 0, NULL);
-            ok(thread != NULL, "CreateThread failed: %lu\n", GetLastError());
-            if (from_apt == RO_INIT_SINGLETHREADED)
-                flush_events();
-            ret = WaitForSingleObject(thread, INFINITE);
-            ok(!ret, "WaitForSingleObject returned %lu\n", ret);
-            CloseHandle(thread);
-
-            IInspectable_AddRef(data.agile_delegate);
-            IInspectable_AddRef(data.non_agile_delegate);
-            p_EventSourceUninitialize(&data.source);
-            /* Ensure no references have leaked. */
-            count = IInspectable_Release(data.agile_delegate);
-            ok(count == 0, "got count %lu\n", count);
-            count = IInspectable_Release(data.non_agile_delegate);
-            ok(count == 0, "got count %lu\n", count);
-            winetest_pop_context();
-        }
-
-        RoUninitialize();
-        winetest_pop_context();
-    }
+    pUninitializeData(0);
 }
 
 START_TEST(vccorlib)
@@ -2636,11 +977,4 @@ START_TEST(vccorlib)
     test_AllocateWithWeakRef();
     test___abi_make_type_id();
     test_CreateValue();
-    test_exceptions();
-    test_GetWeakReference();
-    test___abi_ObjectToString();
-    test_ToString();
-    test_Delegate();
-    test_EventSource();
-    test_EventSource_marshaling();
 }

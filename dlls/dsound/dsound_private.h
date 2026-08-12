@@ -32,7 +32,7 @@
 
 #include "wine/list.h"
 
-#define DS_MAX_CHANNELS 8
+#define DS_MAX_CHANNELS 6
 
 extern int ds_hel_buflen;
 
@@ -70,13 +70,14 @@ typedef struct DSFilter {
  */
 struct DirectSoundDevice
 {
+    LONG                        ref;
+
     GUID                        guid;
     DSCAPS                      drvcaps;
     DWORD                       priolevel, sleeptime;
     PWAVEFORMATEX               pwfx, primary_pwfx;
     LPBYTE                      buffer;
     DWORD                       writelead, buflen, ac_frames, frag_frames, playpos, pad, stopped;
-    LONG                        terminated;
     int                         nrofbuffers;
     IDirectSoundBufferImpl**    buffers;
     SRWLOCK                     buffer_list_lock;
@@ -105,6 +106,7 @@ struct DirectSoundDevice
     IAudioRenderClient *render;
 
     HANDLE sleepev, thread;
+    struct list entry;
 };
 
 /* reference counted buffer memory for duplicated buffer memory */
@@ -138,12 +140,14 @@ struct IDirectSoundBufferImpl
     SRWLOCK                     lock;
     PWAVEFORMATEX               pwfx;
     BufferMemory*               buffer;
-    DWORD                       playflags,state;
+    DWORD                       playflags,state,leadin;
     DWORD                       writelead,maxwritelead,buflen;
     DWORD                       freq;
     DSVOLUMEPAN                 volpan;
     DSBUFFERDESC                dsbd;
     /* used for frequency conversion (PerfectPitch) */
+    ULONG                       freqneeded;
+    DWORD                       firstep;
     float                       firgain;
     LONG64                      freqAdjustNum,freqAdjustDen;
     LONG64                      freqAccNum;
@@ -205,7 +209,6 @@ HRESULT IKsPrivatePropertySetImpl_Create(REFIID riid, void **ppv);
 HRESULT DSOUND_Create(REFIID riid, void **ppv);
 HRESULT DSOUND_Create8(REFIID riid, void **ppv);
 HRESULT IDirectSoundImpl_Create(IUnknown *outer_unk, REFIID riid, void **ppv, BOOL has_ds8);
-void DSOUND_ParseSpeakerConfig(DirectSoundDevice *device);
 
 /* primary.c */
 
@@ -238,7 +241,7 @@ DWORD CALLBACK DSOUND_mixthread(void *ptr);
 void DSOUND_Calc3DBuffer(IDirectSoundBufferImpl *dsb);
 
 /* capture.c */
-
+ 
 HRESULT DSOUND_CaptureCreate(REFIID riid, void **ppv);
 HRESULT DSOUND_CaptureCreate8(REFIID riid, void **ppv);
 HRESULT IDirectSoundCaptureImpl_Create(IUnknown *outer_unk, REFIID riid, void **ppv, BOOL has_dsc8);
@@ -249,12 +252,19 @@ HRESULT IDirectSoundCaptureImpl_Create(IUnknown *outer_unk, REFIID riid, void **
 #define STATE_CAPTURING 2
 #define STATE_STOPPING  3
 
+extern CRITICAL_SECTION DSOUND_renderers_lock;
+extern struct list DSOUND_renderers;
+
 extern GUID *DSOUND_renderer_guids;
 extern GUID *DSOUND_capture_guids;
+
+extern const WCHAR wine_vxd_drv[];
 
 void setup_dsound_options(void);
 
 HRESULT get_mmdevice(EDataFlow flow, const GUID *tgt, IMMDevice **device);
 
+BOOL DSOUND_check_supported(IAudioClient *client, DWORD rate,
+        DWORD depth, WORD channels);
 HRESULT enumerate_mmdevices(EDataFlow flow, GUID *guids,
         LPDSENUMCALLBACKW cb, void *user);

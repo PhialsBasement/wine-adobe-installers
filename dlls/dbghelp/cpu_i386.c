@@ -21,6 +21,7 @@
 #include <assert.h>
 
 #include "ntstatus.h"
+#define WIN32_NO_STATUS
 #include "dbghelp_private.h"
 #include "wine/winbase16.h"
 #include "winternl.h"

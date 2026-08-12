@@ -180,24 +180,13 @@ static HRESULT PROPVAR_ConvertNumber(REFPROPVARIANT pv, int dest_bits,
 
 HRESULT WINAPI PropVariantToDouble(REFPROPVARIANT propvarIn, double *ret)
 {
-    HRESULT hr = S_OK;
     LONGLONG res;
+    HRESULT hr;
 
     TRACE("(%p, %p)\n", propvarIn, ret);
 
-    switch (propvarIn->vt)
-    {
-        case VT_R8:
-            *ret = propvarIn->dblVal;
-            break;
-        case VT_R4:
-            *ret = propvarIn->fltVal;
-            break;
-        default:
-            hr = PROPVAR_ConvertNumber(propvarIn, 64, TRUE, &res);
-            if (SUCCEEDED(hr)) *ret = (double)res;
-    }
-
+    hr = PROPVAR_ConvertNumber(propvarIn, 64, TRUE, &res);
+    if (SUCCEEDED(hr)) *ret = (double)res;
     return hr;
 }
 
@@ -412,63 +401,6 @@ HRESULT WINAPI PropVariantToString(REFPROPVARIANT propvarIn, PWSTR ret, UINT cch
     return hr;
 }
 
-static HRESULT string_alloc_from_int(const PROPVARIANT *var, WCHAR **ret)
-{
-    WCHAR buffer[64], *out = buffer + ARRAY_SIZE(buffer) - 1;
-    BOOL negative = FALSE;
-    ULONG64 value;
-
-    switch (var->vt)
-    {
-        case VT_I1:
-            value = (negative = var->cVal < 0) ? -var->cVal : var->cVal;
-            break;
-        case VT_I2:
-            value = (negative = var->iVal < 0) ? -var->iVal : var->iVal;
-            break;
-        case VT_I4:
-            value = (negative = var->lVal < 0) ? -var->lVal : var->lVal;
-            break;
-        case VT_I8:
-            value = (negative = var->hVal.QuadPart < 0) ? -var->hVal.QuadPart : var->hVal.QuadPart;
-            break;
-        case VT_UI1:
-            value = var->bVal;
-            break;
-        case VT_UI2:
-            value = var->uiVal;
-            break;
-        case VT_UI4:
-            value = var->ulVal;
-            break;
-        case VT_UI8:
-            value = var->uhVal.QuadPart;
-            break;
-        default:
-            return E_UNEXPECTED;
-    }
-
-    *out-- = 0;
-
-    do
-    {
-        unsigned int next_digit = value % 10;
-        *out-- = '0' + next_digit;
-        value = value / 10;
-    } while (value);
-
-    out++;
-
-    if (negative)
-        *--out = '-';
-
-    if (!(*ret = CoTaskMemAlloc((wcslen(out) + 1) * sizeof(*out))))
-        return E_OUTOFMEMORY;
-    wcscpy(*ret, out);
-
-    return S_OK;
-}
-
 HRESULT WINAPI PropVariantToStringAlloc(REFPROPVARIANT propvarIn, WCHAR **ret)
 {
     WCHAR *res = NULL;
@@ -516,17 +448,6 @@ HRESULT WINAPI PropVariantToStringAlloc(REFPROPVARIANT propvarIn, WCHAR **ret)
                     return E_OUTOFMEMORY;
                 StringFromGUID2(propvarIn->puuid, res, GUID_STR_LEN + 1);
             }
-            break;
-
-        case VT_I1:
-        case VT_I2:
-        case VT_I4:
-        case VT_I8:
-        case VT_UI1:
-        case VT_UI2:
-        case VT_UI4:
-        case VT_UI8:
-            hr = string_alloc_from_int(propvarIn, &res);
             break;
 
         default:
@@ -615,7 +536,8 @@ HRESULT WINAPI PropVariantChangeType(PROPVARIANT *ppropvarDest, REFPROPVARIANT p
 {
     HRESULT hr;
 
-    TRACE("(%p, %p, %d, %d, %d)\n", ppropvarDest, propvarSrc, propvarSrc->vt, flags, vt);
+    FIXME("(%p, %p, %d, %d, %d): semi-stub!\n", ppropvarDest, propvarSrc,
+          propvarSrc->vt, flags, vt);
 
     if (vt == propvarSrc->vt)
         return PropVariantCopy(ppropvarDest, propvarSrc);
@@ -717,17 +639,6 @@ HRESULT WINAPI PropVariantChangeType(PROPVARIANT *ppropvarDest, REFPROPVARIANT p
         }
         return hr;
     }
-    case VT_R8:
-    {
-        double res;
-        hr = PropVariantToDouble(propvarSrc, &res);
-        if (SUCCEEDED(hr))
-        {
-            ppropvarDest->vt = VT_R8;
-            ppropvarDest->dblVal = res;
-        }
-        return hr;
-    }
 
     case VT_LPWSTR:
     case VT_BSTR:
@@ -764,14 +675,6 @@ HRESULT WINAPI PropVariantChangeType(PROPVARIANT *ppropvarDest, REFPROPVARIANT p
 
             CoTaskMemFree(resW);
         }
-        return hr;
-    }
-
-    case VT_CLSID:
-    {
-        GUID guid;
-        if (SUCCEEDED((hr = PropVariantToGUID(propvarSrc, &guid))))
-            hr = InitPropVariantFromCLSID(&guid, ppropvarDest);
         return hr;
     }
 
@@ -991,7 +894,7 @@ static inline HRESULT PROPVAR_WCHARToGUID(const WCHAR *str, int len, GUID *guid)
     return S_OK;
 }
 
-HRESULT WINAPI PropVariantToGUID(REFPROPVARIANT ppropvar, GUID *guid)
+HRESULT WINAPI PropVariantToGUID(const PROPVARIANT *ppropvar, GUID *guid)
 {
     TRACE("%p %p)\n", ppropvar, guid);
 
@@ -1291,84 +1194,4 @@ HRESULT WINAPI VariantToPropVariant(const VARIANT *var, PROPVARIANT *propvar)
     }
 
     return S_OK;
-}
-
-HRESULT WINAPI PropVariantGetStringElem(const PROPVARIANT *propvar, ULONG idx, WCHAR **ret)
-{
-    const WCHAR *wstr;
-
-    TRACE("propvar %p, idx %lu, ret %p, propvar->vt %#x.\n", propvar, idx, ret, propvar ? propvar->vt : 0);
-
-    *ret = 0;
-    switch (propvar->vt)
-    {
-    case VT_BSTR:
-        if (idx != 0) return E_INVALIDARG;
-        wstr = propvar->bstrVal;
-        break;
-    case VT_LPWSTR:
-        if (idx != 0) return E_INVALIDARG;
-        wstr = propvar->pwszVal;
-        break;
-    case VT_BSTR | VT_VECTOR:
-        if (idx >= propvar->cabstr.cElems) return E_INVALIDARG;
-        wstr = propvar->cabstr.pElems[idx];
-        break;
-    case VT_LPWSTR | VT_VECTOR:
-        if (idx >= propvar->calpwstr.cElems) return E_INVALIDARG;
-        wstr = propvar->calpwstr.pElems[idx];
-        break;
-    case VT_BSTR | VT_ARRAY:
-    {
-        LONG l = idx;
-        HRESULT hr;
-
-        if (SafeArrayGetDim(propvar->parray) != 1) return E_INVALIDARG;
-        /* bug in native implementation: ignore lower-bound when checking bounds */
-        if (idx >= propvar->parray->rgsabound[0].cElements) return E_INVALIDARG;
-        hr = SafeArrayGetElement(propvar->parray, &l, &wstr);
-        if (FAILED(hr)) return hr;
-        break;
-    }
-    default:
-        return E_INVALIDARG;
-    }
-
-    if (!wstr) wstr = L"";
-    *ret = CoTaskMemAlloc((wcslen(wstr) + 1) * sizeof(WCHAR));
-    if (!*ret)
-        return E_OUTOFMEMORY;
-    wcscpy(*ret, wstr);
-    return S_OK;
-}
-
-HRESULT WINAPI PropVariantToFileTime(REFPROPVARIANT propvar, PSTIME_FLAGS flags, FILETIME *timestamp)
-{
-    TRACE("%p, %#x, %p\n", propvar, flags, timestamp);
-
-    switch (propvar->vt)
-    {
-    case VT_EMPTY:
-        return E_INVALIDARG;
-    default:
-        FIXME("Unimplemented for type %d.\n", propvar->vt);
-        return E_NOTIMPL;
-    }
-}
-
-HRESULT WINAPI PropVariantToUInt32Vector(REFPROPVARIANT propvar, ULONG *buffer, ULONG size, ULONG *count)
-{
-    TRACE("%p, %p, %lu, %p.\n", propvar, buffer, size, count);
-
-    *count = 0;
-
-    switch (propvar->vt)
-    {
-    case VT_EMPTY:
-        return E_INVALIDARG;
-    default:
-        FIXME("Unimplemented for type %d.\n", propvar->vt);
-        return E_NOTIMPL;
-    }
-    return E_NOTIMPL;
 }

@@ -30,7 +30,7 @@
 #include "d3d12.h"
 #define VK_NO_PROTOTYPES
 #include "wine/vulkan.h"
-#include <vkd3d_utils.h>
+#include <vkd3d.h>
 
 WINE_DEFAULT_DEBUG_CHANNEL(d3d);
 WINE_DECLARE_DEBUG_CHANNEL(vkd3d);
@@ -42,6 +42,8 @@ struct wined3d_wndproc
     HWND window;
     BOOL unicode;
     BOOL filter;
+    BOOL activate_processed;
+    BOOL inside_mode_change;
     WNDPROC proc;
     struct wined3d_device *device;
     uint32_t flags;
@@ -490,7 +492,7 @@ static BOOL wined3d_dll_init(HINSTANCE hInstDLL)
         else putenv( "VKD3D_SHADER_DEBUG=none" );
     }
 
-    vkd3d_utils_set_log_callback(vkd3d_log_callback);
+    vkd3d_set_log_callback(vkd3d_log_callback);
 
     return TRUE;
 }
@@ -620,6 +622,73 @@ BOOL wined3d_filter_messages(HWND window, BOOL filter)
 
     wined3d_wndproc_mutex_unlock();
 
+    return ret;
+}
+
+BOOL wined3d_get_activate_processed(HWND window)
+{
+    struct wined3d_wndproc *entry;
+    BOOL ret;
+
+    wined3d_wndproc_mutex_lock();
+
+    if (!(entry = wined3d_find_wndproc(window, NULL)))
+    {
+        wined3d_wndproc_mutex_unlock();
+        return FALSE;
+    }
+    ret = entry->activate_processed;
+    wined3d_wndproc_mutex_unlock();
+    return ret;
+}
+
+void wined3d_set_activate_processed(HWND window, BOOL activate_processed)
+{
+    struct wined3d_wndproc *entry;
+
+    wined3d_wndproc_mutex_lock();
+
+    if (!(entry = wined3d_find_wndproc(window, NULL)))
+    {
+        wined3d_wndproc_mutex_unlock();
+        return;
+    }
+    entry->activate_processed = activate_processed;
+    wined3d_wndproc_mutex_unlock();
+}
+
+BOOL wined3d_get_inside_mode_change(HWND window)
+{
+    struct wined3d_wndproc *entry;
+    BOOL ret;
+
+    wined3d_wndproc_mutex_lock();
+
+    if (!(entry = wined3d_find_wndproc(window, NULL)))
+    {
+        wined3d_wndproc_mutex_unlock();
+        return FALSE;
+    }
+    ret = entry->inside_mode_change;
+    wined3d_wndproc_mutex_unlock();
+    return ret;
+}
+
+BOOL wined3d_set_inside_mode_change(HWND window, BOOL inside_mode_change)
+{
+    struct wined3d_wndproc *entry;
+    BOOL ret;
+
+    wined3d_wndproc_mutex_lock();
+
+    if (!(entry = wined3d_find_wndproc(window, NULL)))
+    {
+        wined3d_wndproc_mutex_unlock();
+        return FALSE;
+    }
+    ret = entry->inside_mode_change;
+    entry->inside_mode_change = inside_mode_change;
+    wined3d_wndproc_mutex_unlock();
     return ret;
 }
 
@@ -759,6 +828,8 @@ BOOL CDECL wined3d_register_window(struct wined3d *wined3d, HWND window,
     entry->device = device;
     entry->wined3d = wined3d;
     entry->flags = flags;
+    entry->activate_processed = FALSE;
+    entry->inside_mode_change = FALSE;
 
     wined3d_wndproc_mutex_unlock();
 

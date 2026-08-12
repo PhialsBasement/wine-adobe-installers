@@ -41,6 +41,7 @@
 #endif
 
 #include "ntstatus.h"
+#define WIN32_NO_STATUS
 #include "windef.h"
 #include "winbase.h"
 #include "wincon.h"
@@ -82,17 +83,6 @@ static const char *get_status_name( unsigned int status )
     return buffer;
 }
 
-static void dump_ushorts( const char *prefix, const unsigned short *ptr, int len )
-{
-    fprintf( stderr, "%s{", prefix );
-    while (len > 0)
-    {
-        fprintf( stderr, "%04x", *ptr++ );
-        if (--len) fputc( ',', stderr );
-    }
-    fputc( '}', stderr );
-}
-
 static void dump_uints( const char *prefix, const unsigned int *ptr, int len )
 {
     fprintf( stderr, "%s{", prefix );
@@ -115,13 +105,6 @@ static void dump_handles( const char *prefix, const obj_handle_t *data, data_siz
         if (--len) fputc( ',', stderr );
     }
     fputc( '}', stderr );
-}
-
-static void dump_unicode_str( const char *prefix, const WCHAR *str, data_size_t size )
-{
-    fprintf( stderr, "%sL\"", prefix );
-    dump_strW( str, size, stderr, "\"\"" );
-    fputc( '"', stderr );
 }
 
 static void dump_timeout( const char *prefix, const timeout_t *time )
@@ -559,7 +542,16 @@ static void dump_varargs_uints64( const char *prefix, data_size_t size )
 
 static void dump_varargs_ushorts( const char *prefix, data_size_t size )
 {
-    dump_ushorts( prefix, cur_data, size / sizeof(unsigned short) );
+    const unsigned short *data = cur_data;
+    data_size_t len = size / sizeof(*data);
+
+    fprintf( stderr, "%s{", prefix );
+    while (len > 0)
+    {
+        fprintf( stderr, "%04x", *data++ );
+        if (--len) fputc( ',', stderr );
+    }
+    fputc( '}', stderr );
     remove_data( size );
 }
 
@@ -671,7 +663,9 @@ static void dump_varargs_string( const char *prefix, data_size_t size )
 
 static void dump_varargs_unicode_str( const char *prefix, data_size_t size )
 {
-    dump_unicode_str( prefix, cur_data, size );
+    fprintf( stderr, "%sL\"", prefix );
+    dump_strW( cur_data, size, stderr, "\"\"" );
+    fputc( '\"', stderr );
     remove_data( size );
 }
 
@@ -684,7 +678,9 @@ static void dump_varargs_unicode_strings( const char *prefix, data_size_t size )
         unsigned int len = 0;
 
         while (len < cur_size / sizeof(WCHAR) && str[len]) len++;
-        dump_unicode_str( "", cur_data, len * sizeof(WCHAR) );
+        fputs( "L\"", stderr );
+        dump_strW( cur_data, len * sizeof(WCHAR), stderr, "\"\"" );
+        fputc( '\"', stderr );
         if (len < cur_size / sizeof(WCHAR)) len++;  /* skip terminating null */
         remove_data( len * sizeof(WCHAR) );
         if (cur_size >= sizeof(WCHAR)) fputc( ',', stderr );
@@ -984,12 +980,12 @@ static void dump_varargs_debug_event( const char *prefix, data_size_t size )
 }
 
 /* dump a unicode string contained in a buffer; helper for dump_varargs_startup_info */
-static data_size_t dump_inline_unicode_string( const char *prefix, data_size_t pos,
-                                               data_size_t len, data_size_t total_size )
+static data_size_t dump_inline_unicode_string( const char *prefix, data_size_t pos, data_size_t len, data_size_t total_size )
 {
+    fputs( prefix, stderr );
     if (pos >= total_size) return pos;
     if (len > total_size - pos) len = total_size - pos;
-    dump_unicode_str( prefix, (const WCHAR *)cur_data + pos/sizeof(WCHAR), len );
+    dump_strW( (const WCHAR *)cur_data + pos/sizeof(WCHAR), len, stderr, "\"\"" );
     return pos + (len / sizeof(WCHAR)) * sizeof(WCHAR);
 }
 
@@ -1008,15 +1004,15 @@ static void dump_varargs_startup_info( const char *prefix, data_size_t size )
              prefix, info.debug_flags, info.console_flags, info.console,
              info.hstdin, info.hstdout, info.hstderr, info.x, info.y, info.xsize, info.ysize,
              info.xchars, info.ychars, info.attribute, info.flags, info.show, info.process_group_id );
-    pos = dump_inline_unicode_string( ",curdir=", pos, info.curdir_len, size );
-    pos = dump_inline_unicode_string( ",dllpath=", pos, info.dllpath_len, size );
-    pos = dump_inline_unicode_string( ",imagepath=", pos, info.imagepath_len, size );
-    pos = dump_inline_unicode_string( ",cmdline=", pos, info.cmdline_len, size );
-    pos = dump_inline_unicode_string( ",title=", pos, info.title_len, size );
-    pos = dump_inline_unicode_string( ",desktop=", pos, info.desktop_len, size );
-    pos = dump_inline_unicode_string( ",shellinfo=", pos, info.shellinfo_len, size );
-    dump_inline_unicode_string( ",runtime=", pos, info.runtime_len, size );
-    fputc( '}', stderr );
+    pos = dump_inline_unicode_string( ",curdir=L\"", pos, info.curdir_len, size );
+    pos = dump_inline_unicode_string( "\",dllpath=L\"", pos, info.dllpath_len, size );
+    pos = dump_inline_unicode_string( "\",imagepath=L\"", pos, info.imagepath_len, size );
+    pos = dump_inline_unicode_string( "\",cmdline=L\"", pos, info.cmdline_len, size );
+    pos = dump_inline_unicode_string( "\",title=L\"", pos, info.title_len, size );
+    pos = dump_inline_unicode_string( "\",desktop=L\"", pos, info.desktop_len, size );
+    pos = dump_inline_unicode_string( "\",shellinfo=L\"", pos, info.shellinfo_len, size );
+    dump_inline_unicode_string( "\",runtime=L\"", pos, info.runtime_len, size );
+    fprintf( stderr, "\"}" );
     remove_data( size );
 }
 
@@ -1249,10 +1245,10 @@ static void dump_varargs_process_info( const char *prefix, data_size_t size )
                  process->parent_pid, process->session_id, process->handle_count, process->unix_pid );
         pos += sizeof(*process);
 
-        pos = dump_inline_unicode_string( "name=", pos, process->name_len, size );
+        pos = dump_inline_unicode_string( "name=L\"", pos, process->name_len, size );
 
         pos = (pos + 7) & ~7;
-        fprintf( stderr, ",threads={" );
+        fprintf( stderr, "\",threads={" );
         for (i = 0; i < process->thread_count; i++)
         {
             const struct thread_info *thread = (const struct thread_info *)((const char *)cur_data + pos);
@@ -1290,7 +1286,9 @@ static void dump_varargs_object_attributes( const char *prefix, data_size_t size
         fprintf( stderr, "rootdir=%04x,attributes=%08x", objattr->rootdir, objattr->attributes );
         dump_inline_security_descriptor( ",sd=", (const struct security_descriptor *)(objattr + 1), objattr->sd_len );
         str = (const WCHAR *)objattr + (sizeof(*objattr) + objattr->sd_len) / sizeof(WCHAR);
-        dump_unicode_str( ",name=", str, objattr->name_len );
+        fprintf( stderr, ",name=L\"" );
+        dump_strW( str, objattr->name_len, stderr, "\"\"" );
+        fputc( '\"', stderr );
         remove_data( (sizeof(*objattr) + (objattr->sd_len & ~1) + (objattr->name_len & ~1) + 3) & ~3 );
     }
     fputc( '}', stderr );
@@ -1314,7 +1312,9 @@ static void dump_varargs_object_type_info( const char *prefix, data_size_t size 
                  info->index,info->obj_count, info->handle_count, info->obj_max, info->handle_max,
                  info->valid_access );
         dump_generic_map( ",access=", &info->mapping );
-        dump_unicode_str( ",name=", (const WCHAR *)(info + 1), info->name_len );
+        fprintf( stderr, ",name=L\"" );
+        dump_strW( (const WCHAR *)(info + 1), info->name_len, stderr, "\"\"" );
+        fputc( '\"', stderr );
         remove_data( min( size, sizeof(*info) + ((info->name_len + 2) & ~3 )));
     }
     fputc( '}', stderr );
@@ -1387,104 +1387,6 @@ static void dump_varargs_pe_image_info( const char *prefix, data_size_t size )
     remove_data( min( size, sizeof(info) ));
 }
 
-struct version_info
-{
-    unsigned short len;
-    unsigned short val_len;
-    unsigned short type;
-    WCHAR          key[1];
-};
-
-struct version_entry
-{
-    const struct version_info *info;
-    const void                *value;
-    const void                *next;
-    const void                *child;
-    data_size_t                namelen;
-};
-
-static int get_version_entry( struct version_entry *entry, const void *ptr, const void *end )
-{
-    unsigned int len;
-    const struct version_info *info = ptr;
-
-    if ((const char *)(info + 1) > (const char *)end) return 0;
-    if ((const char *)info + info->len > (const char *)end) return 0;
-
-    for (len = 0; info->key[len]; len++)
-        if (offsetof(struct version_info, key[len + 1]) > info->len) return 0;
-
-    entry->info  = info;
-    entry->namelen = len * sizeof(WCHAR);
-
-    len = (offsetof(struct version_info, key[len + 1]) + 3) & ~3;
-    if (len + info->val_len * (info->type ? 2 : 1) > info->len) return 0;
-
-    entry->value = (const char *)info + len;
-    entry->child = (const char *)info + len + ((info->val_len * (info->type ? 2 : 1) + 3) & ~3);
-    entry->next  = (const char *)info + ((info->len + 3) & ~3);
-    return 1;
-}
-
-static void dump_version_children( const struct version_entry *parent )
-{
-    struct version_entry child;
-
-    if (!get_version_entry( &child, parent->child, parent->next )) return;
-    fputc( '{', stderr );
-    for (;;)
-    {
-        if (child.info->val_len || child.value == child.next)
-        {
-            dump_unicode_str( "", child.info->key, child.namelen );
-            if (child.info->type)
-            {
-                data_size_t len = child.info->val_len;
-                if (len && !((WCHAR *)child.value)[len - 1]) len--;
-                dump_unicode_str( "=", child.value, len * sizeof(WCHAR) );
-            }
-            else dump_ushorts( "=", child.value, child.info->val_len / sizeof(unsigned short) );
-        }
-        else
-        {
-            dump_unicode_str( "", child.info->key, child.namelen );
-            fputc( '=', stderr );
-        }
-        dump_version_children( &child );
-        if (!get_version_entry( &child, child.next, parent->next )) break;
-        fputc( ',', stderr );
-    }
-    fputc( '}', stderr );
-}
-
-static void dump_varargs_version_res( const char *prefix, data_size_t size )
-{
-    struct version_entry entry;
-
-    fprintf( stderr, "%s{", prefix );
-    if (get_version_entry( &entry, cur_data, (char *)cur_data + size ))
-    {
-        const VS_FIXEDFILEINFO *info = entry.value;
-        if (entry.info->val_len >= sizeof(VS_FIXEDFILEINFO))
-        {
-            fprintf( stderr, "signature=%08x,version=%u.%u,filever=%u.%u.%u.%u,prodver=%u.%u.%u.%u,",
-                     info->dwSignature, HIWORD(info->dwStrucVersion), LOWORD(info->dwStrucVersion),
-                     HIWORD(info->dwFileVersionMS), LOWORD(info->dwFileVersionMS),
-                     HIWORD(info->dwFileVersionLS), LOWORD(info->dwFileVersionLS),
-                     HIWORD(info->dwProductVersionMS), LOWORD(info->dwProductVersionMS),
-                     HIWORD(info->dwProductVersionLS), LOWORD(info->dwProductVersionLS) );
-            fprintf( stderr, "mask=%x,flags=%x,os=%u.%u,type=%u.%u,date=%x.%x,",
-                     info->dwFileFlagsMask, info->dwFileFlags,
-                     HIWORD(info->dwFileOS), LOWORD(info->dwFileOS),
-                     info->dwFileType, info->dwFileSubtype, info->dwFileDateMS, info->dwFileDateLS );
-        }
-        dump_version_children( &entry );
-    }
-    fputc( '}', stderr );
-    remove_data( size );
-}
-
 static void dump_varargs_rawinput_devices(const char *prefix, data_size_t size )
 {
     const struct rawinput_device *device;
@@ -1515,6 +1417,47 @@ static void dump_varargs_handle_infos( const char *prefix, data_size_t size )
         size -= sizeof(*handle);
         remove_data( sizeof(*handle) );
         if (size) fputc( ',', stderr );
+    }
+    fputc( '}', stderr );
+}
+
+static void dump_varargs_cpu_topology_override( const char *prefix, data_size_t size )
+{
+    const struct cpu_topology_override *cpu_topology = cur_data;
+    unsigned int i;
+
+    if (size < sizeof(*cpu_topology))
+        return;
+
+    fprintf( stderr,"%s{", prefix );
+    for (i = 0; i < cpu_topology->cpu_count; ++i)
+    {
+        if (i) fputc( ',', stderr );
+        fprintf( stderr, "%u", cpu_topology->host_cpu_id[i] );
+    }
+    fputc( '}', stderr );
+    remove_data( size );
+}
+
+static void dump_varargs_directory_file_entries( const char *prefix, data_size_t size )
+{
+    const struct directory_file_entry *entry = cur_data;
+    const WCHAR *str;
+
+    fprintf( stderr, "%s{", prefix );
+    if (size)
+    {
+        if (size < sizeof(*entry) || size - sizeof(*entry) < entry->name_len)
+        {
+            fprintf( stderr, "***invalid***}" );
+            remove_data( size );
+            return;
+        }
+        str = (const WCHAR *)(entry + 1);
+        fprintf( stderr, "{name=L\"" );
+        dump_strW( str, entry->name_len, stderr, "\"\"" );
+        fprintf( stderr, "\"}" );
+        remove_data( size );
     }
     fputc( '}', stderr );
 }
@@ -1623,10 +1566,12 @@ static void dump_varargs_directory_entries( const char *prefix, data_size_t size
         }
 
         next = (const char *)(entry + 1);
-        dump_unicode_str( "{name=", (const WCHAR *)next, entry->name_len );
+        fprintf( stderr, "{name=L\"" );
+        dump_strW( (const WCHAR *)next, entry->name_len, stderr, "\"\"" );
         next += entry->name_len;
-        dump_unicode_str( ",type=", (const WCHAR *)next, entry->type_len );
-        fputc( '}', stderr );
+        fprintf( stderr, "\",type=L\"" );
+        dump_strW( (const WCHAR *)next, entry->type_len, stderr, "\"\"" );
+        fprintf( stderr, "\"}" );
 
         entry_size = min( size, (sizeof(*entry) + entry->name_len + entry->type_len + 3) & ~3 );
         size -= entry_size;
@@ -1652,20 +1597,6 @@ static void dump_varargs_monitor_infos( const char *prefix, data_size_t size )
     }
     fputc( '}', stderr );
     remove_data( size );
-}
-
-static void dump_varargs_class_info( const char *prefix, data_size_t size )
-{
-    const struct class_info *info = cur_data;
-
-    fprintf( stderr, "%s{atom=%#x,style=%#x,cls_extra=%u,win_extra=%u,cursor=%#x,background=%#x,icon=%#x,icon_small=%#x",
-             prefix, info->atom, info->style, info->cls_extra, info->win_extra, info->cursor,
-             info->background, info->icon, info->icon_small );
-    dump_uint64( ",instance=", &info->instance );
-    dump_uint64( ",wndproc=", &info->wndproc );
-    dump_uint64( ",menu_name=", &info->menu_name );
-    fputc( '}', stderr );
-    remove_data( sizeof(*info) );
 }
 
 void trace_request(void)

@@ -59,12 +59,7 @@ static const struct
     { &GUID_WICPixelFormat24bppBGR, PixelFormat24bppRGB, 0 },
     { &GUID_WICPixelFormat32bppBGR, PixelFormat32bppRGB, 0 },
     { &GUID_WICPixelFormat32bppBGRA, PixelFormat32bppARGB, 0 },
-    { &GUID_WICPixelFormat32bppCMYK, PixelFormat32bppCMYK, 0 },
-    { &GUID_WICPixelFormat32bppGrayFloat, PixelFormat32bppARGB, 0 },
     { &GUID_WICPixelFormat32bppPBGRA, PixelFormat32bppPARGB, 0 },
-    { &GUID_WICPixelFormat48bppRGB, PixelFormat48bppRGB, 0 },
-    { &GUID_WICPixelFormat64bppCMYK, PixelFormat48bppRGB, 0 },
-    { &GUID_WICPixelFormat64bppRGBA, PixelFormat48bppRGB, 0 },
     { NULL }
 };
 
@@ -1125,7 +1120,7 @@ GpStatus WINGDIPAPI GdipBitmapLockBits(GpBitmap* bitmap, GDIPCONST GpRect* rect,
 
     if(rect){
         if(rect->X < 0 || rect->Y < 0 || (rect->X + rect->Width > bitmap->width) ||
-          (rect->Y + rect->Height > bitmap->height))
+          (rect->Y + rect->Height > bitmap->height) || !flags)
         {
             image_unlock(&bitmap->image);
             return InvalidParameter;
@@ -1468,73 +1463,29 @@ GpStatus WINGDIPAPI GdipCreateBitmapFromGdiDib(GDIPCONST BITMAPINFO* info,
                                                VOID *bits, GpBitmap **bitmap)
 {
     DWORD height, stride;
-    PixelFormat format;
-    BYTE *scan0;
+    HBITMAP hbm;
+    void *bmbits;
+    GpStatus status;
 
     TRACE("(%p, %p, %p)\n", info, bits, bitmap);
 
     if (!info || !bits || !bitmap)
         return InvalidParameter;
 
-    if (info->bmiHeader.biSize < sizeof(BITMAPINFOHEADER))
+    hbm = CreateDIBSection(0, info, DIB_RGB_COLORS, &bmbits, NULL, 0);
+    if (!hbm)
         return InvalidParameter;
 
     height = abs(info->bmiHeader.biHeight);
     stride = ((info->bmiHeader.biWidth * info->bmiHeader.biBitCount + 31) >> 3) & ~3;
-    scan0 = bits;
+    TRACE("height %lu, stride %lu, image size %lu\n", height, stride, height * stride);
 
-    if (info->bmiHeader.biHeight > 0)
-    {
-        scan0 = scan0 + (height - 1) * stride;
-        stride = -stride;
-    }
+    memcpy(bmbits, bits, height * stride);
 
-    switch (info->bmiHeader.biBitCount)
-    {
-        case 1:
-            format = PixelFormat1bppIndexed;
-            break;
-        case 4:
-            format = PixelFormat4bppIndexed;
-            break;
-        case 8:
-            format = PixelFormat8bppIndexed;
-            break;
-        case 16:
-        {
-            if (info->bmiHeader.biCompression == BI_RGB)
-            {
-                format = PixelFormat16bppRGB555;
-                break;
-            }
-            if (info->bmiHeader.biCompression == BI_BITFIELDS && info->bmiHeader.biSize >= FIELD_OFFSET(BITMAPV4HEADER, bV4AlphaMask))
-            {
-                const BITMAPV4HEADER *header = (const BITMAPV4HEADER*)info;
-                if (header->bV4RedMask == 0x7c00 && header->bV4GreenMask == 0x3e0 && header->bV4BlueMask == 0x1f)
-                {
-                    format = PixelFormat16bppRGB555;
-                    break;
-                }
-                if (header->bV4RedMask == 0xf800 && header->bV4GreenMask == 0x7e0 && header->bV4BlueMask == 0x1f)
-                {
-                    format = PixelFormat16bppRGB565;
-                    break;
-                }
-            }
-            return InvalidParameter;
-        }
-        case 24:
-            format = PixelFormat24bppRGB;
-            break;
-        case 32:
-            format = PixelFormat32bppRGB;
-            break;
-        default:
-            FIXME("don't know how to handle %d bpp\n", info->bmiHeader.biBitCount);
-            return InvalidParameter;
-    }
+    status = GdipCreateBitmapFromHBITMAP(hbm, NULL, bitmap);
+    DeleteObject(hbm);
 
-    return GdipCreateBitmapFromScan0(info->bmiHeader.biWidth, height, stride, format, scan0, bitmap);
+    return status;
 }
 
 /* FIXME: no icm */
@@ -2267,12 +2218,8 @@ GpStatus WINGDIPAPI GdipGetImageHeight(GpImage *image, UINT *height)
         return InvalidParameter;
 
     if(image->type == ImageTypeMetafile)
-    {
-        if(!((GpMetafile*)image)->hemf)
-            return InvalidParameter;
         *height = units_to_pixels(((GpMetafile*)image)->bounds.Height, ((GpMetafile*)image)->unit,
                                   image->yres, ((GpMetafile*)image)->printer_display);
-    }
     else if(image->type == ImageTypeBitmap)
         *height = ((GpBitmap*)image)->height;
     else
@@ -2289,9 +2236,6 @@ GpStatus WINGDIPAPI GdipGetImageHeight(GpImage *image, UINT *height)
 GpStatus WINGDIPAPI GdipGetImageHorizontalResolution(GpImage *image, REAL *res)
 {
     if(!image || !res)
-        return InvalidParameter;
-
-    if((image->type == ImageTypeMetafile) && !((GpMetafile*)image)->hemf)
         return InvalidParameter;
 
     *res = image->xres;
@@ -2369,9 +2313,6 @@ GpStatus WINGDIPAPI GdipGetImageVerticalResolution(GpImage *image, REAL *res)
     if(!image || !res)
         return InvalidParameter;
 
-    if((image->type == ImageTypeMetafile) && !((GpMetafile*)image)->hemf)
-        return InvalidParameter;
-
     *res = image->yres;
 
     TRACE("(%p) <-- %0.2f\n", image, *res);
@@ -2387,12 +2328,8 @@ GpStatus WINGDIPAPI GdipGetImageWidth(GpImage *image, UINT *width)
         return InvalidParameter;
 
     if(image->type == ImageTypeMetafile)
-    {
-        if(!((GpMetafile*)image)->hemf)
-            return InvalidParameter;
         *width = units_to_pixels(((GpMetafile*)image)->bounds.Width, ((GpMetafile*)image)->unit,
                                  image->xres, ((GpMetafile*)image)->printer_display);
-    }
     else if(image->type == ImageTypeBitmap)
         *width = ((GpBitmap*)image)->width;
     else
@@ -3876,11 +3813,15 @@ static GpStatus decode_frame_wic(IWICBitmapDecoder *decoder, BOOL force_conversi
                 if (status == Ok) /* locked bitmap */
                 {
                     wrc.X = 0;
-                    wrc.Y = 0;
                     wrc.Width = width;
-                    wrc.Height = height;
-                    hr = IWICBitmapSource_CopyPixels(source, &wrc, lockeddata.Stride,
-                        lockeddata.Stride * height, (BYTE*)lockeddata.Scan0);
+                    wrc.Height = 1;
+                    for (i=0; i<height; i++)
+                    {
+                        wrc.Y = i;
+                        hr = IWICBitmapSource_CopyPixels(source, &wrc, abs(lockeddata.Stride),
+                            abs(lockeddata.Stride), (BYTE*)lockeddata.Scan0+lockeddata.Stride*i);
+                        if (FAILED(hr)) break;
+                    }
 
                     GdipBitmapUnlockBits(bitmap, &lockeddata);
                 }
@@ -4235,8 +4176,7 @@ static GpStatus decode_image_png(IStream* stream, GpImage **image)
         hr = IWICBitmapFrameDecode_GetPixelFormat(frame, &format);
         if (hr == S_OK)
         {
-            if (IsEqualGUID(&format, &GUID_WICPixelFormat8bppGray) ||
-                IsEqualGUID(&format, &GUID_WICPixelFormat64bppRGBA))
+            if (IsEqualGUID(&format, &GUID_WICPixelFormat8bppGray))
                 force_conversion = TRUE;
             else if ((IsEqualGUID(&format, &GUID_WICPixelFormat8bppIndexed) ||
                       IsEqualGUID(&format, &GUID_WICPixelFormat4bppIndexed) ||
@@ -5269,7 +5209,7 @@ static const struct image_codec codecs[NUM_CODECS] = {
     {
         { /* ICO */
             /* Clsid */              { 0x557cf407, 0x1a04, 0x11d3, { 0x9a, 0x73, 0x0, 0x0, 0xf8, 0x1e, 0xf3, 0x2e } },
-            /* FormatID */           { 0xb96b3cb5U, 0x0728U, 0x11d3U, {0x9d, 0x7b, 0x00, 0x00, 0xf8, 0x1e, 0xf3, 0x2e} },
+            /* FormatID */           { 0xb96b3cabU, 0x0728U, 0x11d3U, {0x9d, 0x7b, 0x00, 0x00, 0xf8, 0x1e, 0xf3, 0x2e} },
             /* CodecName */          ico_codecname,
             /* DllName */            NULL,
             /* FormatDescription */  ico_format,
@@ -5565,37 +5505,6 @@ GpStatus WINGDIPAPI GdipCreateBitmapFromHBITMAP(HBITMAP hbm, HPALETTE hpal, GpBi
     return retval;
 }
 
-static UINT get_effect_parameter_size(EffectType type)
-{
-    switch (type)
-    {
-    case BlurEffect:
-        return sizeof(struct BlurParams);
-    case SharpenEffect:
-        return sizeof(struct SharpenParams);
-    case TintEffect:
-        return sizeof(struct TintParams);
-    case RedEyeCorrectionEffect:
-        return sizeof(struct RedEyeCorrectionParams);
-    case ColorMatrixEffect:
-        return sizeof(ColorMatrix);
-    case ColorLUTEffect:
-        return sizeof(struct ColorLUTParams);
-    case BrightnessContrastEffect:
-        return sizeof(struct BrightnessContrastParams);
-    case HueSaturationLightnessEffect:
-        return sizeof(struct HueSaturationLightnessParams);
-    case ColorBalanceEffect:
-        return sizeof(struct ColorBalanceParams);
-    case LevelsEffect:
-        return sizeof(struct LevelsParams);
-    case ColorCurveEffect:
-        return sizeof(struct ColorCurveParams);
-    default:
-        return 0;
-    }
-}
-
 /*****************************************************************************
  * GdipCreateEffect [GDIPLUS.@]
  */
@@ -5603,7 +5512,6 @@ GpStatus WINGDIPAPI GdipCreateEffect(const GUID guid, CGpEffect **effect)
 {
     CGpEffect *ef = NULL;
     EffectType type;
-    UINT param_size;
 
     TRACE("(%s, %p)\n", debugstr_guid(&guid), effect);
 
@@ -5660,9 +5568,7 @@ GpStatus WINGDIPAPI GdipCreateEffect(const GUID guid, CGpEffect **effect)
         return Win32Error;
     }
 
-    param_size = get_effect_parameter_size(type);
-
-    ef = calloc(1, FIELD_OFFSET(CGpEffect, params.data[param_size]));
+    ef = malloc(sizeof(CGpEffect));
     ef->type = type;
     *effect = ef;
 
@@ -5696,43 +5602,48 @@ GpStatus WINGDIPAPI GdipGetEffectParameterSize(CGpEffect *effect, UINT *size)
     if (!effect || !size)
         return InvalidParameter;
 
-    sz = get_effect_parameter_size(effect->type);
-    if (!sz)
+    switch (effect->type)
+    {
+    case BlurEffect:
+        sz = sizeof(struct BlurParams);
+        break;
+    case SharpenEffect:
+        sz = sizeof(struct SharpenParams);
+        break;
+    case TintEffect:
+        sz = sizeof(struct TintParams);
+        break;
+    case RedEyeCorrectionEffect:
+        sz = sizeof(struct RedEyeCorrectionParams);
+        break;
+    case ColorMatrixEffect:
+        sz = sizeof(ColorMatrix);
+        break;
+    case ColorLUTEffect:
+        sz = sizeof(struct ColorLUTParams);
+        break;
+    case BrightnessContrastEffect:
+        sz = sizeof(struct BrightnessContrastParams);
+        break;
+    case HueSaturationLightnessEffect:
+        sz = sizeof(struct HueSaturationLightnessParams);
+        break;
+    case ColorBalanceEffect:
+        sz = sizeof(struct ColorBalanceParams);
+        break;
+    case LevelsEffect:
+        sz = sizeof(struct LevelsParams);
+        break;
+    case ColorCurveEffect:
+        sz = sizeof(struct ColorCurveParams);
+        break;
+    default:
         status = InvalidParameter;
+        break;
+    }
 
     *size = sz;
     return status;
-}
-
-/*****************************************************************************
- * GdipGetEffectParameters [GDIPLUS.@]
- */
-GpStatus WINGDIPAPI GdipGetEffectParameters(CGpEffect *effect, UINT *size, void *params)
-{
-    UINT params_size;
-
-    TRACE("(%p,%p,%p)\n", effect, size, params);
-
-    if (!effect || !size || !params)
-        return InvalidParameter;
-
-    if (effect->type == RedEyeCorrectionEffect)
-    {
-        static int calls;
-        if (!calls++)
-            FIXME("not implemented for RedEyeCorrectionEffect\n");
-        return NotImplemented;
-    }
-
-    params_size = get_effect_parameter_size(effect->type);
-
-    if (*size < params_size)
-        return InvalidParameter;
-
-    *size = params_size;
-    memcpy(params, effect->params.data, params_size);
-
-    return Ok;
 }
 
 /*****************************************************************************
@@ -5741,29 +5652,14 @@ GpStatus WINGDIPAPI GdipGetEffectParameters(CGpEffect *effect, UINT *size, void 
 GpStatus WINGDIPAPI GdipSetEffectParameters(CGpEffect *effect,
     const VOID *params, const UINT size)
 {
-    UINT params_size;
+    static int calls;
 
     TRACE("(%p,%p,%u)\n", effect, params, size);
 
-    if (!effect || !params)
-        return InvalidParameter;
+    if(!(calls++))
+        FIXME("not implemented\n");
 
-    if (effect->type == RedEyeCorrectionEffect)
-    {
-        static int calls;
-        if (!calls++)
-            FIXME("not implemented for RedEyeCorrectionEffect\n");
-        return NotImplemented;
-    }
-
-    params_size = get_effect_parameter_size(effect->type);
-
-    if (size != params_size)
-        return InvalidParameter;
-
-    memcpy(effect->params.data, params, size);
-
-    return Ok;
+    return NotImplemented;
 }
 
 /*****************************************************************************
@@ -6220,17 +6116,11 @@ GpStatus WINGDIPAPI GdipInitializePalette(ColorPalette *palette,
         wic_palette = get_palette(NULL, (WICBitmapPaletteType)type);
         if (!wic_palette) return OutOfMemory;
 
-        if (palette->Count >= wic_palette->Count + (transparent ? 1 : 0))
+        if (palette->Count >= wic_palette->Count)
         {
-            palette->Flags = (UINT)type << 8;
+            palette->Flags = wic_palette->Flags;
             palette->Count = wic_palette->Count;
             memcpy(palette->Entries, wic_palette->Entries, wic_palette->Count * sizeof(wic_palette->Entries[0]));
-            if (transparent)
-            {
-                /* If there is transparent color, add additional entry to palette */
-                palette->Entries[palette->Count] = 0x00000000;
-                palette->Count++;
-            }
         }
         else
             status = GenericError;

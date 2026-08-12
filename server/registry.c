@@ -29,7 +29,6 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <limits.h>
-#include <stdbool.h>
 #include <stdio.h>
 #include <stdarg.h>
 #include <string.h>
@@ -37,11 +36,9 @@
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <unistd.h>
-#ifdef HAVE_SYS_PERSONALITY_H
-#include <sys/personality.h>
-#endif
 
 #include "ntstatus.h"
+#define WIN32_NO_STATUS
 #include "object.h"
 #include "file.h"
 #include "handle.h"
@@ -93,6 +90,7 @@ struct key
     unsigned int      flags;       /* flags */
     timeout_t         modif;       /* last modification time */
     struct list       notify_list; /* list of notifications */
+    abstime_t         timestamp_counter; /* timestamp counter at last change */
 };
 
 /* key flags */
@@ -100,8 +98,9 @@ struct key
 #define KEY_DELETED  0x0002  /* key has been deleted */
 #define KEY_DIRTY    0x0004  /* key has been modified */
 #define KEY_SYMLINK  0x0008  /* key is a symbolic link */
-#define KEY_WOWSHARE 0x0010  /* key is a Wow64 shared key (used for Software\Classes) */
+#define KEY_WOWREFLECT 0x0010  /* key is a Wow64 shared and reflected key (used for Software\Classes) */
 #define KEY_PREDEF   0x0020  /* key is marked as predefined */
+#define KEY_WOWSHARE 0x0040  /* key is Wow64 shared */
 
 #define OBJ_KEY_WOW64 0x100000 /* magic flag added to attributes for WoW64 redirection */
 
@@ -121,19 +120,18 @@ struct key_value
 #define MAX_NAME_LEN  256    /* max. length of a key name */
 #define MAX_VALUE_LEN 16383  /* max. length of a value name */
 
+static abstime_t change_timestamp_counter;
+
 /* the root of the registry tree */
 static struct key *root_key;
 
 static const timeout_t ticks_1601_to_1970 = (timeout_t)86400 * (369 * 365 + 89) * TICKS_PER_SEC;
-static const timeout_t save_period = 30 * -TICKS_PER_SEC;  /* delay between periodic saves */
-static struct timeout_user *save_timeout_user;  /* saving timer */
-static enum prefix_type { PREFIX_UNKNOWN, PREFIX_32BIT, PREFIX_64BIT } prefix_type;
+static enum prefix_type prefix_type;
 
 static const WCHAR wow6432node[] = {'W','o','w','6','4','3','2','N','o','d','e'};
 static const WCHAR symlink_value[] = {'S','y','m','b','o','l','i','c','L','i','n','k','V','a','l','u','e'};
 static const struct unicode_str symlink_str = { symlink_value, sizeof(symlink_value) };
 
-static void set_periodic_save_timer(void);
 static struct key_value *find_value( const struct key *key, const struct unicode_str *name, int *index );
 
 /* information about where to save a registry branch */
@@ -167,7 +165,7 @@ struct file_load_info
 static void key_dump( struct object *obj, int verbose );
 static unsigned int key_map_access( struct object *obj, unsigned int access );
 static struct security_descriptor *key_get_sd( struct object *obj );
-static WCHAR *key_get_full_name( struct object *obj, data_size_t max, data_size_t *len );
+static WCHAR *key_get_full_name( struct object *obj, data_size_t *len );
 static struct object *key_lookup_name( struct object *obj, struct unicode_str *name,
                                        unsigned int attr, struct object *root );
 static int key_link_name( struct object *obj, struct object_name *name, struct object *parent );
@@ -183,10 +181,11 @@ static const struct object_ops key_ops =
     no_add_queue,            /* add_queue */
     NULL,                    /* remove_queue */
     NULL,                    /* signaled */
+    NULL,                    /* get_esync_fd */
+    NULL,                    /* get_fsync_idx */
     NULL,                    /* satisfied */
     no_signal,               /* signal */
     no_get_fd,               /* get_fd */
-    default_get_sync,        /* get_sync */
     key_map_access,          /* map_access */
     key_get_sd,              /* get_sd */
     default_set_sd,          /* set_sd */
@@ -465,7 +464,7 @@ static struct security_descriptor *key_get_sd( struct object *obj )
     return key_default_sd;
 }
 
-static WCHAR *key_get_full_name( struct object *obj, data_size_t max, data_size_t *ret_len )
+static WCHAR *key_get_full_name( struct object *obj, data_size_t *ret_len )
 {
     struct key *key = (struct key *) obj;
 
@@ -474,7 +473,7 @@ static WCHAR *key_get_full_name( struct object *obj, data_size_t max, data_size_
         set_error( STATUS_KEY_DELETED );
         return NULL;
     }
-    return default_get_full_name( obj, max, ret_len );
+    return default_get_full_name( obj, ret_len );
 }
 
 static struct object *key_lookup_name( struct object *obj, struct unicode_str *name,
@@ -522,7 +521,7 @@ static struct object *key_lookup_name( struct object *obj, struct unicode_str *n
         }
 
         key = (struct key *)obj;
-        if (key && (key->flags & KEY_WOWSHARE) && (attr & OBJ_KEY_WOW64) && !name->str)
+        if (key && (key->flags & KEY_WOWREFLECT) && (attr & OBJ_KEY_WOW64) && !name->str)
         {
             key = get_parent( key );
             release_object( obj );
@@ -549,7 +548,7 @@ static struct object *key_lookup_name( struct object *obj, struct unicode_str *n
 
     if (!(found = find_subkey( key, &tmp, &index )))
     {
-        if ((key->flags & KEY_WOWSHARE) && (attr & OBJ_KEY_WOW64))
+        if ((key->flags & KEY_WOWREFLECT) && (attr & OBJ_KEY_WOW64))
         {
             /* try in the 64-bit parent */
             key = get_parent( key );
@@ -608,7 +607,7 @@ static int key_link_name( struct object *obj, struct object_name *name, struct o
     for (i = ++parent_key->last_subkey; i > index; i--)
         parent_key->subkeys[i] = parent_key->subkeys[i - 1];
     parent_key->subkeys[index] = (struct key *)grab_object( key );
-    if (is_wow6432node( name->name, name->len ) &&
+    if (!(parent_key->flags & KEY_WOWSHARE) && is_wow6432node( name->name, name->len ) &&
         !is_wow6432node( parent_key->obj.name->name, parent_key->obj.name->len ))
         parent_key->wow6432node = key;
     name->parent = parent;
@@ -712,6 +711,7 @@ static struct key *create_key_object( struct object *parent, const struct unicod
             key->last_value  = -1;
             key->values      = NULL;
             key->modif       = modif;
+            key->timestamp_counter = 0;
             list_init( &key->notify_list );
 
             if (options & REG_OPTION_CREATE_LINK) key->flags |= KEY_SYMLINK;
@@ -732,23 +732,25 @@ static struct key *create_key_object( struct object *parent, const struct unicod
 /* mark a key and all its parents as dirty (modified) */
 static void make_dirty( struct key *key )
 {
+    ++change_timestamp_counter;
     while (key)
     {
         if (key->flags & (KEY_DIRTY|KEY_VOLATILE)) return;  /* nothing to do */
         key->flags |= KEY_DIRTY;
+        key->timestamp_counter = change_timestamp_counter;
         key = get_parent( key );
     }
 }
 
 /* mark a key and all its subkeys as clean (not modified) */
-static void make_clean( struct key *key )
+static void make_clean( struct key *key, abstime_t timestamp_counter )
 {
     int i;
 
     if (key->flags & KEY_VOLATILE) return;
     if (!(key->flags & KEY_DIRTY)) return;
-    key->flags &= ~KEY_DIRTY;
-    for (i = 0; i <= key->last_subkey; i++) make_clean( key->subkeys[i] );
+    if (key->timestamp_counter <= timestamp_counter) key->flags &= ~KEY_DIRTY;
+    for (i = 0; i <= key->last_subkey; i++) make_clean( key->subkeys[i], timestamp_counter );
 }
 
 /* go through all the notifications and send them if necessary */
@@ -781,7 +783,7 @@ static struct key *grab_wow6432node( struct key *key )
     struct key *ret = key->wow6432node;
 
     if (!ret) return key;
-    if (ret->flags & KEY_WOWSHARE) return key;
+    if (ret->flags & KEY_WOWREFLECT) return key;
     grab_object( ret );
     release_object( key );
     return ret;
@@ -827,7 +829,7 @@ static struct key *open_key( struct key *parent, const struct unicode_str *name,
     if (parent && !(access & KEY_WOW64_64KEY) && !is_wow6432node( name->str, name->len ))
     {
         key = get_wow6432node( parent );
-        if (key && ((access & KEY_WOW64_32KEY) || (key->flags & KEY_WOWSHARE)))
+        if (key && ((access & KEY_WOW64_32KEY) || (key->flags & KEY_WOWREFLECT)))
             parent = key;
     }
 
@@ -853,7 +855,7 @@ static struct key *create_key( struct key *parent, const struct unicode_str *nam
     if (parent && !(access & KEY_WOW64_64KEY) && !is_wow6432node( name->str, name->len ))
     {
         key = get_wow6432node( parent );
-        if (key && ((access & KEY_WOW64_32KEY) || (key->flags & KEY_WOWSHARE)))
+        if (key && ((access & KEY_WOW64_32KEY) || (key->flags & KEY_WOWREFLECT)))
             parent = key;
     }
 
@@ -936,7 +938,7 @@ static void enum_key( struct key *key, int index, int info_class, struct enum_ke
     switch(info_class)
     {
     case KeyNameInformation:
-        if (!(fullname = key->obj.ops->get_full_name( &key->obj, ~0u, &namelen ))) return;
+        if (!(fullname = key->obj.ops->get_full_name( &key->obj, &namelen ))) return;
         /* fall through */
     case KeyBasicInformation:
         classlen = 0; /* only return the name */
@@ -1041,7 +1043,7 @@ static void rename_key( struct key *key, const struct unicode_str *new_name )
     for (cur_index = 0; cur_index <= parent->last_subkey; cur_index++)
         if (parent->subkeys[cur_index] == key) break;
 
-    if (cur_index < index)
+    if (cur_index < index && (index - cur_index) > 1)
     {
         --index;
         for (i = cur_index; i < index; ++i) parent->subkeys[i] = parent->subkeys[i+1];
@@ -1848,19 +1850,6 @@ static WCHAR *format_user_registry_path( const struct sid *sid, struct unicode_s
     return ascii_to_unicode_str( buffer, path );
 }
 
-#ifdef __aarch64__
-static bool supports_aarch32(void)
-{
-#if defined(HAVE_SYS_PERSONALITY_H)
-    int old = personality( PER_LINUX32 );
-    if (old == -1) return false;
-    personality( old );
-    return true;
-#endif
-    return false;
-}
-#endif
-
 static void init_supported_machines(void)
 {
     unsigned int count = 0;
@@ -1876,8 +1865,7 @@ static void init_supported_machines(void)
     {
         supported_machines[count++] = IMAGE_FILE_MACHINE_ARM64;
         supported_machines[count++] = IMAGE_FILE_MACHINE_I386;
-        if (supports_aarch32()) supported_machines[count++] = IMAGE_FILE_MACHINE_ARMNT;
-        supported_machines[count++] = IMAGE_FILE_MACHINE_AMD64;
+        /* supported_machines[count++] = IMAGE_FILE_MACHINE_ARMNT;  not supported yet */
     }
 #else
 #error Unsupported machine
@@ -1910,6 +1898,7 @@ void init_registry(void)
                                                'M','a','c','h','i','n','e','\\',
                                                'S','y','s','t','e','m','\\',
                                                'C','o','n','t','r','o','l','S','e','t','0','0','1'};
+    static const WCHAR software[] = {'S','o','f','t','w','a','r','e',};
     static const struct unicode_str root_name = { REGISTRY, sizeof(REGISTRY) };
     static const struct unicode_str HKLM_name = { HKLM, sizeof(HKLM) };
     static const struct unicode_str HKU_name = { HKU_default, sizeof(HKU_default) };
@@ -1917,7 +1906,7 @@ void init_registry(void)
     static const struct unicode_str controlset_name = { controlset, sizeof(controlset) };
 
     WCHAR *current_user_path;
-    struct unicode_str current_user_str;
+    struct unicode_str current_user_str, name;
     struct key *key, *hklm, *hkcu;
     unsigned int i;
     char *p;
@@ -1976,8 +1965,6 @@ void init_registry(void)
     /* set the shared flag on Software\Classes\Wow6432Node for all platforms */
     for (i = 1; i < supported_machines_count; i++)
     {
-        struct unicode_str name;
-
         switch (supported_machines[i])
         {
         case IMAGE_FILE_MACHINE_I386:  name.str = classes_i386;  name.len = sizeof(classes_i386);  break;
@@ -1986,10 +1973,18 @@ void init_registry(void)
         }
         if ((key = create_key_recursive( hklm, &name, current_time )))
         {
-            key->flags |= KEY_WOWSHARE;
+            key->flags |= KEY_WOWREFLECT;
             release_object( key );
         }
-        /* FIXME: handle HKCU too */
+    }
+
+    name.str = software;
+    name.len = sizeof(software);
+    if ((key = create_key_recursive( hkcu, &name, current_time )))
+    {
+        key->flags |= KEY_WOWSHARE;
+        key->wow6432node = NULL;
+        release_object( key );
     }
 
     if ((key = create_key_recursive( hklm, &perflib_name, current_time )))
@@ -2000,9 +1995,6 @@ void init_registry(void)
 
     release_object( hklm );
     release_object( hkcu );
-
-    /* start the periodic save timer */
-    set_periodic_save_timer();
 
     /* create windows directories */
 
@@ -2026,6 +2018,7 @@ void init_registry(void)
 /* save a registry branch to a file */
 static void save_all_subkeys( struct key *key, FILE *f )
 {
+    /* Registry format in ntdll/registry.c:save_all_subkeys() should match. */
     fprintf( f, "WINE REGISTRY Version 2\n" );
     fprintf( f, ";; All keys relative to " );
     dump_path( key, NULL, f );
@@ -2044,29 +2037,104 @@ static void save_all_subkeys( struct key *key, FILE *f )
     save_subkeys( key, key, f );
 }
 
-/* save a registry branch to a file handle */
-static void save_registry( struct key *key, obj_handle_t handle )
+static data_size_t serialize_value( const struct key_value *value, char *buf )
 {
-    struct file *file;
-    int fd;
+    data_size_t size;
 
-    if (!(file = get_file_obj( current->process, handle, FILE_WRITE_DATA ))) return;
-    fd = dup( get_file_unix_fd( file ) );
-    release_object( file );
-    if (fd != -1)
+    size = sizeof(data_size_t) + value->namelen + sizeof(unsigned int) + sizeof(data_size_t) + value->len;
+    if (!buf) return size;
+
+    *(data_size_t *)buf = value->namelen;
+    buf += sizeof(data_size_t);
+    memcpy( buf, value->name, value->namelen );
+    buf += value->namelen;
+
+    *(unsigned int *)buf = value->type;
+    buf += sizeof(unsigned int);
+
+    *(data_size_t *)buf = value->len;
+    buf += sizeof(data_size_t);
+    memcpy( buf, value->data, value->len );
+
+    return size;
+}
+
+/* save a registry key with subkeys to a buffer */
+static data_size_t serialize_key( const struct key *key, char *buf )
+{
+    data_size_t size;
+    int subkey_count, i;
+
+    if (key->flags & KEY_VOLATILE) return 0;
+
+    size = sizeof(data_size_t) + key->obj.name->len + sizeof(data_size_t) + key->classlen + sizeof(int) + sizeof(int)
+           + sizeof(unsigned int) + sizeof(timeout_t);
+    for (i = 0; i <= key->last_value; i++)
+        size += serialize_value( &key->values[i], buf ? buf + size : NULL );
+    subkey_count = 0;
+    for (i = 0; i <= key->last_subkey; i++)
     {
-        FILE *f = fdopen( fd, "w" );
-        if (f)
-        {
-            save_all_subkeys( key, f );
-            if (fclose( f )) file_set_error();
-        }
-        else
-        {
-            file_set_error();
-            close( fd );
-        }
+        if (key->subkeys[i]->flags & KEY_VOLATILE) continue;
+        size += serialize_key( key->subkeys[i], buf ? buf + size : NULL );
+        ++subkey_count;
     }
+    if (!buf) return size;
+
+    *(data_size_t *)buf = key->obj.name->len;
+    buf += sizeof(data_size_t);
+    memcpy( buf, key->obj.name->name, key->obj.name->len );
+    buf += key->obj.name->len;
+
+    *(data_size_t *)buf = key->classlen;
+    buf += sizeof(data_size_t);
+    memcpy( buf, key->class, key->classlen );
+    buf += key->classlen;
+
+    *(int *)buf = key->last_value + 1;
+    buf += sizeof(int);
+
+    *(int *)buf = subkey_count;
+    buf += sizeof(int);
+
+    *(unsigned int *)buf = key->flags & KEY_SYMLINK;
+    buf += sizeof(unsigned int);
+
+    *(timeout_t *)buf = key->modif;
+
+    return size;
+}
+
+/* save registry branch to buffer */
+static data_size_t save_registry( const struct key *key, char *buf )
+{
+    int *parent_count = NULL;
+    const struct key *parent;
+    data_size_t size;
+
+    size = sizeof(int) + sizeof(int);
+    if (buf)
+    {
+        *(int *)buf = prefix_type;
+        buf += sizeof(int);
+        parent_count = (int *)buf;
+        buf += sizeof(int);
+        *parent_count = 0;
+    }
+
+    parent = key;
+    do
+    {
+        size += sizeof(data_size_t) + parent->obj.name->len;
+        if (!buf) continue;
+        ++*parent_count;
+        *(data_size_t *)buf = parent->obj.name->len;
+        buf += sizeof(data_size_t);
+        memcpy( buf, parent->obj.name->name, parent->obj.name->len );
+        buf += parent->obj.name->len;
+    } while ((parent = get_parent( parent )));
+
+    size += serialize_key( key, buf );
+    return size;
 }
 
 /* save a registry branch to a file */
@@ -2135,28 +2203,8 @@ static int save_branch( struct key *key, const char *filename )
     }
 
 done:
-    if (ret) make_clean( key );
+    if (ret) make_clean( key, key->timestamp_counter );
     return ret;
-}
-
-/* periodic saving of the registry */
-static void periodic_save( void *arg )
-{
-    int i;
-
-    if (fchdir( config_dir_fd ) == -1) return;
-    save_timeout_user = NULL;
-    for (i = 0; i < save_branch_count; i++)
-        save_branch( save_branch_info[i].key, save_branch_info[i].filename );
-    if (fchdir( server_dir_fd ) == -1) fatal_error( "chdir to server dir: %s\n", strerror( errno ));
-    set_periodic_save_timer();
-}
-
-/* start the periodic save timer */
-static void set_periodic_save_timer(void)
-{
-    if (save_timeout_user) remove_timeout_user( save_timeout_user );
-    save_timeout_user = add_timeout_user( save_period, periodic_save, NULL );
 }
 
 /* save the modified registry branches to disk */
@@ -2177,6 +2225,42 @@ void flush_registry(void)
     if (fchdir( server_dir_fd ) == -1) fatal_error( "chdir to server dir: %s\n", strerror( errno ));
 }
 
+/* determine if the thread is wow64 (32-bit client running on 64-bit prefix) */
+static int is_wow64_thread( struct thread *thread )
+{
+    return (is_machine_64bit( native_machine ) && !is_machine_64bit( thread->process->machine ));
+}
+
+/* find all the branches inside the specified key or the branch containing the key */
+static void find_branches_for_key( struct key *key, int *branches, int *branch_count )
+{
+    struct key *k;
+    int i;
+
+    *branch_count = 0;
+    for (i = 0; i < save_branch_count; i++)
+    {
+        k = save_branch_info[i].key;
+        while ((k = get_parent(k)))
+        {
+            if (k != key) continue;
+            branches[(*branch_count)++] = i;
+            break;
+        }
+    }
+
+    if (*branch_count) return;
+
+    do
+    {
+        for (i = 0; i < save_branch_count; i++)
+        {
+            if(key != save_branch_info[i].key) continue;
+            branches[(*branch_count)++] = i;
+            return;
+        }
+    } while ((key = get_parent( key )));
+}
 
 /* create a registry key */
 DECL_HANDLER(create_key)
@@ -2190,7 +2274,7 @@ DECL_HANDLER(create_key)
 
     if (!objattr) return;
 
-    if (!is_wow64_process( current->process )) access = (access & ~KEY_WOW64_32KEY) | KEY_WOW64_64KEY;
+    if (!is_wow64_thread( current )) access = (access & ~KEY_WOW64_32KEY) | KEY_WOW64_64KEY;
 
     if (objattr->rootdir)
     {
@@ -2221,7 +2305,7 @@ DECL_HANDLER(open_key)
     unsigned int access = req->access;
     struct unicode_str name = get_req_unicode_str();
 
-    if (!is_wow64_process( current->process )) access = (access & ~KEY_WOW64_32KEY) | KEY_WOW64_64KEY;
+    if (!is_wow64_thread( current )) access = (access & ~KEY_WOW64_32KEY) | KEY_WOW64_64KEY;
 
     if (req->parent && !(parent = get_hkey_obj( req->parent, 0 ))) return;
 
@@ -2245,15 +2329,56 @@ DECL_HANDLER(delete_key)
     }
 }
 
-/* flush a registry key */
+/* return registry branches snaphot data for flushing key */
 DECL_HANDLER(flush_key)
 {
     struct key *key = get_hkey_obj( req->hkey, 0 );
-    if (key)
+    int branches[3], branch_count = 0, i, path_len;
+    char *data;
+
+    if (!key) return;
+
+    reply->total = 0;
+    reply->branch_count = 0;
+    if ((key->flags & KEY_DIRTY) && !(key->flags & KEY_VOLATILE))
+        find_branches_for_key( key, branches, &branch_count );
+    release_object( key );
+
+    reply->timestamp_counter = change_timestamp_counter;
+    for (i = 0; i < branch_count; ++i)
     {
-        /* we don't need to do anything here with the current implementation */
-        release_object( key );
+        if (!(save_branch_info[branches[i]].key->flags & KEY_DIRTY)) continue;
+        ++reply->branch_count;
+        path_len = strlen( save_branch_info[branches[i]].filename ) + 1;
+        reply->total += sizeof(int) + sizeof(int) + path_len + save_registry( save_branch_info[branches[i]].key, NULL );
     }
+    if (reply->total > get_reply_max_size())
+    {
+        set_error( STATUS_BUFFER_TOO_SMALL );
+        return;
+    }
+
+    if (!(data = set_reply_data_size( reply->total ))) return;
+
+    for (i = 0; i < branch_count; ++i)
+    {
+        if (!(save_branch_info[branches[i]].key->flags & KEY_DIRTY)) continue;
+        *(int *)data = branches[i];
+        data += sizeof(int);
+        path_len = strlen( save_branch_info[branches[i]].filename ) + 1;
+        *(int *)data = path_len;
+        data += sizeof(int);
+        memcpy( data, save_branch_info[branches[i]].filename, path_len );
+        data += path_len;
+        data += save_registry( save_branch_info[branches[i]].key, data );
+    }
+}
+
+/* clear dirty state after successful registry branch flush */
+DECL_HANDLER(flush_key_done)
+{
+    if (req->branch < save_branch_count) make_clean( save_branch_info[req->branch].key, req->timestamp_counter );
+    else set_error( STATUS_INVALID_PARAMETER );
 }
 
 /* enumerate registry subkeys */
@@ -2389,6 +2514,7 @@ DECL_HANDLER(unload_registry)
 DECL_HANDLER(save_registry)
 {
     struct key *key;
+    char *data;
 
     if (!thread_single_check_privilege( current, SeBackupPrivilege ))
     {
@@ -2398,7 +2524,13 @@ DECL_HANDLER(save_registry)
 
     if ((key = get_hkey_obj( req->hkey, 0 )))
     {
-        save_registry( key, req->file );
+        reply->total = save_registry( key, NULL );
+        if (reply->total <= get_reply_max_size())
+        {
+            if ((data = set_reply_data_size( reply->total )))
+                save_registry( key, data );
+        }
+        else set_error( STATUS_BUFFER_TOO_SMALL );
         release_object( key );
     }
 }

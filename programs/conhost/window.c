@@ -61,7 +61,6 @@ struct console_window
     unsigned int      sb_width;        /* active screen buffer width */
     unsigned int      sb_height;       /* active screen buffer height */
     COORD             cursor_pos;      /* cursor position */
-    unsigned int      close_on_exit;   /* whether conhost closes when all children have terminated */
 
     RECT              update;          /* screen buffer update rect */
     enum update_state update_state;    /* update state */
@@ -87,7 +86,6 @@ struct console_config
     unsigned int  win_height;
     COORD         win_pos;        /* position (in cells) of visible part of screen buffer in window */
     unsigned int  edition_mode;   /* edition mode flavor while line editing */
-    unsigned int  close_on_exit;  /* whether conhost closes when all children have terminated */
     unsigned int  font_pitch_family;
     unsigned int  font_weight;
     WCHAR         face_name[LF_FACESIZE];
@@ -96,8 +94,7 @@ struct console_config
 static const char *debugstr_config( const struct console_config *config )
 {
     return wine_dbg_sprintf( "cell=(%u,%u) cursor=(%d,%d) attr=%02x pop-up=%02x font=%s/%u/%u "
-                             "hist=%u/%d flags=%c%c msk=%08x sb=(%u,%u) win=(%u,%u)x(%u,%u) edit=%u "
-                             "close_on_exit=%u",
+                             "hist=%u/%d flags=%c%c msk=%08x sb=(%u,%u) win=(%u,%u)x(%u,%u) edit=%u",
                              config->cell_width, config->cell_height, config->cursor_size,
                              config->cursor_visible, config->attr, config->popup_attr,
                              wine_dbgstr_w(config->face_name), config->font_pitch_family,
@@ -107,7 +104,7 @@ static const char *debugstr_config( const struct console_config *config )
                              config->quick_edit ? 'Q' : 'q',
                              config->menu_mask, config->sb_width, config->sb_height,
                              config->win_pos.X, config->win_pos.Y, config->win_width,
-                             config->win_height, config->edition_mode, config->close_on_exit );
+                             config->win_height, config->edition_mode );
 }
 
 static const char *debugstr_logfont( const LOGFONTW *lf, unsigned int ft )
@@ -143,10 +140,6 @@ static void load_registry_key( HKEY key, struct console_config *config )
 {
     DWORD type, count, val, i;
     WCHAR color_name[13];
-
-    count = sizeof(val);
-    if (!RegQueryValueExW( key, L"CloseOnExit", 0, &type, (BYTE *)&val, &count ))
-        config->close_on_exit = val;
 
     for (i = 0; i < ARRAY_SIZE(config->color_map); i++)
     {
@@ -271,7 +264,6 @@ static void load_config( const WCHAR *key_name, struct console_config *config )
     config->win_pos.X    = 0;
     config->win_pos.Y    = 0;
     config->edition_mode = 0;
-    config->close_on_exit= 1;
 
     /* Load default console settings */
     if (!RegOpenKeyW( HKEY_CURRENT_USER, L"Console", &key ))
@@ -300,12 +292,6 @@ static void save_registry_key( HKEY key, const struct console_config *config, BO
 
     if (!save_all)
         load_config( NULL, &default_config );
-
-    if (save_all || config->close_on_exit != default_config.close_on_exit)
-    {
-        val = config->close_on_exit;
-        RegSetValueExW( key, L"CloseOnExit", 0, REG_DWORD, (BYTE *)&val, sizeof(val) );
-    }
 
     for (i = 0; i < ARRAY_SIZE(config->color_map); i++)
     {
@@ -813,56 +799,93 @@ static BOOL set_console_font( struct console *console, const LOGFONTW *logfont )
 struct font_chooser
 {
     struct console *console;
-    unsigned int    weight;
-    LOGFONTW        lf;
+    int             pass;
+    unsigned int    font_height;
+    unsigned int    font_width;
+    BOOL            done;
 };
 
-/* check if the font family described in lf and tm is usable as a font for the renderer */
-static BOOL validate_font( struct console *console, const LOGFONTW *lf,
-                           const TEXTMETRICW *tm, DWORD type, int *weight )
+/* check if the font described in tm is usable as a font for the renderer */
+static BOOL validate_font_metric( struct console *console, const TEXTMETRICW *tm,
+                                  DWORD type, int pass )
 {
-    int w = 0x1;
-
-    if (!tm) w |= 0x6;
-    else if (!(type & RASTER_FONTTYPE))
+    switch (pass) /* we get increasingly lenient in later passes */
     {
-        w |= 0x2;
-        if (tm->tmMaxCharWidth * (console->active->win.right - console->active->win.left + 1)
-                < GetSystemMetrics(SM_CXSCREEN)
-                && tm->tmHeight * (console->active->win.bottom - console->active->win.top + 1)
-                < GetSystemMetrics(SM_CYSCREEN))
-            w |= 0x4;
+    case 0:
+        if (type & RASTER_FONTTYPE) return FALSE;
+        /* fall through */
+    case 1:
+        if (type & RASTER_FONTTYPE)
+        {
+            if (tm->tmMaxCharWidth * (console->active->win.right - console->active->win.left + 1)
+                >= GetSystemMetrics(SM_CXSCREEN))
+                return FALSE;
+            if (tm->tmHeight * (console->active->win.bottom - console->active->win.top + 1)
+                >= GetSystemMetrics(SM_CYSCREEN))
+                return FALSE;
+        }
+        /* fall through */
+    case 2:
+        if (tm->tmCharSet != DEFAULT_CHARSET && tm->tmCharSet != console->window->ui_charset)
+            return FALSE;
+        /* fall through */
+    case 3:
+        if (tm->tmItalic || tm->tmUnderlined || tm->tmStruckOut) return FALSE;
+        break;
     }
-    if ((lf->lfPitchAndFamily & 3) == FIXED_PITCH
-            && (!tm || (!tm->tmItalic && !tm->tmUnderlined && !tm->tmStruckOut)))
-        w |= 0x8;
-    if (lf->lfCharSet == console->window->ui_charset
-            && (!tm || tm->tmCharSet == console->window->ui_charset))
-        w |= 0x10;
-    if (lf->lfFaceName[0] != '@')
-        w |= 0x20;
+    return TRUE;
+}
 
-    if (weight) *weight = w;
-    return w == 0x3f;
+/* check if the font family described in lf is usable as a font for the renderer */
+static BOOL validate_font( struct console *console, const LOGFONTW *lf, int pass )
+{
+    switch (pass) /* we get increasingly lenient in later passes */
+    {
+    case 0:
+    case 1:
+    case 2:
+        if (lf->lfCharSet != DEFAULT_CHARSET && lf->lfCharSet != console->window->ui_charset)
+            return FALSE;
+        /* fall through */
+    case 3:
+        if ((lf->lfPitchAndFamily & 3) != FIXED_PITCH) return FALSE;
+        /* fall through */
+    case 4:
+        if (lf->lfFaceName[0] == '@') return FALSE;
+        break;
+    }
+    return TRUE;
 }
 
 static int CALLBACK enum_first_font_proc( const LOGFONTW *lf, const TEXTMETRICW *tm,
                                           DWORD font_type, LPARAM lparam )
 {
     struct font_chooser *fc = (struct font_chooser *)lparam;
-    int weight;
-    BOOL ret;
+    LOGFONTW mlf;
+
+    if (font_type != TRUETYPE_FONTTYPE) return 1;
 
     TRACE( "%s\n", debugstr_logfont( lf, font_type ));
+
+    if (!validate_font( fc->console, lf, fc->pass ))
+        return 1;
+
     TRACE( "%s\n", debugstr_textmetric( tm, font_type ));
 
-    ret = validate_font( fc->console, lf, tm, font_type, &weight );
-    if (weight > fc->weight)
-    {
-        fc->weight = weight;
-        fc->lf = *lf;
-    }
-    return !ret;
+    if (!validate_font_metric( fc->console, tm, font_type, fc->pass ))
+        return 1;
+
+    /* set default font size */
+    mlf = *lf;
+    mlf.lfHeight = fc->font_height;
+    mlf.lfWidth = fc->font_width;
+
+    if (!set_console_font( fc->console, &mlf ))
+        return 1;
+
+    fc->done = TRUE;
+
+    return 0;
 }
 
 static void set_first_font( struct console *console, struct console_config *config )
@@ -876,14 +899,18 @@ static void set_first_font( struct console *console, struct console_config *conf
     lf.lfCharSet = DEFAULT_CHARSET;
     lf.lfPitchAndFamily = FIXED_PITCH | FF_MODERN;
 
-    memset( &fc, 0, sizeof(fc) );
     fc.console = console;
+    fc.font_height = config->cell_height;
+    fc.font_width = config->cell_width;
+    fc.done = FALSE;
 
-    EnumFontFamiliesExW( console->window->mem_dc, &lf, enum_first_font_proc, (LPARAM)&fc, 0);
+    for (fc.pass = 0; fc.pass <= 5; fc.pass++)
+    {
+        EnumFontFamiliesExW( console->window->mem_dc, &lf, enum_first_font_proc, (LPARAM)&fc, 0);
+        if (fc.done) break;
+    }
 
-    fc.lf.lfHeight = config->cell_height;
-    fc.lf.lfWidth = config->cell_width;
-    if (!fc.weight || !set_console_font( console, &fc.lf ))
+    if (fc.pass > 5)
         ERR("Unable to find a valid console font\n");
 
     /* Update active configuration */
@@ -1575,9 +1602,11 @@ static int CALLBACK enum_list_font_proc( const LOGFONTW *lf, const TEXTMETRICW *
 {
     struct dialog_info *di = (struct dialog_info *)lparam;
 
+    if (font_type != TRUETYPE_FONTTYPE) return 1;
+
     TRACE( "%s\n", debugstr_logfont( lf, font_type ));
 
-    if (validate_font( di->console, lf, NULL, 0, NULL ))
+    if (validate_font( di->console, lf, 0 ))
         SendDlgItemMessageW( di->dialog, IDC_FNT_LIST_FONT, LB_ADDSTRING, 0, (LPARAM)lf->lfFaceName );
 
     return 1;
@@ -1687,7 +1716,7 @@ static INT_PTR WINAPI config_dialog_proc( HWND dialog, UINT msg, WPARAM wparam, 
         SendMessageW( GetDlgItem(dialog, IDC_CNF_SB_HEIGHT_UD),  UDM_SETRANGE, 0, MAKELPARAM(max_ud, 0));
         SendMessageW( GetDlgItem(dialog, IDC_CNF_SB_WIDTH_UD),   UDM_SETRANGE, 0, MAKELPARAM(max_ud, 0));
 
-        SendDlgItemMessageW( dialog, IDC_CNF_CLOSE_EXIT, BM_SETCHECK, di->config.close_on_exit ? BST_CHECKED : BST_UNCHECKED, 0 );
+        SendDlgItemMessageW( dialog, IDC_CNF_CLOSE_EXIT, BM_SETCHECK, BST_CHECKED, 0 );
 
         SendDlgItemMessageW( dialog, IDC_CNF_EDITION_MODE, CB_ADDSTRING, 0, (LPARAM)L"Win32" );
         SendDlgItemMessageW( dialog, IDC_CNF_EDITION_MODE, CB_ADDSTRING, 0, (LPARAM)L"Emacs" );
@@ -1699,7 +1728,6 @@ static INT_PTR WINAPI config_dialog_proc( HWND dialog, UINT msg, WPARAM wparam, 
             NMHDR *nmhdr = (NMHDR*)lparam;
             int win_w, win_h, sb_w, sb_h;
             BOOL st1, st2;
-            DWORD val;
 
             di = (struct dialog_info *)GetWindowLongPtrW( dialog, DWLP_USER );
             switch (nmhdr->code)
@@ -1739,9 +1767,6 @@ static INT_PTR WINAPI config_dialog_proc( HWND dialog, UINT msg, WPARAM wparam, 
                 di->config.sb_width  = sb_w;
                 di->config.sb_height = sb_h;
 
-                val = (IsDlgButtonChecked( dialog, IDC_CNF_CLOSE_EXIT ) & BST_CHECKED) != 0;
-                di->config.close_on_exit = val;
-
                 di->config.edition_mode = SendDlgItemMessageW( dialog, IDC_CNF_EDITION_MODE,
                                                                CB_GETCURSEL, 0, 0 );
                 SetWindowLongPtrW( dialog, DWLP_MSGRESULT, PSNRET_NOERROR );
@@ -1762,9 +1787,8 @@ static void apply_config( struct console *console, const struct console_config *
     if (console->active->width != config->sb_width || console->active->height != config->sb_height)
         change_screen_buffer_size( console->active, config->sb_width, config->sb_height );
 
-    console->window->menu_mask     = config->menu_mask;
-    console->window->quick_edit    = config->quick_edit;
-    console->window->close_on_exit = config->close_on_exit;
+    console->window->menu_mask  = config->menu_mask;
+    console->window->quick_edit = config->quick_edit;
 
     console->edition_mode = config->edition_mode;
     console->history_mode = config->history_mode;
@@ -1832,9 +1856,8 @@ static void current_config( struct console *console, struct console_config *conf
 {
     size_t len;
 
-    config->menu_mask     = console->window->menu_mask;
-    config->quick_edit    = console->window->quick_edit;
-    config->close_on_exit = console->window->close_on_exit;
+    config->menu_mask  = console->window->menu_mask;
+    config->quick_edit = console->window->quick_edit;
 
     config->edition_mode = console->edition_mode;
     config->history_mode = console->history_mode;
@@ -2477,19 +2500,4 @@ void init_message_window( struct console *console )
                    WS_OVERLAPPED|WS_CAPTION|WS_SYSMENU|WS_THICKFRAME|WS_MINIMIZEBOX|
                    WS_MAXIMIZEBOX|WS_HSCROLL|WS_VSCROLL, CW_USEDEFAULT, CW_USEDEFAULT,
                    0, 0, HWND_MESSAGE, 0, wndclass.hInstance, console );
-}
-
-void teardown_window( struct console *console )
-{
-    if (console->window && !console->window->close_on_exit)
-    {
-        MSG msg;
-
-        while (GetMessageW( &msg, 0, 0, 0 ))
-        {
-            if (msg.message == WM_QUIT) return;
-            TranslateMessage( &msg );
-            DispatchMessageW( &msg );
-        }
-    }
 }

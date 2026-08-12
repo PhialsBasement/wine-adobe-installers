@@ -132,13 +132,13 @@
 # endif
 #endif
 
-#ifndef _CRT_ALIGN
+#ifndef DECLSPEC_ALIGN
 # ifdef __GNUC__
-#  define _CRT_ALIGN(x) __attribute__((aligned(x)))
+#  define DECLSPEC_ALIGN(x) __attribute__((aligned(x)))
 # elif __has_declspec_attribute(align) &&  !defined(MIDL_PASS)
-#  define _CRT_ALIGN(x) __declspec(align(x))
+#  define DECLSPEC_ALIGN(x) __declspec(align(x))
 # else
-#  define _CRT_ALIGN(x)
+#  define DECLSPEC_ALIGN(x)
 # endif
 #endif
 
@@ -205,19 +205,13 @@ typedef unsigned int size_t;
 #define _SIZE_T_DEFINED
 #endif
 
-typedef size_t rsize_t;
-
 #ifndef _TIME32_T_DEFINED
 typedef __msvcrt_long __time32_t;
 #define _TIME32_T_DEFINED
 #endif
 
 #ifndef _TIME64_T_DEFINED
-#if defined(_MSC_VER) || defined(__MINGW32__)
-typedef __int64 __time64_t;
-#else
-typedef __int64 _CRT_ALIGN(8) __time64_t;
-#endif
+typedef __int64 DECLSPEC_ALIGN(8) __time64_t;
 #define _TIME64_T_DEFINED
 #endif
 
@@ -254,15 +248,6 @@ typedef unsigned short  wctype_t;
 #ifndef _ERRNO_T_DEFINED
 typedef int errno_t;
 #define _ERRNO_T_DEFINED
-#endif
-
-#ifndef _CONST_RETURN
-# ifdef __cplusplus
-#  define _CONST_RETURN const
-#  define _CRT_CONST_CORRECT_OVERLOADS
-# else
-#  define _CONST_RETURN
-# endif
 #endif
 
 struct threadlocaleinfostruct;

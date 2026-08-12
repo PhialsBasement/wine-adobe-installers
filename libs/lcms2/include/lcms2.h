@@ -1,7 +1,7 @@
 //---------------------------------------------------------------------------------
 //
 //  Little Color Management System
-//  Copyright (c) 1998-2026 Marti Maria Saguer
+//  Copyright (c) 1998-2023 Marti Maria Saguer
 //
 // Permission is hereby granted, free of charge, to any person obtaining
 // a copy of this software and associated documentation files (the "Software"),
@@ -23,7 +23,7 @@
 //
 //---------------------------------------------------------------------------------
 //
-// Version 2.18
+// Version 2.16
 //
 
 #ifndef _lcms2_H
@@ -64,9 +64,6 @@
 // Uncomment this to remove the "register" storage class
 // #define CMS_NO_REGISTER_KEYWORD 1
 
-// Uncomment this to remove visibility attribute when building shared objects
-// #define CMS_NO_VISIBILITY 1
-
 // ********** End of configuration toggles ******************************
 
 // Needed for streams
@@ -87,7 +84,7 @@ extern "C" {
 #endif
 
 // Version/release
-#define LCMS_VERSION        2180
+#define LCMS_VERSION        2160
 
 // I will give the chance of redefining basic types for compilers that are not fully C99 compliant
 #ifndef CMS_BASIC_TYPES_ALREADY_DEFINED
@@ -251,7 +248,7 @@ typedef int                  cmsBool;
 #     define CMSAPI
 #  endif
 #else  // not Windows
-#  if defined(HAVE_FUNC_ATTRIBUTE_VISIBILITY) && !defined(CMS_NO_VISIBILITY)
+#  ifdef HAVE_FUNC_ATTRIBUTE_VISIBILITY
 #     define CMSEXPORT
 #     define CMSAPI    __attribute__((visibility("default")))
 #  else
@@ -961,6 +958,7 @@ typedef void* cmsHTRANSFORM;
 // IEEE 754-2008 "half"
 #define TYPE_GRAY_HALF_FLT    (FLOAT_SH(1)|COLORSPACE_SH(PT_GRAY)|CHANNELS_SH(1)|BYTES_SH(2))
 #define TYPE_RGB_HALF_FLT     (FLOAT_SH(1)|COLORSPACE_SH(PT_RGB)|CHANNELS_SH(3)|BYTES_SH(2))
+#define TYPE_RGBA_HALF_FLT    (FLOAT_SH(1)|COLORSPACE_SH(PT_RGB)|EXTRA_SH(1)|CHANNELS_SH(3)|BYTES_SH(2))
 #define TYPE_CMYK_HALF_FLT    (FLOAT_SH(1)|COLORSPACE_SH(PT_CMYK)|CHANNELS_SH(4)|BYTES_SH(2))
 
 #define TYPE_RGBA_HALF_FLT    (FLOAT_SH(1)|COLORSPACE_SH(PT_RGB)|EXTRA_SH(1)|CHANNELS_SH(3)|BYTES_SH(2))

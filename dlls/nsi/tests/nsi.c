@@ -949,7 +949,7 @@ static void test_tcp_tables( int family, int table_type )
     for (i = 0; i < ARRAY_SIZE(dyn_sizes); i++)
     {
         err = NsiAllocateAndGetTable( 1, &NPI_MS_TCP_MODULEID, table_num, (void **)&keys, sizeof(*keys), NULL, 0,
-                                      (void **)&dyn_tbl, dyn_sizes[i], (void **)&stat, sizeof(*stat), &count, 0 );
+                                      (void **)&dyn_tbl, dyn_sizes[i] + 4, (void **)&stat, sizeof(*stat), &count, 0 );
         if (!err) break;
     }
     ok( !err, "got %ld\n", err );

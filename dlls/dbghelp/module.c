@@ -25,12 +25,13 @@
 #include <assert.h>
 
 #include "ntstatus.h"
+#define WIN32_NO_STATUS
 #include "dbghelp_private.h"
 #include "image_private.h"
 #include "psapi.h"
-#include "tlhelp32.h"
 #include "winternl.h"
 #include "wine/debug.h"
+#include "wine/heap.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(dbghelp);
 
@@ -83,8 +84,33 @@ static const WCHAR* get_filename(const WCHAR* name, const WCHAR* endptr)
 static BOOL is_wine_loader(const WCHAR *module)
 {
     const WCHAR *filename = get_filename(module, NULL);
+    const char *ptr;
+    BOOL ret = FALSE;
+    WCHAR *buffer;
+    DWORD len;
 
-    return !wcscmp( filename, L"wine" );
+    if ((ptr = getenv("WINELOADER")))
+    {
+        ptr = file_nameA(ptr);
+        len = 2 + MultiByteToWideChar( CP_UNIXCP, 0, ptr, -1, NULL, 0 );
+        buffer = heap_alloc( len * sizeof(WCHAR) );
+        MultiByteToWideChar( CP_UNIXCP, 0, ptr, -1, buffer, len );
+    }
+    else
+    {
+        buffer = heap_alloc( sizeof(L"wine") + 2 * sizeof(WCHAR) );
+        lstrcpyW( buffer, L"wine" );
+    }
+
+    if (!wcscmp( filename, buffer ))
+        ret = TRUE;
+
+    lstrcatW( buffer, L"64" );
+    if (!wcscmp( filename, buffer ))
+        ret = TRUE;
+
+    heap_free( buffer );
+    return ret;
 }
 
 static void module_fill_module(const WCHAR* in, WCHAR* out, size_t size)
@@ -109,9 +135,40 @@ void module_set_module(struct module* module, const WCHAR* name)
     module_fill_module(name, module->modulename, ARRAY_SIZE(module->modulename));
 }
 
-const WCHAR *get_wine_loader_name(struct process *pcs)
+/* Returned string must be freed by caller */
+WCHAR *get_wine_loader_name(struct process *pcs)
 {
-    return process_getenv(pcs, L"WINELOADER");
+    const WCHAR *name;
+    WCHAR* altname;
+    unsigned len;
+
+    name = process_getenv(pcs, L"WINELOADER");
+    if (!name) name = pcs->is_host_64bit ? L"wine64" : L"wine";
+    len = lstrlenW(name);
+
+    /* WINELOADER isn't properly updated in Wow64 process calling inside Windows env block
+     * (it's updated in ELF env block though)
+     * So do the adaptation ourselves.
+     */
+    altname = HeapAlloc(GetProcessHeap(), 0, (len + 2 + 1) * sizeof(WCHAR));
+    if (altname)
+    {
+        memcpy(altname, name, len * sizeof(WCHAR));
+        if (pcs->is_host_64bit && len >= 2 && memcmp(name + len - 2, L"64", 2 * sizeof(WCHAR)) != 0)
+        {
+            lstrcpyW(altname + len, L"64");
+            /* in multi-arch wow configuration, wine64 doesn't exist */
+            if (GetFileAttributesW(altname) == INVALID_FILE_ATTRIBUTES)
+                altname[len] = L'\0';
+        }
+        else if (!pcs->is_host_64bit && len >= 2 && !memcmp(name + len - 2, L"64", 2 * sizeof(WCHAR)))
+            altname[len - 2] = '\0';
+        else
+            altname[len] = '\0';
+    }
+
+    TRACE("returning %s\n", debugstr_w(altname));
+    return altname;
 }
 
 static const char*      get_module_type(struct module* module)
@@ -338,7 +395,7 @@ BOOL module_load_debug(struct module* module)
             idslW64.hFile = INVALID_HANDLE_VALUE;
 
             pcs_callback(module->process, CBA_DEFERRED_SYMBOL_LOAD_START, &idslW64);
-            ret = pe_load_debug_info(module);
+            ret = pe_load_debug_info(module->process, module);
             pcs_callback(module->process,
                          ret ? CBA_DEFERRED_SYMBOL_LOAD_COMPLETE : CBA_DEFERRED_SYMBOL_LOAD_FAILURE,
                          &idslW64);
@@ -445,7 +502,7 @@ static BOOL image_check_debug_link_crc(const WCHAR* file, struct image_file_map*
 
     path = get_dos_file_name(file);
     handle = CreateFileW(path, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, 0, NULL);
-    HeapFree(GetProcessHeap(), 0, path);
+    heap_free(path);
     if (handle == INVALID_HANDLE_VALUE) return FALSE;
 
     crc = calc_crc32(handle);
@@ -477,7 +534,7 @@ static BOOL image_check_debug_link_gnu_id(const WCHAR* file, struct image_file_m
 
     path = get_dos_file_name(file);
     handle = CreateFileW(path, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, 0, NULL);
-    HeapFree(GetProcessHeap(), 0, path);
+    heap_free(path);
     if (handle == INVALID_HANDLE_VALUE) return FALSE;
 
     TRACE("Located debug information file at %s\n", debugstr_w(file));
@@ -1032,12 +1089,20 @@ BOOL module_remove(struct process* pcs, struct module* module)
     /* remove local scope if symbol is from this module */
     if (pcs->localscope_symt)
     {
-        struct module_pair pair;
-        if (module_init_pair(&pair, pcs->handle, pcs->localscope_pc) &&
-            (module == pair.effective || module == pair.requested))
+        struct symt* locsym = pcs->localscope_symt;
+        if (symt_check_tag(locsym, SymTagInlineSite))
+            locsym = &symt_get_function_from_inlined((struct symt_function*)locsym)->symt;
+        if (symt_check_tag(locsym, SymTagFunction))
         {
-            pcs->localscope_pc = 0;
-            pcs->localscope_symt = NULL;
+            struct symt_compiland *compiland = (struct symt_compiland*)SYMT_SYMREF_TO_PTR(((struct symt_function*)locsym)->container);
+            if (symt_check_tag(&compiland->symt, SymTagCompiland))
+            {
+                if (module == ((struct symt_module*)SYMT_SYMREF_TO_PTR(compiland->container))->module)
+                {
+                    pcs->localscope_pc = 0;
+                    pcs->localscope_symt = NULL;
+                }
+            }
         }
     }
     while (module_format_vtable_iterator_next(module, &iter, MODULE_FORMAT_VTABLE_INDEX(remove)))
@@ -1246,6 +1311,23 @@ BOOL  WINAPI EnumerateLoadedModules(HANDLE hProcess,
 }
 #endif
 
+static unsigned int load_and_grow_modules(HANDLE process, HMODULE** hmods, unsigned start, unsigned* alloc, DWORD filter)
+{
+    DWORD needed;
+    BOOL ret;
+
+    while ((ret = EnumProcessModulesEx(process, *hmods + start, (*alloc - start) * sizeof(HMODULE),
+                                       &needed, filter)) &&
+           needed > (*alloc - start) * sizeof(HMODULE))
+    {
+        HMODULE* new = HeapReAlloc(GetProcessHeap(), 0, *hmods, (*alloc) * 2 * sizeof(HMODULE));
+        if (!new) return 0;
+        *hmods = new;
+        *alloc *= 2;
+    }
+    return ret ? needed / sizeof(HMODULE) : 0;
+}
+
 /******************************************************************
  *		EnumerateLoadedModulesW64 (DBGHELP.@)
  *
@@ -1255,16 +1337,15 @@ BOOL  WINAPI EnumerateLoadedModulesW64(HANDLE process,
                                        PVOID user)
 {
     OBJECT_BASIC_INFORMATION obi;
-    DWORD               snapshot_flags;
-    DWORD               pid = GetProcessId( process );
-    HANDLE              snapshot;
-    MODULEENTRY32W      me;
-
-    if (!pid)
-    {
-        SetLastError(STATUS_INVALID_CID);
-        return FALSE;
-    }
+    HMODULE*            hmods;
+    unsigned            alloc = 256, count, count32, i;
+    USHORT              pcs_machine, native_machine;
+    BOOL                with_32bit_modules;
+    WCHAR               imagenameW[MAX_PATH];
+    MODULEINFO          mi;
+    WCHAR*              sysdir = NULL;
+    WCHAR*              wowdir = NULL;
+    size_t              sysdir_len = 0, wowdir_len = 0;
 
     if (process != GetCurrentProcess() &&
         RtlIsCurrentProcess( process ) &&
@@ -1272,28 +1353,90 @@ BOOL  WINAPI EnumerateLoadedModulesW64(HANDLE process,
         obi.GrantedAccess & PROCESS_VM_READ)
     {
         TRACE("same process.\n");
-        pid = 0;
+        process = GetCurrentProcess();
     }
 
-    snapshot_flags = TH32CS_SNAPMODULE;
-    if (dbghelp_options & SYMOPT_INCLUDE_32BIT_MODULES)
-        snapshot_flags |= TH32CS_SNAPMODULE32;
+    /* process might not be a handle to a live process */
+    if (!IsWow64Process2(process, &pcs_machine, &native_machine))
+    {
+        SetLastError(STATUS_INVALID_CID);
+        return FALSE;
+    }
+    with_32bit_modules = sizeof(void*) > sizeof(int) &&
+        pcs_machine != IMAGE_FILE_MACHINE_UNKNOWN &&
+        (dbghelp_options & SYMOPT_INCLUDE_32BIT_MODULES);
 
-    snapshot = CreateToolhelp32Snapshot( snapshot_flags, pid );
-    if (snapshot == INVALID_HANDLE_VALUE)
+    if (!(hmods = HeapAlloc(GetProcessHeap(), 0, alloc * sizeof(hmods[0]))))
         return FALSE;
 
-    me.dwSize = sizeof(me);
-    if (Module32FirstW( snapshot, &me ))
+    /* Note:
+     * - we report modules returned from kernelbase.EnumProcessModulesEx
+     * - appending 32bit modules when possible and requested
+     *
+     * When considering 32bit modules in a wow64 child process, required from
+     * a 64bit process:
+     * - native returns from kernelbase.EnumProcessModulesEx
+     *   redirected paths (that is in system32 directory), while
+     *   dbghelp.EnumerateLoadedModulesWine returns the effective path
+     *   (eg. syswow64 for x86_64).
+     * - (Except for the main module, if gotten from syswow64, where kernelbase
+     *    will return the effective path)
+     * - Wine kernelbase (and ntdll) incorrectly return these modules from
+     *   syswow64 (except for ntdll which is returned from system32).
+     * => for these modules, always perform a system32 => syswow64 path
+     *    conversion (it'll work even if ntdll/kernelbase is fixed).
+     */
+    if ((count = load_and_grow_modules(process, &hmods, 0, &alloc, LIST_MODULES_DEFAULT)) && with_32bit_modules)
     {
-        do
+        /* append 32bit modules when required */
+        if ((count32 = load_and_grow_modules(process, &hmods, count, &alloc, LIST_MODULES_32BIT)))
         {
-            if (!enum_cb( me.szExePath, (DWORD_PTR)me.modBaseAddr, me.modBaseSize, user )) break;
-        } while (Module32NextW( snapshot, &me ));
+            sysdir_len = GetSystemDirectoryW(NULL, 0);
+            wowdir_len = GetSystemWow64Directory2W(NULL, 0, pcs_machine);
+
+            if (!sysdir_len || !wowdir_len ||
+                !(sysdir = HeapAlloc(GetProcessHeap(), 0, (sysdir_len + 1 + wowdir_len + 1) * sizeof(WCHAR))))
+            {
+                HeapFree(GetProcessHeap(), 0, hmods);
+                return FALSE;
+            }
+            wowdir = sysdir + sysdir_len + 1;
+            if (GetSystemDirectoryW(sysdir, sysdir_len) >= sysdir_len)
+                FIXME("shouldn't happen\n");
+            if (GetSystemWow64Directory2W(wowdir, wowdir_len, pcs_machine) >= wowdir_len)
+                FIXME("shouldn't happen\n");
+            wcscat(sysdir, L"\\");
+            wcscat(wowdir, L"\\");
+        }
+    }
+    else count32 = 0;
+
+    for (i = 0; i < count + count32; i++)
+    {
+        if (GetModuleInformation(process, hmods[i], &mi, sizeof(mi)) &&
+            GetModuleFileNameExW(process, hmods[i], imagenameW, ARRAY_SIZE(imagenameW)))
+        {
+            /* rewrite path in system32 into syswow64 for 32bit modules */
+            if (i >= count)
+            {
+                size_t len = wcslen(imagenameW);
+
+                if (!wcsnicmp(imagenameW, sysdir, sysdir_len) &&
+                    (len - sysdir_len + wowdir_len) + 1 <= ARRAY_SIZE(imagenameW))
+                {
+                    memmove(&imagenameW[wowdir_len], &imagenameW[sysdir_len], (len - sysdir_len) * sizeof(WCHAR));
+                    memcpy(imagenameW, wowdir, wowdir_len * sizeof(WCHAR));
+                }
+            }
+            if (!enum_cb(imagenameW, (DWORD_PTR)mi.lpBaseOfDll, mi.SizeOfImage, user))
+                break;
+        }
     }
 
-    CloseHandle( snapshot );
-    return TRUE;
+    HeapFree(GetProcessHeap(), 0, hmods);
+    HeapFree(GetProcessHeap(), 0, sysdir);
+
+    return count != 0;
 }
 
 static void dbghelp_str_WtoA(const WCHAR *src, char *dst, int dst_len)

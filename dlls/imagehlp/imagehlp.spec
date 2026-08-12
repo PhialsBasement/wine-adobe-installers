@@ -33,8 +33,8 @@
 @ stdcall MapFileAndCheckSumA(str ptr ptr)
 @ stdcall MapFileAndCheckSumW(wstr ptr ptr)
 @ stub  MarkImageAsRunFromSwap
+@ stub ReBaseImage64
 @ stdcall ReBaseImage(str str long long long long ptr ptr ptr ptr long)
-@ stdcall ReBaseImage64(str str long long long long ptr ptr ptr ptr long)
 @ stdcall RemovePrivateCvSymbolic(ptr ptr ptr)
 @ stub RemovePrivateCvSymbolicEx
 @ stdcall RemoveRelocations(ptr)
@@ -44,7 +44,7 @@
 @ stdcall -import StackWalk64(long long long ptr ptr ptr ptr ptr ptr)
 @ stdcall -import StackWalk(long long long ptr ptr ptr ptr ptr ptr)
 @ stdcall -import SymCleanup(long)
-@ stdcall -import SymEnumSourceFiles(ptr int64 str ptr ptr)
+@ stdcall SymEnumSourceFiles(ptr int64 str ptr ptr) SymEnumSourceFiles
 @ stub SymEnumSym
 @ stdcall -import SymEnumSymbols(ptr int64 str ptr ptr)
 @ stdcall -import SymEnumTypes(ptr int64 ptr ptr)

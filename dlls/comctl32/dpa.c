@@ -910,12 +910,14 @@ HDPA WINAPI DPA_CreateEx (INT nGrow, HANDLE hHeap)
 
     TRACE("(%d %p)\n", nGrow, hHeap);
 
-    if (!hHeap) hHeap = GetProcessHeap();
-    hdpa = HeapAlloc (hHeap, HEAP_ZERO_MEMORY, sizeof(*hdpa));
+    if (hHeap)
+        hdpa = HeapAlloc (hHeap, HEAP_ZERO_MEMORY, sizeof(*hdpa));
+    else
+        hdpa = Alloc (sizeof(*hdpa));
 
     if (hdpa) {
         hdpa->nGrow = max(8, nGrow);
-        hdpa->hHeap = hHeap;
+        hdpa->hHeap = hHeap ? hHeap : GetProcessHeap();
         hdpa->nMaxCount = hdpa->nGrow * 2;
         hdpa->ptrs = HeapAlloc (hdpa->hHeap, HEAP_ZERO_MEMORY,
                                 hdpa->nMaxCount * sizeof(LPVOID));
@@ -1005,7 +1007,6 @@ void WINAPI DPA_DestroyCallback (HDPA hdpa, PFNDPAENUMCALLBACK enumProc,
     DPA_Destroy (hdpa);
 }
 
-#if __WINE_COMCTL32_VERSION == 6
 /**************************************************************************
  * DPA_GetSize [COMCTL32.@]
  *
@@ -1025,4 +1026,3 @@ ULONGLONG WINAPI DPA_GetSize(HDPA hdpa)
 
     return sizeof(DPA) + hdpa->nMaxCount*sizeof(PVOID);
 }
-#endif /* __WINE_COMCTL32_VERSION == 6 */

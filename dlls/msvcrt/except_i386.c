@@ -710,7 +710,7 @@ int CDECL _except_handler4_common( ULONG *cookie, void (*check_cookie)(void),
                     __DestructExceptionObject(rec);
 
                     /* Unwind all higher frames, this one will handle the exception */
-                    RtlUnwind(frame, 0, rec, 0);
+                    _global_unwind2((EXCEPTION_REGISTRATION_RECORD*)frame);
                     msvcrt_local_unwind4( cookie, frame, trylevel, &frame->_ebp );
 
                     /* Set our trylevel to the enclosing block, and call the __finally

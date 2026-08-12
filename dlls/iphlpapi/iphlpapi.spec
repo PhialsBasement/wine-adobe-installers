@@ -128,7 +128,7 @@
 #@ stub GetOwnerModuleFromUdp6Entry
 #@ stub GetOwnerModuleFromUdpEntry
 @ stdcall GetPerAdapterInfo( long ptr ptr )
-@ stdcall GetPerTcp6ConnectionEStats( ptr long ptr long long ptr long long ptr long long )
+#@ stub GetPerTcp6ConnectionEStats
 #@ stub GetPerTcp6ConnectionStats
 @ stdcall GetPerTcpConnectionEStats( ptr long ptr long long ptr long long ptr long long )
 #@ stub GetPerTcpConnectionStats
@@ -153,7 +153,7 @@
 @ stdcall GetUnicastIpAddressTable(long ptr)
 @ stdcall GetUniDirectionalAdapterInfo( ptr ptr )
 @ stdcall Icmp6CreateFile()
-@ stdcall Icmp6ParseReplies( ptr long )
+#@ stub Icmp6ParseReplies
 @ stdcall Icmp6SendEcho2(ptr ptr ptr ptr ptr ptr ptr long ptr ptr long long)
 @ stdcall IcmpCloseHandle(ptr)
 @ stdcall IcmpCreateFile()
@@ -285,7 +285,7 @@
 @ stub SetIpStatsToStack
 @ stdcall SetIpTTL( long )
 #@ stub SetNetworkInformation
-@ stdcall SetPerTcp6ConnectionEStats( ptr long ptr long long long )
+#@ stub SetPerTcp6ConnectionEStats
 #@ stub SetPerTcp6ConnectionStats
 @ stdcall SetPerTcpConnectionEStats( ptr long ptr long long long )
 #@ stub SetPerTcpConnectionStats

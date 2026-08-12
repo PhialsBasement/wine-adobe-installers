@@ -1,7 +1,7 @@
 EXTRADEFS = -D_IMAGEHLP_SOURCE_
 MODULE    = imagehlp.dll
 IMPORTLIB = imagehlp
-DELAYIMPORTS = dbghelp
+IMPORTS   = dbghelp
 
 SOURCES = \
 	access.c \

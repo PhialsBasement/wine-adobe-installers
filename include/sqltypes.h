@@ -28,7 +28,7 @@ extern "C" {
 #endif
 
 typedef unsigned char   SQLCHAR;
-#if defined(WINE_UNICODE_NATIVE) || ((defined(__MINGW32__) || defined(_MSC_VER)) && defined(_WCHAR_T_DEFINED))
+#if defined(WINE_UNICODE_NATIVE)
 typedef wchar_t         SQLWCHAR;
 #elif __cpp_unicode_literals >= 200710
 typedef char16_t        SQLWCHAR;

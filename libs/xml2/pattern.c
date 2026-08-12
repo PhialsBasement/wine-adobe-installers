@@ -1164,10 +1164,10 @@ xmlCompileStepPattern(xmlPatParserContextPtr ctxt) {
 			    goto error;
 			}
 		    } else {
-			PUSH(XML_OP_ELEM, token, URL);
+			PUSH(XML_OP_CHILD, token, URL);
 		    }
 		} else
-		    PUSH(XML_OP_ELEM, name, NULL);
+		    PUSH(XML_OP_CHILD, name, NULL);
 		return;
 	    } else if (xmlStrEqual(name, (const xmlChar *) "attribute")) {
 		XML_PAT_FREE_STRING(ctxt, name)

@@ -25,6 +25,7 @@
 #include <sys/types.h>
 
 #include "ntstatus.h"
+#define WIN32_NO_STATUS
 #include "windef.h"
 #include "winbase.h"
 #include "winuser.h"
@@ -75,10 +76,11 @@ static const struct object_ops winstation_ops =
     no_add_queue,                 /* add_queue */
     NULL,                         /* remove_queue */
     NULL,                         /* signaled */
+    NULL,                         /* get_esync_fd */
+    NULL,                         /* get_fsync_idx */
     NULL,                         /* satisfied */
     no_signal,                    /* signal */
     no_get_fd,                    /* get_fd */
-    default_get_sync,             /* get_sync */
     default_map_access,           /* map_access */
     default_get_sd,               /* get_sd */
     default_set_sd,               /* set_sd */
@@ -116,10 +118,11 @@ static const struct object_ops desktop_ops =
     no_add_queue,                 /* add_queue */
     NULL,                         /* remove_queue */
     NULL,                         /* signaled */
+    NULL,                         /* get_esync_fd */
+    NULL,                         /* get_fsync_idx */
     NULL,                         /* satisfied */
     no_signal,                    /* signal */
     no_get_fd,                    /* get_fd */
-    default_get_sync,             /* get_sync */
     default_map_access,           /* map_access */
     default_get_sd,               /* get_sd */
     default_set_sd,               /* set_sd */
@@ -296,8 +299,8 @@ static struct desktop *create_desktop( const struct unicode_str *name, unsigned 
             desktop->taskman_window = NULL;
             desktop->global_hooks = NULL;
             desktop->close_timeout = NULL;
+            desktop->close_timeout_val = 0;
             desktop->foreground_input = NULL;
-            desktop->foreground_pid = 0;
             desktop->users = 0;
             list_init( &desktop->threads );
             desktop->clip_flags = 0;
@@ -308,7 +311,7 @@ static struct desktop *create_desktop( const struct unicode_str *name, unsigned 
             list_init( &desktop->hotkeys );
             list_init( &desktop->pointers );
 
-            if (!(desktop->shared = alloc_shared_object( sizeof(*desktop->shared) )))
+            if (!(desktop->shared = alloc_shared_object()))
             {
                 release_object( desktop );
                 return NULL;
@@ -452,7 +455,7 @@ static void remove_desktop_user( struct desktop *desktop, struct thread *thread 
 
     /* if we have one remaining user, it has to be the manager of the desktop window */
     if ((process = get_top_window_owner( desktop )) && desktop->users == process->running_threads && !desktop->close_timeout)
-        desktop->close_timeout = add_timeout_user( -TICKS_PER_SEC, close_desktop_timeout, desktop );
+        desktop->close_timeout = add_timeout_user( desktop->close_timeout_val, close_desktop_timeout, desktop );
 }
 
 /* remove a thread from the list of threads attached to a desktop */
@@ -900,6 +903,7 @@ DECL_HANDLER(set_user_object_info)
             }
             SHARED_WRITE_END;
         }
+        if (req->flags & SET_USER_OBJECT_SET_CLOSE_TIMEOUT) desktop->close_timeout_val = req->close_timeout;
     }
     else if (obj->ops == &winstation_ops)
     {

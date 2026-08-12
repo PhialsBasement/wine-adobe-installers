@@ -23,6 +23,7 @@
 #include <string.h>
 
 #include "ntstatus.h"
+#define WIN32_NO_STATUS
 #include "windef.h"
 #include "winbase.h"
 #include "winerror.h"
@@ -38,7 +39,6 @@
 #include "iads.h"
 #include "advapi32_misc.h"
 #include "lmcons.h"
-#include "userenv.h"
 
 #include "wine/debug.h"
 
@@ -244,12 +244,42 @@ BOOL ADVAPI_IsLocalComputer(LPCWSTR ServerName)
     return Result;
 }
 
+static BOOL WINAPI init_computer_sid( INIT_ONCE *init_once, void *parameter, void **context )
+{
+    DWORD *sub_authority = parameter;
+    unsigned int i, count;
+    DWORD len, index;
+    BOOL found = FALSE;
+    DWORD values[3];
+    char buffer[64];
+    LSTATUS status;
+
+    len = ARRAY_SIZE(buffer);
+    index = 0;
+    while (!(status = RegEnumKeyExA( HKEY_USERS, index, buffer, &len, NULL, NULL, NULL, NULL )))
+    {
+        count = sscanf(buffer, "S-1-5-21-%lu-%lu-%lu", &values[0], &values[1], &values[2]);
+        if (count == 3)
+        {
+            if (found)
+                ERR( "Multiple users are not supported.\n" );
+            for (i = 0; i < 3; ++i)
+                sub_authority[i] = values[i];
+            found = TRUE;
+        }
+        ++index;
+        len = ARRAY_SIZE(buffer);
+    }
+    return found;
+}
+
 /************************************************************
  *                ADVAPI_GetComputerSid
  */
 BOOL ADVAPI_GetComputerSid(PSID sid)
 {
-    static const struct /* same fields as struct SID */
+    static INIT_ONCE init_once = INIT_ONCE_STATIC_INIT;
+    static struct /* same fields as struct SID */
     {
         BYTE Revision;
         BYTE SubAuthorityCount;
@@ -257,6 +287,9 @@ BOOL ADVAPI_GetComputerSid(PSID sid)
         DWORD SubAuthority[4];
     } computer_sid =
     { SID_REVISION, 4, { SECURITY_NT_AUTHORITY }, { SECURITY_NT_NON_UNIQUE, 0, 0, 0 } };
+
+    if (!InitOnceExecuteOnce( &init_once, init_computer_sid, computer_sid.SubAuthority + 1, NULL ))
+        ERR( "Could not initialize computer sid.\n" );
 
     memcpy( sid, &computer_sid, sizeof(computer_sid) );
     return TRUE;
@@ -276,8 +309,7 @@ GetEffectiveRightsFromAclW( PACL pacl, PTRUSTEEW pTrustee, PACCESS_MASK pAccessR
 {
     FIXME("%p %p %p - stub\n", pacl, pTrustee, pAccessRights);
 
-    *pAccessRights = STANDARD_RIGHTS_ALL | SPECIFIC_RIGHTS_ALL;
-    return 0;
+    return 1;
 }
 
 /*	##############################################
@@ -1210,7 +1242,7 @@ static void split_domain_account( const LSA_UNICODE_STRING *str, LSA_UNICODE_STR
 
     while (p > str->Buffer && *p != '\\') p--;
 
-    if (p >= str->Buffer && *p == '\\')
+    if (*p == '\\')
     {
         domain->Buffer = str->Buffer;
         domain->Length = (p - str->Buffer) * sizeof(WCHAR);
@@ -1343,7 +1375,7 @@ BOOL lookup_local_user_name( const LSA_UNICODE_STRING *account_and_domain,
     {
         /* check to make sure this account is on this computer */
         if (GetComputerNameW( userName, &nameLen ) &&
-            (domain.Length / sizeof(WCHAR) != nameLen || wcsnicmp( domain.Buffer, userName, nameLen )))
+            (domain.Length / sizeof(WCHAR) != nameLen || wcsncmp( domain.Buffer, userName, nameLen )))
         {
             SetLastError(ERROR_NONE_MAPPED);
             ret = FALSE;
@@ -1352,7 +1384,7 @@ BOOL lookup_local_user_name( const LSA_UNICODE_STRING *account_and_domain,
     }
 
     if (GetUserNameW( userName, &nameLen ) &&
-        account.Length / sizeof(WCHAR) == nameLen - 1 && !wcsnicmp( account.Buffer, userName, nameLen - 1 ))
+        account.Length / sizeof(WCHAR) == nameLen - 1 && !wcsncmp( account.Buffer, userName, nameLen - 1 ))
     {
             ret = lookup_user_account_name( Sid, cbSid, ReferencedDomainName, cchReferencedDomainName, peUse );
             *handled = TRUE;
@@ -1361,7 +1393,7 @@ BOOL lookup_local_user_name( const LSA_UNICODE_STRING *account_and_domain,
     {
         nameLen = UNLEN + 1;
         if (GetComputerNameW( userName, &nameLen ) &&
-            account.Length / sizeof(WCHAR) == nameLen && !wcsnicmp( account.Buffer, userName , nameLen ))
+            account.Length / sizeof(WCHAR) == nameLen && !wcsncmp( account.Buffer, userName , nameLen ))
         {
             ret = lookup_computer_account_name( Sid, cbSid, ReferencedDomainName, cchReferencedDomainName, peUse );
             *handled = TRUE;
@@ -2672,47 +2704,19 @@ BOOL WINAPI ConvertSidToStringSidA(PSID pSid, LPSTR *pstr)
 }
 
 /******************************************************************************
- * CreateProcessWithLogonW [ADVAPI32.@]
+ * CreateProcessWithLogonW
  */
-BOOL WINAPI CreateProcessWithLogonW( LPCWSTR user_name, LPCWSTR domain, LPCWSTR password,
-                                     DWORD logon_flags, LPCWSTR application_name, LPWSTR command_line,
-                                     DWORD creation_flags, void *environment, LPCWSTR current_directory,
-                                     STARTUPINFOW *startup_info, PROCESS_INFORMATION *process_information )
+BOOL WINAPI CreateProcessWithLogonW( LPCWSTR lpUsername, LPCWSTR lpDomain, LPCWSTR lpPassword, DWORD dwLogonFlags,
+    LPCWSTR lpApplicationName, LPWSTR lpCommandLine, DWORD dwCreationFlags, LPVOID lpEnvironment,
+    LPCWSTR lpCurrentDirectory, LPSTARTUPINFOW lpStartupInfo, LPPROCESS_INFORMATION lpProcessInformation )
 {
-    HANDLE token;
-
-    FIXME("%s %s %p 0x%08lx %s %s 0x%08lx %p %s %p %p: semi-stub\n", debugstr_w(user_name), debugstr_w(domain),
-          password, logon_flags, debugstr_w(application_name), debugstr_w(command_line), creation_flags,
-          environment, debugstr_w(current_directory), startup_info, process_information);
-
-    if (LogonUserW(user_name, domain, password, 0, 0, &token))
-    {
-        void *env = environment;
-        BOOL ret = TRUE;
-
-        if (!environment)
-        {
-            ret = CreateEnvironmentBlock(&env, token, FALSE);
-            creation_flags |= CREATE_UNICODE_ENVIRONMENT;
-        }
-
-        if (ret)
-        {
-            ret = CreateProcessAsUserW( token, application_name, command_line, NULL, NULL, FALSE,
-                    creation_flags, env, current_directory, startup_info, process_information );
-        }
-        if (env != environment)
-            DestroyEnvironmentBlock(env);
-        CloseHandle(token);
-        return ret;
-    }
+    FIXME("%s %s %p 0x%08lx %s %s 0x%08lx %p %s %p %p stub\n", debugstr_w(lpUsername), debugstr_w(lpDomain),
+          lpPassword, dwLogonFlags, debugstr_w(lpApplicationName), debugstr_w(lpCommandLine), dwCreationFlags,
+          lpEnvironment, debugstr_w(lpCurrentDirectory), lpStartupInfo, lpProcessInformation);
 
     return FALSE;
 }
 
-/******************************************************************************
- * CreateProcessWithTokenW [ADVAPI32.@]
- */
 BOOL WINAPI CreateProcessWithTokenW(HANDLE token, DWORD logon_flags, LPCWSTR application_name, LPWSTR command_line,
         DWORD creation_flags, void *environment, LPCWSTR current_directory, STARTUPINFOW *startup_info,
         PROCESS_INFORMATION *process_information )
@@ -3190,15 +3194,6 @@ BOOL WINAPI SaferSetLevelInformation(SAFER_LEVEL_HANDLE handle, SAFER_OBJECT_INF
 }
 
 /******************************************************************************
- * SaferiIsExecutableFileType   [ADVAPI32.@]
- */
-BOOL WINAPI SaferiIsExecutableFileType(const WCHAR *path, BOOLEAN shell_execute)
-{
-    FIXME("(%s, %u) stub\n", debugstr_w(path), shell_execute);
-    return FALSE;
-}
-
-/******************************************************************************
  * LookupSecurityDescriptorPartsA   [ADVAPI32.@]
  */
 DWORD WINAPI LookupSecurityDescriptorPartsA(TRUSTEEA *owner, TRUSTEEA *group, ULONG *access_count,
@@ -3220,15 +3215,4 @@ DWORD WINAPI LookupSecurityDescriptorPartsW(TRUSTEEW *owner, TRUSTEEW *group, UL
     FIXME("(%p %p %p %p %p %p %p) stub\n", owner, group, access_count,
           access_list, audit_count, audit_list, descriptor);
     return ERROR_CALL_NOT_IMPLEMENTED;
-}
-
-/******************************************************************************
- * AddConditionalAce [ADVAPI32.@]
- */
-BOOL WINAPI AddConditionalAce(PACL acl, DWORD ace_revision, DWORD ace_flags, UCHAR ace_type,
-                               DWORD access_mask, PSID sid, PWCHAR condition, DWORD *length)
-{
-    FIXME("(%p %lx %lx %x %lx %p %s %p) stub\n", acl, ace_revision, ace_flags, ace_type,
-           access_mask, sid, debugstr_w(condition), length);
-    return FALSE;
 }

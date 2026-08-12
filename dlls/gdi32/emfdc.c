@@ -319,8 +319,6 @@ static BOOL emf_parse_user_bitmapinfo( BITMAPINFOHEADER *dst, const BITMAPINFOHE
         UINT elm_size = coloruse == DIB_PAL_COLORS ? sizeof(WORD) : sizeof(DWORD);
         UINT colours = dst->biClrUsed;
 
-        if (!colours) colours = 1 << dst->biBitCount;
-
         /* Windows never truncates colour tables, even if they are
          * unnecessarily big (> 1<<bpp).  We emulate this behaviour. */
 
@@ -662,56 +660,33 @@ static BOOL emfdc_select_font( DC_ATTR *dc_attr, HFONT font )
 
 static DWORD emfdc_ext_create_pen( struct emf *emf, HPEN pen )
 {
-    EMREXTCREATEPEN *emr = NULL;
-    EXTLOGPEN *elp = NULL;
+    EMREXTCREATEPEN *emr;
     int size, emr_size;
-    unsigned int i;
     DWORD ret = 0;
 
     if (!(size = GetObjectW( pen, 0, NULL )))
         return 0;
-
-    elp = malloc( size );
-    if (!elp)
-        return 0;
-
-    /* Native adds an extra 4 bytes, presumably because someone wasn't careful about the
-     * dynamic array [1] at the end of EXTLOGPEN. Also note that GetObject returns an
-     * EXTLOGPEN with a pointer-sized elpHatch, whereas a metafile always has a 32 bit
-     * sized emr->elp.elpHatch .*/
-    emr_size = sizeof(*emr) - sizeof(*elp) + sizeof(emr->elp.elpStyleEntry) + size;
-    emr = calloc( 1, emr_size );
+    emr_size = sizeof(*emr) - sizeof(emr->elp) + size;
+    emr = HeapAlloc( GetProcessHeap(), 0, emr_size );
     if (!emr)
-        goto out;
-    GetObjectW( pen, size, elp );
+        return 0;
+    GetObjectW( pen, size, &emr->elp );
 
-    if (elp->elpBrushStyle == BS_DIBPATTERN ||
-            elp->elpBrushStyle == BS_DIBPATTERNPT ||
-            elp->elpBrushStyle == BS_PATTERN)
+    if (emr->elp.elpBrushStyle == BS_DIBPATTERN ||
+            emr->elp.elpBrushStyle == BS_DIBPATTERNPT ||
+            emr->elp.elpBrushStyle == BS_PATTERN)
     {
-        FIXME( "elpBrushStyle = %d\n", elp->elpBrushStyle );
-        goto out;
+        FIXME( "elpBrushStyle = %d\n", emr->elp.elpBrushStyle );
+        HeapFree( GetProcessHeap(), 0, emr );
+        return 0;
     }
-    emr->offBmi = emr->offBits = emr_size;
-
-    emr->elp.elpPenStyle = elp->elpPenStyle;
-    emr->elp.elpWidth = elp->elpWidth;
-    emr->elp.elpBrushStyle = elp->elpBrushStyle;
-    emr->elp.elpColor = elp->elpColor;
-    emr->elp.elpHatch = elp->elpHatch;
-    emr->elp.elpNumEntries = elp->elpNumEntries;
-
-    for (i = 0; i < elp->elpNumEntries; ++i)
-        emr->elp.elpStyleEntry[i] = elp->elpStyleEntry[i];
+    emr->offBmi = emr->cbBmi = emr->offBits = emr->cbBits = 0;
 
     emr->emr.iType = EMR_EXTCREATEPEN;
     emr->emr.nSize = emr_size;
     emr->ihPen = ret = emfdc_add_handle( emf, pen );
     ret = emfdc_record( emf, &emr->emr ) ? ret : 0;
-
-out:
-    free( emr );
-    free( elp );
+    HeapFree( GetProcessHeap(), 0, emr );
     return ret;
 }
 

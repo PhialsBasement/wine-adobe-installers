@@ -42,6 +42,7 @@
 #include <string.h>
 
 #include <ntstatus.h>
+#define WIN32_NO_STATUS
 #include <windows.h>
 #include <winternl.h>
 #include <shlwapi.h>
@@ -62,6 +63,17 @@ static char *strdup_unixcp( const WCHAR *str )
     return ret;
 }
 
+static void restore_system_environment(void)
+{
+    const char* orig_ld_path = getenv("ORIG_LD_LIBRARY_PATH");
+
+    if (orig_ld_path)
+    {
+        __wine_set_unix_env("LD_LIBRARY_PATH", orig_ld_path);
+        __wine_set_unix_env("ORIG_LD_LIBRARY_PATH", NULL);
+    }
+}
+
 /* try to launch a unix app from a comma separated string of app names */
 static int launch_app( const WCHAR *candidates, const WCHAR *argv1 )
 {
@@ -70,6 +82,11 @@ static int launch_app( const WCHAR *candidates, const WCHAR *argv1 )
     char **argv_new;
 
     if (!(cmdline = strdup_unixcp( argv1 ))) return 1;
+
+    /* PROTON HACK: Restore ORIG_LD_LIBRARY_PATH to LD_LIBRARY_PATH.
+     * System programs may not work correctly with our libraries, in
+     * particular gio on Ubuntu 19.04 is broken by our libgio. */
+    restore_system_environment();
 
     while (*candidates)
     {
@@ -356,6 +373,10 @@ static WCHAR *encode_unix_path(const char *src)
 
 static WCHAR *convert_file_uri(IUri *uri)
 {
+    UNICODE_STRING nt_name;
+    OBJECT_ATTRIBUTES attr;
+    NTSTATUS status;
+    ULONG size = 256;
     char *buffer;
     WCHAR *new_path = NULL;
     BSTR filename;
@@ -367,9 +388,23 @@ static WCHAR *convert_file_uri(IUri *uri)
 
     WINE_TRACE("Windows path: %s\n", wine_dbgstr_w(filename));
 
-    if (GetFileAttributesW( filename ) == INVALID_FILE_ATTRIBUTES) return NULL;
-    if (!(buffer = wine_get_unix_file_name( filename ))) return NULL;
-    new_path = encode_unix_path( buffer );
+    if (!RtlDosPathNameToNtPathName_U( filename, &nt_name, NULL, NULL )) return NULL;
+    InitializeObjectAttributes( &attr, &nt_name, 0, 0, NULL );
+    for (;;)
+    {
+        if (!(buffer = malloc( size )))
+        {
+            RtlFreeUnicodeString( &nt_name );
+            return NULL;
+        }
+        status = wine_nt_to_unix_file_name( &attr, buffer, &size, FILE_OPEN );
+        if (status != STATUS_BUFFER_TOO_SMALL) break;
+        free( buffer );
+    }
+
+    if (!status) new_path = encode_unix_path( buffer );
+    SysFreeString(filename);
+    free( buffer );
 
     WINE_TRACE("New path: %s\n", wine_dbgstr_w(new_path));
 

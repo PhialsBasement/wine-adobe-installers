@@ -35,7 +35,7 @@
 
 #include "wingdi.h"	/* for BITMAPINFOHEADER */
 
-#pragma pack(push,2)
+#include <pshpack2.h>
 typedef struct
 {
     unsigned int   biSize;
@@ -44,7 +44,7 @@ typedef struct
     unsigned short biPlanes;
     unsigned short biBitCount;
 } BITMAPOS2HEADER;
-#pragma pack(pop)
+#include <poppack.h>
 
 /* New instances for all types of structures */
 /* Very inefficient (in size), but very functional :-]
@@ -152,6 +152,13 @@ raw_data_t *new_raw_data(void)
 lvc_t *new_lvc(void)
 {
     lvc_t *ret = xmalloc( sizeof(*ret) );
+    memset( ret, 0, sizeof(*ret) );
+    return ret;
+}
+
+res_count_t *new_res_count(void)
+{
+    res_count_t *ret = xmalloc( sizeof(*ret) );
     memset( ret, 0, sizeof(*ret) );
     return ret;
 }

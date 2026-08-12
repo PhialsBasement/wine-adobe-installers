@@ -22,7 +22,7 @@
 
 #include <corecrt.h>
 
-#pragma pack(push,8)
+#include <pshpack8.h>
 
 #ifdef __i386__
 
@@ -47,12 +47,12 @@ typedef struct __JUMP_BUFFER
 
 #elif defined(__x86_64__)
 
-typedef _CRT_ALIGN(16) struct _SETJMP_FLOAT128
+typedef DECLSPEC_ALIGN(16) struct _SETJMP_FLOAT128
 {
     unsigned __int64 Part[2];
 } SETJMP_FLOAT128;
 
-typedef _CRT_ALIGN(16) struct _JUMP_BUFFER
+typedef DECLSPEC_ALIGN(16) struct _JUMP_BUFFER
 {
     unsigned __int64 Frame;
     unsigned __int64 Rbx;
@@ -180,6 +180,6 @@ _ACRTIMP int __cdecl __attribute__((__nothrow__,__returns_twice__)) _setjmpex(jm
 }
 #endif
 
-#pragma pack(pop)
+#include <poppack.h>
 
 #endif /* __WINE_SETJMP_H */

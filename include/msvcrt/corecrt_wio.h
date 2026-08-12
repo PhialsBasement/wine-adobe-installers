@@ -8,7 +8,7 @@
 
 #include <corecrt.h>
 
-#pragma pack(push,8)
+#include <pshpack8.h>
 
 typedef __msvcrt_ulong _fsize_t;
 
@@ -34,7 +34,7 @@ struct _wfinddata32i64_t {
   __time32_t time_create;
   __time32_t time_access;
   __time32_t time_write;
-  __int64    _CRT_ALIGN(8) size;
+  __int64    DECLSPEC_ALIGN(8) size;
   wchar_t    name[260];
 };
 
@@ -52,7 +52,7 @@ struct _wfinddata64_t {
   __time64_t time_create;
   __time64_t time_access;
   __time64_t time_write;
-  __int64    _CRT_ALIGN(8) size;
+  __int64    DECLSPEC_ALIGN(8) size;
   wchar_t    name[260];
 };
 
@@ -101,13 +101,12 @@ _ACRTIMP wchar_t* __cdecl _wmktemp(wchar_t*);
 _ACRTIMP int      __cdecl _wopen(const wchar_t*,int,...);
 _ACRTIMP int      __cdecl _wrename(const wchar_t*,const wchar_t*);
 _ACRTIMP int      __cdecl _wsopen(const wchar_t*,int,int,...);
-_ACRTIMP errno_t  __cdecl _wsopen_s(int*,const wchar_t*,int,int,int);
 _ACRTIMP int      __cdecl _wunlink(const wchar_t*);
 
 #ifdef __cplusplus
 }
 #endif
 
-#pragma pack(pop)
+#include <poppack.h>
 
 #endif /* _WIO_DEFINED */

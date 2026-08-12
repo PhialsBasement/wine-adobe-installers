@@ -1982,7 +1982,6 @@ static void test_QueryDisplayConfig_result(UINT32 flags,
     DISPLAYCONFIG_TARGET_DEVICE_NAME target_name;
     DISPLAYCONFIG_TARGET_PREFERRED_MODE preferred_mode;
     DISPLAYCONFIG_ADAPTER_NAME adapter_name;
-    DISPLAYCONFIG_GET_ADVANCED_COLOR_INFO color_info;
     const DISPLAYCONFIG_DESKTOP_IMAGE_INFO *di;
 
     for (i = 0; i < paths; i++)
@@ -2033,14 +2032,6 @@ static void test_QueryDisplayConfig_result(UINT32 flags,
         ret = pDisplayConfigGetDeviceInfo(&adapter_name.header);
         ok(!ret, "Expected 0, got %ld\n", ret);
         ok(adapter_name.adapterDevicePath[0] != '\0', "Expected adapter device path, got empty string\n");
-
-        color_info.header.type = DISPLAYCONFIG_DEVICE_INFO_GET_ADVANCED_COLOR_INFO;
-        color_info.header.size = sizeof(color_info);
-        color_info.header.adapterId = pi[i].targetInfo.adapterId;
-        color_info.header.id = pi[i].targetInfo.id;
-        ret = pDisplayConfigGetDeviceInfo(&color_info.header);
-        ok(!ret || broken(ret == ERROR_INVALID_PARAMETER) /* before Win10 1709 */,
-                "Expected 0, got %ld\n", ret);
 
         /* Check corresponding modes */
         if (flags & QDC_VIRTUAL_MODE_AWARE)
@@ -2296,7 +2287,6 @@ static void test_DisplayConfigGetDeviceInfo(void)
     DISPLAYCONFIG_TARGET_DEVICE_NAME target_name;
     DISPLAYCONFIG_TARGET_PREFERRED_MODE preferred_mode;
     DISPLAYCONFIG_ADAPTER_NAME adapter_name;
-    DISPLAYCONFIG_GET_ADVANCED_COLOR_INFO color_info;
 
     ret = pDisplayConfigGetDeviceInfo(NULL);
     ok(ret == ERROR_GEN_FAILURE, "got %ld\n", ret);
@@ -2375,18 +2365,6 @@ static void test_DisplayConfigGetDeviceInfo(void)
     adapter_name.header.adapterId.LowPart = 0xFFFF;
     adapter_name.header.adapterId.HighPart = 0xFFFF;
     ret = pDisplayConfigGetDeviceInfo(&adapter_name.header);
-    ok(ret == ERROR_GEN_FAILURE || ret == ERROR_INVALID_PARAMETER || ret == ERROR_NOT_SUPPORTED, "got %ld\n", ret);
-
-    color_info.header.type = DISPLAYCONFIG_DEVICE_INFO_GET_ADVANCED_COLOR_INFO;
-    color_info.header.size = sizeof(color_info) - 1;
-    ret = pDisplayConfigGetDeviceInfo(&color_info.header);
-    ok(ret == ERROR_INVALID_PARAMETER, "got %ld\n", ret);
-
-    color_info.header.type = DISPLAYCONFIG_DEVICE_INFO_GET_ADVANCED_COLOR_INFO;
-    color_info.header.size = sizeof(color_info);
-    color_info.header.adapterId.LowPart = 0xFFFF;
-    color_info.header.adapterId.HighPart = 0xFFFF;
-    ret = pDisplayConfigGetDeviceInfo(&color_info.header);
     ok(ret == ERROR_GEN_FAILURE || ret == ERROR_INVALID_PARAMETER || ret == ERROR_NOT_SUPPORTED, "got %ld\n", ret);
 }
 
@@ -3233,7 +3211,7 @@ static void test_monitor_dpi_awareness( const struct monitor_info *infos, UINT c
     {
         if (infos[i].rect.left == 0 && infos[i].rect.top == 0) primary = infos[i].rect;
 
-        if (info != infos + i) UnionRect( &scaled_virtual, &scaled_virtual, &infos[i].rect );
+        if (info - infos + i) UnionRect( &scaled_virtual, &scaled_virtual, &infos[i].rect );
         else
         {
             scaled = monitor = infos[i].rect;

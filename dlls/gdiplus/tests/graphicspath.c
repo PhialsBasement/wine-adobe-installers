@@ -75,7 +75,7 @@ typedef struct
     int todo;
 } path_test_t;
 
-#define ok_path(a,b,c,d) _ok_path_fudge(a,b,c,d,0.4,__LINE__)
+#define ok_path(a,b,c,d) _ok_path_fudge(a,b,c,d,1.0,__LINE__)
 #define ok_path_fudge(a,b,c,d,e) _ok_path_fudge(a,b,c,d,e,__LINE__)
 static void _ok_path_fudge(GpPath* path, const path_test_t *expected, INT expected_size,
         BOOL todo_size, REAL fudge, int line)
@@ -121,11 +121,7 @@ static void _ok_path_fudge(GpPath* path, const path_test_t *expected, INT expect
         if (match || expected[eidx].todo != 2)
             idx++;
         if (match || !numskip--)
-        {
-            eidx++;
-            if (eidx < expected_size)
-                numskip = expected[eidx].wine_only_entries_preceding;
-        }
+            numskip = expected[++eidx].wine_only_entries_preceding;
     }
 
 end:
@@ -590,7 +586,6 @@ static void test_worldbounds(void)
     expectf(266.8, bounds.Width);
     expectf(289.6, bounds.Height);
 
-    /* Bounds from path without any points */
     GdipCreatePath(FillModeAlternate, &path);
     status = GdipGetPathWorldBounds(path, &bounds, matrix, pen);
     expect(Ok, status);
@@ -601,19 +596,6 @@ static void test_worldbounds(void)
     expectf(0.0, bounds.Width);
     expectf(0.0, bounds.Height);
 
-    /* Bounds from path with single point */
-    GdipCreatePath(FillModeAlternate, &path);
-    GdipAddPathLine2(path, &(line2_points[0]), 1);
-    status = GdipGetPathWorldBounds(path, &bounds, NULL, pen);
-    expect(Ok, status);
-    GdipDeletePath(path);
-
-    expectf(0.0, bounds.X);
-    expectf(0.0, bounds.Y);
-    expectf(0.0, bounds.Width);
-    expectf(0.0, bounds.Height);
-
-    /* Bounds from path with two points */
     GdipCreatePath(FillModeAlternate, &path);
     GdipAddPathLine2(path, &(line2_points[0]), 2);
     status = GdipGetPathWorldBounds(path, &bounds, matrix, pen);
@@ -1150,17 +1132,6 @@ static void test_addclosedcurve(void)
     GdipDeletePath(path);
 }
 
-static path_test_t line_path[] = {
-
-    {0.0,  50.0, PathPointTypeStart, 0, 0}, /*0*/
-    {5.0,  45.0, PathPointTypeLine,  0, 0}, /*1*/
-    {0.0,  40.0, PathPointTypeLine,  0, 0}, /*2*/
-    {15.0, 35.0, PathPointTypeLine | PathPointTypeCloseSubpath, 0, 0}, /*3*/
-    {0.0,  30.0, PathPointTypeStart, 0, 0}, /*4*/
-    {25.0, 25.0, PathPointTypeLine,  0, 0}, /*5*/
-    {0.0,  20.0, PathPointTypeLine,  0, 0} /*6*/
-};
-
 static path_test_t reverse_path[] = {
     {0.0,  20.0, PathPointTypeStart, 0, 0}, /*0*/
     {25.0, 25.0, PathPointTypeLine,  0, 0}, /*1*/
@@ -1169,23 +1140,7 @@ static path_test_t reverse_path[] = {
     {0.0,  40.0, PathPointTypeLine,  0, 0}, /*4*/
     {5.0,  45.0, PathPointTypeLine,  0, 0}, /*5*/
     {0.0,  50.0, PathPointTypeLine | PathPointTypeCloseSubpath, 0, 0}  /*6*/
-};
-
-static path_test_t pie_path[] = {
-    {2.5,  4.0,  PathPointTypeStart,  0, 0}, /*0*/
-    {3.99, 4.26, PathPointTypeLine,   0, 0}, /*1*/
-    {3.96, 4.44, PathPointTypeBezier, 0, 0}, /*2*/
-    {3.93, 4.62, PathPointTypeBezier, 0, 0}, /*3*/
-    {3.88, 4.79, PathPointTypeBezier | PathPointTypeCloseSubpath, 0, 0}  /*4*/
-};
-
-static path_test_t reverse_pie_path[] = {
-    {3.88, 4.79, PathPointTypeStart,  0, 0}, /*0*/
-    {3.93, 4.62, PathPointTypeBezier, 0, 0}, /*1*/
-    {3.96, 4.44, PathPointTypeBezier, 0, 0}, /*2*/
-    {3.99, 4.26, PathPointTypeBezier, 0, 0}, /*3*/
-    {2.5,  4.0,  PathPointTypeLine | PathPointTypeCloseSubpath, 0, 0}  /*4*/
-};
+    };
 
 static void test_reverse(void)
 {
@@ -1209,39 +1164,14 @@ static void test_reverse(void)
     status = GdipReversePath(path);
     expect(Ok, status);
 
-    status = GdipAddPathLine2(path, pts, 4);
-    expect(Ok, status);
-    status = GdipClosePathFigure(path);
-    expect(Ok, status);
-    status = GdipAddPathLine2(path, &(pts[4]), 3);
-    expect(Ok, status);
-    ok_path(path, line_path, ARRAY_SIZE(line_path), FALSE);
+    GdipAddPathLine2(path, pts, 4);
+    GdipClosePathFigure(path);
+    GdipAddPathLine2(path, &(pts[4]), 3);
 
     status = GdipReversePath(path);
     expect(Ok, status);
     ok_path(path, reverse_path, ARRAY_SIZE(reverse_path), FALSE);
 
-    /* Double reverse should go back to original Line Path */
-    status = GdipReversePath(path);
-    expect(Ok, status);
-    ok_path(path, line_path, ARRAY_SIZE(line_path), FALSE);
-    GdipDeletePath(path);
-
-    /* Reverse test for Path Pie */
-    status = GdipCreatePath(FillModeAlternate, &path);
-    expect(Ok, status);
-    status = GdipAddPathPie(path, 1.0, 2.0, 3.0, 4.0, 10.0, 20.0);
-    expect(Ok, status);
-    ok_path(path, pie_path, ARRAY_SIZE(pie_path), FALSE);
-
-    status = GdipReversePath(path);
-    expect(Ok, status);
-    ok_path(path, reverse_pie_path, ARRAY_SIZE(reverse_pie_path), FALSE);
-
-    /* Double reverse should go back to original Pie Path*/
-    status = GdipReversePath(path);
-    expect(Ok, status);
-    ok_path(path, pie_path, ARRAY_SIZE(pie_path), FALSE);
     GdipDeletePath(path);
 }
 
@@ -1296,26 +1226,26 @@ static path_test_t flattenellipse_path[] = {
     {96.0, 34.8, PathPointTypeLine,  0, 0}, /*2*/
     {91.5, 39.0, PathPointTypeLine,  0, 0}, /*3*/
     {85.5, 42.8, PathPointTypeLine,  0, 0}, /*4*/
-    {69.5, 48.0, PathPointTypeLine,  0, 0}, /*5*/
-    {50.0, 50.0, PathPointTypeLine,  0, 0}, /*6*/
-    {30.5, 48.0, PathPointTypeLine,  0, 0}, /*7*/
-    {14.8, 42.8, PathPointTypeLine,  0, 0}, /*8*/
-    {8.5,  39.0, PathPointTypeLine,  0, 0}, /*9*/
-    {4.0,  34.8, PathPointTypeLine,  0, 0}, /*10*/
-    {1.0,  30.0, PathPointTypeLine,  0, 0}, /*11*/
-    {0.0,  25.0, PathPointTypeLine,  0, 0}, /*12*/
-    {1.0,  20.0, PathPointTypeLine,  0, 0}, /*13*/
-    {4.0,  15.3, PathPointTypeLine,  0, 0}, /*14*/
-    {8.5,  11.0, PathPointTypeLine,  0, 0}, /*15*/
-    {14.8, 7.3,  PathPointTypeLine,  0, 0}, /*16*/
-    {30.5, 2.0,  PathPointTypeLine,  0, 0}, /*17*/
-    {50.0, 0.0,  PathPointTypeLine,  0, 0}, /*18*/
-    {69.5, 2.0,  PathPointTypeLine,  0, 0}, /*19*/
-    {85.5, 7.3,  PathPointTypeLine,  0, 0}, /*20*/
-    {91.5, 11.0, PathPointTypeLine,  0, 0}, /*21*/
-    {96.0, 15.3, PathPointTypeLine,  0, 0}, /*22*/
-    {99.0, 20.0, PathPointTypeLine,  0, 0}, /*23*/
-    {100.0,25.0, PathPointTypeLine | PathPointTypeCloseSubpath,  0, 0}  /*24*/
+    {69.5, 48.0, PathPointTypeLine,  0, 1}, /*5*/
+    {50.0, 50.0, PathPointTypeLine,  0, 1}, /*6*/
+    {30.5, 48.0, PathPointTypeLine,  0, 1}, /*7*/
+    {14.8, 42.8, PathPointTypeLine,  0, 1}, /*8*/
+    {8.5,  39.0, PathPointTypeLine,  0, 1}, /*9*/
+    {4.0,  34.8, PathPointTypeLine,  0, 1}, /*10*/
+    {1.0,  30.0, PathPointTypeLine,  0, 1}, /*11*/
+    {0.0,  25.0, PathPointTypeLine,  0, 1}, /*12*/
+    {1.0,  20.0, PathPointTypeLine,  0, 1}, /*13*/
+    {4.0,  15.3, PathPointTypeLine,  0, 1}, /*14*/
+    {8.5,  11.0, PathPointTypeLine,  0, 1}, /*15*/
+    {14.8, 7.3,  PathPointTypeLine,  0, 1}, /*16*/
+    {30.5, 2.0,  PathPointTypeLine,  0, 1}, /*17*/
+    {50.0, 0.0,  PathPointTypeLine,  0, 1}, /*18*/
+    {69.5, 2.0,  PathPointTypeLine,  0, 1}, /*19*/
+    {85.5, 7.3,  PathPointTypeLine,  0, 1}, /*20*/
+    {91.5, 11.0, PathPointTypeLine,  0, 1}, /*21*/
+    {96.0, 15.3, PathPointTypeLine,  0, 1}, /*22*/
+    {99.0, 20.0, PathPointTypeLine,  0, 1}, /*23*/
+    {100.0,25.0, PathPointTypeLine | PathPointTypeCloseSubpath,  0, 1}  /*24*/
     };
 
 static path_test_t flattenline_path[] = {
@@ -1323,36 +1253,14 @@ static path_test_t flattenline_path[] = {
     {50.0, 100.0, PathPointTypeLine,  0, 0} /*1*/
     };
 
-static path_test_t arc_path3[] = {
-    {100.0, 25.0, PathPointTypeStart,  0, 0}, /*0*/
-    {100.0, 38.8, PathPointTypeBezier, 0, 0}, /*1*/
-    {77.6,  50.0, PathPointTypeBezier, 0, 0}, /*2*/
-    {50.0,  50.0, PathPointTypeBezier, 0, 0}  /*3*/
-    };
-
-static path_test_t flattenarc_path3[] = {
+static path_test_t flattenarc_path[] = {
     {100.0, 25.0,PathPointTypeStart, 0, 0}, /*0*/
     {99.0, 30.0, PathPointTypeLine,  0, 0}, /*1*/
     {96.0, 34.8, PathPointTypeLine,  0, 0}, /*2*/
     {91.5, 39.0, PathPointTypeLine,  0, 0}, /*3*/
     {85.5, 42.8, PathPointTypeLine,  0, 0}, /*4*/
-    {69.5, 48.0, PathPointTypeLine,  0, 0}, /*5*/
-    {50.0, 50.0, PathPointTypeLine,  0, 0}  /*6*/
-    };
-
-static path_test_t flattenarc_path4[] = {
-    {100.0,25.0, PathPointTypeStart, 0, 0}, /*0*/
-    {99.8, 27.6, PathPointTypeLine,  0, 0}, /*1*/
-    {99.0, 30.1, PathPointTypeLine,  0, 0}, /*2*/
-    {97.8, 32.4, PathPointTypeLine,  0, 0}, /*3*/
-    {96.0, 34.8, PathPointTypeLine,  0, 0}, /*4*/
-    {93.9, 36.9, PathPointTypeLine,  0, 0}, /*5*/
-    {91.4, 39.0, PathPointTypeLine,  0, 0}, /*6*/
-    {85.4, 42.7, PathPointTypeLine,  0, 0}, /*7*/
-    {77.9, 45.8, PathPointTypeLine,  0, 0}, /*8*/
-    {69.5, 48.0, PathPointTypeLine,  0, 0}, /*9*/
-    {60.0, 49.5, PathPointTypeLine,  0, 0}, /*10*/
-    {50.0, 50.0, PathPointTypeLine,  0, 0}  /*11*/
+    {69.5, 48.0, PathPointTypeLine,  0, 1}, /*5*/
+    {50.0, 50.0, PathPointTypeLine,  0, 1}  /*6*/
     };
 
 static path_test_t flattenquater_path[] = {
@@ -1396,7 +1304,7 @@ static void test_flatten(void)
 
     status = GdipFlattenPath(path, NULL, 1.0);
     expect(Ok, status);
-    ok_path(path, flattenellipse_path, ARRAY_SIZE(flattenellipse_path), FALSE);
+    ok_path(path, flattenellipse_path, ARRAY_SIZE(flattenellipse_path), TRUE);
 
     status = GdipResetPath(path);
     expect(Ok, status);
@@ -1406,35 +1314,13 @@ static void test_flatten(void)
     expect(Ok, status);
     ok_path(path, flattenline_path, ARRAY_SIZE(flattenline_path), FALSE);
 
-    // Flatten line with FlatnessDefault (0.25f)
-    status = GdipResetPath(path);
-    expect(Ok, status);
-    status = GdipAddPathLine(path, 5.0, 10.0, 50.0, 100.0);
-    expect(Ok, status);
-    status = GdipFlattenPath(path, NULL, FlatnessDefault);
-    expect(Ok, status);
-    ok_path(path, flattenline_path, ARRAY_SIZE(flattenline_path), FALSE);
-
-    /* Flatten arc path with Flatness = 1.0) */
     status = GdipResetPath(path);
     expect(Ok, status);
     status = GdipAddPathArc(path, 0.0, 0.0, 100.0, 50.0, 0.0, 90.0);
     expect(Ok, status);
-    ok_path(path, arc_path3, ARRAY_SIZE(arc_path3), FALSE);
-
     status = GdipFlattenPath(path, NULL, 1.0);
     expect(Ok, status);
-    ok_path(path, flattenarc_path3, ARRAY_SIZE(flattenarc_path3), FALSE);
-
-    /* Flatten arc path with FlatnessDefault (0.25f) */
-    status = GdipResetPath(path);
-    expect(Ok, status);
-    status = GdipAddPathArc(path, 0.0, 0.0, 100.0, 50.0, 0.0, 90.0);
-    expect(Ok, status);
-
-    status = GdipFlattenPath(path, NULL, FlatnessDefault);
-    expect(Ok, status);
-    ok_path(path, flattenarc_path4, ARRAY_SIZE(flattenarc_path4), FALSE);
+    ok_path(path, flattenarc_path, ARRAY_SIZE(flattenarc_path), TRUE);
 
     /* easy case - quater of a full circle */
     status = GdipResetPath(path);
@@ -1462,107 +1348,6 @@ static void test_flatten(void)
     expect(Ok, status);
 
     GdipDeleteMatrix(m);
-    GdipDeletePath(path);
-}
-
-static path_test_t warp_path[] = {
-    {7.53, 0.25, PathPointTypeStart, 0, 1}, /*0*/
-    {21.5, 0.25, PathPointTypeLine,  0, 1}, /*1*/
-    {20.5, 8.25, PathPointTypeLine,  0, 1}, /*2*/
-    {6.53, 8.25, PathPointTypeLine| PathPointTypeCloseSubpath, 0, 1} /*3*/
-    };
-
-static path_test_t transformed_warp_path[] = {
-    {16.56, 4.25,  PathPointTypeStart, 0, 1}, /*0*/
-    {44.56, 4.25,  PathPointTypeLine,  0, 1}, /*1*/
-    {42.56, 12.25, PathPointTypeLine,  0, 1}, /*2*/
-    {14.56, 12.25, PathPointTypeLine| PathPointTypeCloseSubpath, 0, 1} /*3*/
-    };
-
-static path_test_t warp_pie_path[] = {
-    {19.37, 8.75,  PathPointTypeStart, 0, 1}, /*0*/
-    {21.5,  8.97,  PathPointTypeLine,  0, 1}, /*1*/
-    {20.95, 10.36, PathPointTypeLine | PathPointTypeCloseSubpath, 0, 1} /*2*/
-    };
-
-static void test_warp_path(void)
-{
-    GpStatus status;
-    GpPath *path;
-    GpMatrix *mat;
-    INT count = 3;
-    GpPointF dest_points[3] = { { 8.0, 0.0 }, { 64.0, 0.0 }, { 0.0, 64.0 } };
-
-    status = GdipCreatePath(FillModeAlternate, &path);
-    expect(Ok, status);
-    status = GdipCreateMatrix(&mat);
-    expect(Ok, status);
-
-    status = GdipAddPathRectangle(path, -1.0, 0.5, 32.0, 16.0);
-    expect(Ok, status);
-
-    /* NULL path */
-    status = GdipWarpPath(NULL, NULL, dest_points, count, 0.0, 0.0, 128.0, 128.0, WarpModePerspective, FlatnessDefault);
-    expect(InvalidParameter, status);
-
-    /* NULL destination points */
-    status = GdipWarpPath(path, NULL, NULL, count, 0.0, 0.0, 128.0, 128.0, WarpModePerspective, FlatnessDefault);
-    expect(InvalidParameter, status);
-
-    /* Zero number of point in destination points */
-    status = GdipWarpPath(path, NULL, dest_points, 0, 0.0, 0.0, 128.0, 128.0, WarpModePerspective, FlatnessDefault);
-    expect(InvalidParameter, status);
-
-    /* Valid warp with one destination point */
-    status = GdipWarpPath(path, NULL, dest_points, 1, 0.0, 0.0, 128.0, 128.0, WarpModePerspective, FlatnessDefault);
-    todo_wine expect(Ok, status);
-    ok_path(path, warp_path, ARRAY_SIZE(warp_path), FALSE);
-    status = GdipResetPath(path);
-    expect(Ok, status);
-
-     /* Valid warp with two destination points */
-    status = GdipAddPathRectangle(path, -1.0, 0.5, 32.0, 16.0);
-    expect(Ok, status);
-    status = GdipWarpPath(path, NULL, dest_points, 2, 0.0, 0.0, 128.0, 128.0, WarpModePerspective, FlatnessDefault);
-    todo_wine expect(Ok, status);
-    ok_path(path, warp_path, ARRAY_SIZE(warp_path), FALSE);
-    status = GdipResetPath(path);
-    expect(Ok, status);
-
-    /* Valid warp without transformation matrix */
-    status = GdipAddPathRectangle(path, -1.0, 0.5, 32.0, 16.0);
-    expect(Ok, status);
-    status = GdipWarpPath(path, NULL, dest_points, count, 0.0, 0.0, 128.0, 128.0, WarpModePerspective, FlatnessDefault);
-    todo_wine expect(Ok, status);
-    ok_path(path, warp_path, ARRAY_SIZE(warp_path), FALSE);
-
-    status = GdipResetPath(path);
-    expect(Ok, status);
-
-    /* Valid warp with transformation matrix */
-    status = GdipAddPathRectangle(path, -1.0, 0.5, 32.0, 16.0);
-    expect(Ok, status);
-    status = GdipScaleMatrix(mat, 2.0, 1.0, MatrixOrderAppend);
-    expect(Ok, status);
-    status = GdipTranslateMatrix(mat, 1.5, 4.0, MatrixOrderAppend);
-    expect(Ok, status);
-
-    status = GdipWarpPath(path, mat, dest_points, count, 0.0, 0.0, 128.0, 128.0, WarpModePerspective, FlatnessDefault);
-    todo_wine expect(Ok, status);
-    ok_path(path, transformed_warp_path, ARRAY_SIZE(transformed_warp_path), FALSE);
-
-    status = GdipResetPath(path);
-    expect(Ok, status);
-
-    /* Valid Pie Path warp with transformation matrix */
-    status = GdipAddPathPie(path, 1.0, 2.0, 5.0, 15.0, 10.0, 45.0);
-    expect(Ok, status);
-
-    status = GdipWarpPath(path, mat, dest_points, count, 0.0, 0.0, 128.0, 128.0, WarpModePerspective, 0.75f);
-    todo_wine expect(Ok, status);
-    ok_path(path, warp_pie_path, ARRAY_SIZE(warp_pie_path), TRUE);
-
-    GdipDeleteMatrix(mat);
     GdipDeletePath(path);
 }
 
@@ -1913,14 +1698,14 @@ static path_test_t widenline_capdiamondanchor_path[] = {
     };
 
 static path_test_t widenline_caparrowanchor_path[] = {
-    {15.0,      5.0,  PathPointTypeStart, 0, 0}, /*0*/
-    {40.0,      5.0,  PathPointTypeLine,  0, 0}, /*1*/
-    {40.0,      15.0, PathPointTypeLine,  0, 0}, /*2*/
-    {15.0,      15.0, PathPointTypeLine|PathPointTypeCloseSubpath, 0, 0}, /*3*/
-    {5.0,       10.0, PathPointTypeStart, 0, 0}, /*4*/
+    {15.0, 5.0,       PathPointTypeStart, 0, 1}, /*0*/
+    {40.0, 5.0,       PathPointTypeLine,  0, 1}, /*1*/
+    {40.0, 15.0,      PathPointTypeLine,  0, 1}, /*2*/
+    {15.0, 15.0,      PathPointTypeLine|PathPointTypeCloseSubpath, 0, 1}, /*3*/
+    {5.0, 10.0,       PathPointTypeStart, 0, 0}, /*4*/
     {22.320507, 0.0,  PathPointTypeLine,  0, 0}, /*5*/
     {22.320507, 20.0, PathPointTypeLine|PathPointTypeCloseSubpath, 0, 0}, /*6*/
-    {50.0,      10.0, PathPointTypeStart, 0, 0}, /*7*/
+    {50.0, 10.0,      PathPointTypeStart, 0, 0}, /*7*/
     {32.679489, 20.0, PathPointTypeLine,  0, 0}, /*8*/
     {32.679489, 0.0,  PathPointTypeLine|PathPointTypeCloseSubpath, 0, 0}, /*9*/
     };
@@ -2465,7 +2250,6 @@ START_TEST(graphicspath)
     test_reverse();
     test_addpie();
     test_flatten();
-    test_warp_path();
     test_widen();
     test_widen_cap();
     test_isvisible();

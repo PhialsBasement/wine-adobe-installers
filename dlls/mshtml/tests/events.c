@@ -2545,6 +2545,7 @@ static void test_onclick(IHTMLDocument2 *doc)
         ok(V_VT(&v) == VT_BSTR, "V_VT(onclick) = %d\n", V_VT(&v));
         ok(!lstrcmpW(V_BSTR(&v), L"function();"), "V_BSTR(onclick) = %s\n", wine_dbgstr_w(V_BSTR(&v)));
     }else {
+        todo_wine
         ok(V_VT(&v) == VT_NULL, "V_VT(onclick) = %d\n", V_VT(&v));
     }
     VariantClear(&v);
@@ -3280,10 +3281,9 @@ static void test_message_event(IHTMLDocument2 *doc)
     hres = IDispatchEx_InvokeEx(dispex, dispid, 0, DISPATCH_METHOD, &dp, NULL, NULL, &caller_sp_stub);
     ok(hres == (document_mode < 9 ? E_ABORT : S_OK), "InvokeEx(postMessage) returned: %08lx\n", hres);
     CHECK_CALLED(QS_IActiveScriptSite);
-    if(document_mode < 9) {
+    if(document_mode < 9)
         CHECK_CALLED(QS_GetCaller);
-        CLEAR_CALLED(QS_IActiveScriptSite_parent);
-    } else {
+    else {
         SET_EXPECT(onmessage);
         pump_msgs(&called_onmessage);
         CHECK_CALLED(onmessage);
@@ -3308,8 +3308,6 @@ static void test_message_event(IHTMLDocument2 *doc)
     }
 
     if(document_mode < 9) {
-        CHECK_CALLED(QS_GetCaller);
-        CHECK_CALLED(QS_IActiveScriptSite_parent);
         SET_EXPECT(QS_GetCaller_parent2);
         SET_EXPECT(onmessage);
     }

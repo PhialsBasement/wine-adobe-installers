@@ -84,6 +84,8 @@ static inline RECT visible_rect_from_window( struct window_rects *rects, RECT wi
     return rect;
 }
 
+W32KAPI RECT map_rect_virt_to_raw_for_monitor( HMONITOR monitor, RECT rect, UINT dpi_from );
+
 typedef struct gdi_physdev
 {
     const struct gdi_dc_funcs *funcs;
@@ -162,6 +164,7 @@ struct gdi_dc_funcs
     DWORD    (*pGetFontUnicodeRanges)(PHYSDEV,LPGLYPHSET);
     DWORD    (*pGetGlyphIndices)(PHYSDEV,LPCWSTR,INT,LPWORD,DWORD);
     DWORD    (*pGetGlyphOutline)(PHYSDEV,UINT,UINT,LPGLYPHMETRICS,DWORD,LPVOID,const MAT2*);
+    BOOL     (*pGetICMProfile)(PHYSDEV,BOOL,LPDWORD,LPWSTR);
     DWORD    (*pGetImage)(PHYSDEV,BITMAPINFO*,struct gdi_image_bits*,struct bitblt_coords*);
     DWORD    (*pGetKerningPairs)(PHYSDEV,DWORD,LPKERNINGPAIR);
     COLORREF (*pGetNearestColor)(PHYSDEV,COLORREF);
@@ -201,7 +204,7 @@ struct gdi_dc_funcs
     COLORREF (*pSetDCBrushColor)(PHYSDEV, COLORREF);
     COLORREF (*pSetDCPenColor)(PHYSDEV, COLORREF);
     INT      (*pSetDIBitsToDevice)(PHYSDEV,INT,INT,DWORD,DWORD,INT,INT,UINT,UINT,LPCVOID,BITMAPINFO*,UINT);
-    VOID     (*pSetDeviceClipping)(PHYSDEV,HRGN);
+    VOID     (*pSetDeviceClipping)(PHYSDEV,HRGN,HRGN);
     BOOL     (*pSetDeviceGammaRamp)(PHYSDEV,LPVOID);
     COLORREF (*pSetPixel)(PHYSDEV,INT,INT,COLORREF);
     COLORREF (*pSetTextColor)(PHYSDEV,COLORREF);
@@ -218,7 +221,7 @@ struct gdi_dc_funcs
 };
 
 /* increment this when you change the DC function table */
-#define WINE_GDI_DRIVER_VERSION 108
+#define WINE_GDI_DRIVER_VERSION 102
 
 #define GDI_PRIORITY_NULL_DRV        0  /* null driver */
 #define GDI_PRIORITY_FONT_DRV      100  /* any font driver */
@@ -242,43 +245,6 @@ static inline void push_dc_driver( PHYSDEV *dev, PHYSDEV physdev, const struct g
     physdev->next = *dev;
     physdev->hdc = (*dev)->hdc;
     *dev = physdev;
-}
-
-/* support for client surfaces */
-
-struct client_surface;
-struct client_surface_funcs
-{
-    void (*destroy)( struct client_surface *surface );
-    /* detach the surface from its window, called from window owner thread */
-    void (*detach)( struct client_surface *surface );
-    /* update the surface to match its window state */
-    void (*update)( struct client_surface *surface );
-    /* present the client surface if necessary, hdc != NULL when offscreen, called from render thread */
-    void (*present)( struct client_surface *surface, HDC hdc );
-};
-
-struct client_surface
-{
-    const struct client_surface_funcs *funcs;
-    struct list                        entry;          /* entry in win32u managed list */
-    LONG                               ref;            /* reference count */
-    HWND                               hwnd;           /* window the surface was created for */
-    LONG                               updated;        /* has been moved / resized / reparented */
-    LONG                               offscreen;      /* client window is offscreen */
-};
-
-W32KAPI void *client_surface_create( UINT size, const struct client_surface_funcs *funcs, HWND hwnd );
-W32KAPI void client_surface_add_ref( struct client_surface *surface );
-W32KAPI void client_surface_release( struct client_surface *surface );
-W32KAPI void client_surface_present( struct client_surface *surface );
-W32KAPI void client_surface_update( struct client_surface *surface );
-W32KAPI void detach_client_surfaces( HWND hwnd );
-
-static inline const char *debugstr_client_surface( struct client_surface *surface )
-{
-    if (!surface) return "(null)";
-    return wine_dbg_sprintf( "%p/%p", surface->hwnd, surface );
 }
 
 /* support for window surfaces */
@@ -319,7 +285,14 @@ W32KAPI struct window_surface *window_surface_create( UINT size, const struct wi
                                                       const RECT *rect, BITMAPINFO *info, HBITMAP bitmap );
 W32KAPI void window_surface_add_ref( struct window_surface *surface );
 W32KAPI void window_surface_release( struct window_surface *surface );
+W32KAPI void window_surface_lock( struct window_surface *surface );
+W32KAPI void window_surface_unlock( struct window_surface *surface );
+W32KAPI void window_surface_set_layered( struct window_surface *surface, COLORREF color_key, UINT alpha_bits, UINT alpha_mask );
+W32KAPI void window_surface_flush( struct window_surface *surface );
+W32KAPI void window_surface_set_clip( struct window_surface *surface, HRGN clip_region );
 W32KAPI void window_surface_set_shape( struct window_surface *surface, HRGN shape_region );
+W32KAPI void window_surface_set_layered( struct window_surface *surface, COLORREF color_key, UINT alpha_bits, UINT alpha_mask );
+W32KAPI struct window_surface *window_surface_get( HWND hwnd );
 
 /* display manager interface, used to initialize display device registry data */
 
@@ -337,7 +310,6 @@ struct gdi_monitor
     RECT rc_work;         /* RcWork in MONITORINFO struct */
     unsigned char *edid;  /* Extended Device Identification Data */
     UINT edid_len;
-    BOOL hdr_enabled;
 };
 
 struct gdi_device_manager
@@ -349,11 +321,8 @@ struct gdi_device_manager
 };
 
 #define WINE_DM_UNSUPPORTED 0x80000000
-#define WINE_SWP_FULLSCREEN 0x80000000
-#define WINE_SWP_RESIZABLE  0x40000000
 
 struct vulkan_driver_funcs;
-struct opengl_driver_funcs;
 
 struct user_driver_funcs
 {
@@ -372,7 +341,7 @@ struct user_driver_funcs
     const KBDTABLES *(*pKbdLayerDescriptor)(HKL);
     void    (*pReleaseKbdTables)(const KBDTABLES *);
     /* IME functions */
-    UINT    (*pImeToAsciiEx)(UINT,UINT,const BYTE*,HIMC);
+    UINT    (*pImeProcessKey)(HIMC,UINT,UINT,const BYTE*);
     void    (*pNotifyIMEStatus)(HWND,UINT);
     BOOL    (*pSetIMECompositionRect)(HWND,RECT);
     /* cursor/icon functions */
@@ -400,6 +369,7 @@ struct user_driver_funcs
     LRESULT (*pDesktopWindowProc)(HWND,UINT,WPARAM,LPARAM);
     void    (*pDestroyWindow)(HWND);
     void    (*pFlashWindowEx)(FLASHWINFO*);
+    BOOL    (*pHasWindowManager)(const char *);
     void    (*pGetDC)(HDC,HWND,HWND,const RECT *,const RECT *,DWORD);
     BOOL    (*pProcessEvents)(DWORD);
     void    (*pReleaseDC)(HWND,HDC);
@@ -410,31 +380,32 @@ struct user_driver_funcs
     void    (*pSetLayeredWindowAttributes)(HWND,COLORREF,BYTE,DWORD);
     void    (*pSetParent)(HWND,HWND,HWND);
     void    (*pSetWindowRgn)(HWND,HRGN,BOOL);
-    void    (*pSetWindowIcons)(HWND,HICON,const ICONINFO*,HICON,const ICONINFO*);
+    void    (*pSetWindowIcon)(HWND,UINT,HICON);
     void    (*pSetWindowStyle)(HWND,INT,STYLESTRUCT*);
     void    (*pSetWindowText)(HWND,LPCWSTR);
     UINT    (*pShowWindow)(HWND,INT,RECT*,UINT);
     LRESULT (*pSysCommand)(HWND,WPARAM,LPARAM,const POINT*);
-    void    (*pUpdateLayeredWindow)(HWND,BYTE,UINT);
+    void    (*pUpdateLayeredWindow)(HWND,UINT);
     LRESULT (*pWindowMessage)(HWND,UINT,WPARAM,LPARAM);
     BOOL    (*pWindowPosChanging)(HWND,UINT,BOOL,const struct window_rects *);
     BOOL    (*pGetWindowStyleMasks)(HWND,UINT,UINT,UINT*,UINT*);
     BOOL    (*pGetWindowStateUpdates)(HWND,UINT*,UINT*,RECT*,HWND*);
     BOOL    (*pCreateWindowSurface)(HWND,BOOL,const RECT *,struct window_surface**);
     void    (*pMoveWindowBits)(HWND,const struct window_rects *,const struct window_rects *,const RECT *);
-    void    (*pWindowPosChanged)(HWND,HWND,HWND,UINT,const struct window_rects*,struct window_surface*);
+    void    (*pWindowPosChanged)(HWND,HWND,HWND,UINT,BOOL,const struct window_rects*,struct window_surface*);
     /* system parameters */
     BOOL    (*pSystemParametersInfo)(UINT,UINT,void*,UINT);
-    /* wintab support */
-    LRESULT (*pWintabProc)(HWND,UINT,WPARAM,LPARAM,void*);
     /* vulkan support */
     UINT    (*pVulkanInit)(UINT,void *,const struct vulkan_driver_funcs **);
     /* opengl support */
-    UINT    (*pOpenGLInit)(UINT,const struct opengl_funcs *,const struct opengl_driver_funcs **);
+    struct opengl_funcs * (*pwine_get_wgl_driver)(UINT);
     /* thread management */
     void    (*pThreadDetach)(void);
 };
 
 W32KAPI void __wine_set_user_driver( const struct user_driver_funcs *funcs, UINT version );
+
+W32KAPI BOOL win32u_set_window_pixel_format( HWND hwnd, int format, BOOL internal );
+W32KAPI int win32u_get_window_pixel_format( HWND hwnd );
 
 #endif /* __WINE_WINE_GDI_DRIVER_H */

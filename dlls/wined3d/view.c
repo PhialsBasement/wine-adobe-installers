@@ -43,7 +43,7 @@ static GLenum get_texture_view_target(const struct wined3d_gl_info *gl_info,
     }
     view_types[] =
     {
-        {GL_TEXTURE_CUBE_MAP,  WINED3D_VIEW_TEXTURE_CUBE, GL_TEXTURE_CUBE_MAP},
+        {GL_TEXTURE_CUBE_MAP,  0, GL_TEXTURE_CUBE_MAP},
         {GL_TEXTURE_3D,        0, GL_TEXTURE_3D},
 
         {GL_TEXTURE_2D,       0,                          GL_TEXTURE_2D},
@@ -81,28 +81,11 @@ static GLenum get_texture_view_target(const struct wined3d_gl_info *gl_info,
     return texture_gl->target;
 }
 
-static bool find_format_plane_idx(const struct wined3d_format *resource_format,
-        const struct wined3d_format *plane_format, unsigned int *plane_idx)
-{
-    if (plane_format->id == resource_format->plane_formats[0])
-    {
-        *plane_idx = 0;
-        return true;
-    }
-    if (plane_format->id == resource_format->plane_formats[1])
-    {
-        *plane_idx = 1;
-        return true;
-    }
-    return false;
-}
-
 static const struct wined3d_format *validate_resource_view(const struct wined3d_view_desc *desc,
         struct wined3d_resource *resource, BOOL mip_slice, BOOL allow_srgb_toggle)
 {
     const struct wined3d_adapter *adapter = resource->device->adapter;
     const struct wined3d_format *format;
-    unsigned int plane_idx;
 
     format = wined3d_get_format(adapter, desc->format_id, resource->bind_flags);
     if (resource->type == WINED3D_RTYPE_BUFFER && (desc->flags & WINED3D_VIEW_BUFFER_RAW))
@@ -155,16 +138,7 @@ static const struct wined3d_format *validate_resource_view(const struct wined3d_
         struct wined3d_texture *texture = texture_from_resource(resource);
         unsigned int depth_or_layer_count;
 
-        if (resource->format->attrs & WINED3D_FORMAT_ATTR_PLANAR)
-        {
-            if (!find_format_plane_idx(resource->format, format, &plane_idx))
-            {
-                WARN("Invalid view format %s for planar format %s.\n",
-                        debug_d3dformat(format->id), debug_d3dformat(resource->format->id));
-                return NULL;
-            }
-        }
-        else if (resource->format->id != format->id && !wined3d_format_is_typeless(resource->format)
+        if (resource->format->id != format->id && !wined3d_format_is_typeless(resource->format)
                 && (!allow_srgb_toggle || !wined3d_formats_are_srgb_variants(resource->format->id, format->id)))
         {
             WARN("Trying to create incompatible view for non typeless format %s.\n",
@@ -202,12 +176,6 @@ static void create_texture_view(struct wined3d_gl_view *view, GLenum view_target
     view_format_gl = wined3d_format_gl(view_format);
     view->target = view_target;
 
-    if (texture_gl->t.resource.format->attrs & WINED3D_FORMAT_ATTR_PLANAR)
-    {
-        FIXME("Planar views are not implemented for OpenGL.\n");
-        return;
-    }
-
     context = context_acquire(texture_gl->t.resource.device, NULL, 0);
     context_gl = wined3d_context_gl(context);
     gl_info = context_gl->gl_info;
@@ -219,7 +187,7 @@ static void create_texture_view(struct wined3d_gl_view *view, GLenum view_target
         return;
     }
 
-    wined3d_texture_gl_prepare_texture(texture_gl, context_gl, false);
+    wined3d_texture_gl_prepare_texture(texture_gl, context_gl, FALSE);
     texture_name = wined3d_texture_gl_get_texture_name(texture_gl, context, FALSE);
 
     level_idx = desc->u.texture.level_idx;
@@ -851,13 +819,6 @@ static VkImageView wined3d_view_vk_create_vk_image_view(struct wined3d_context_v
             create_info.subresourceRange.aspectMask |= VK_IMAGE_ASPECT_DEPTH_BIT;
         if (view_format_vk->f.green_size)
             create_info.subresourceRange.aspectMask |= VK_IMAGE_ASPECT_STENCIL_BIT;
-    }
-    else if (resource->format->attrs & WINED3D_FORMAT_ATTR_PLANAR)
-    {
-        unsigned int plane_idx = 0;
-
-        find_format_plane_idx(resource->format, &view_format_vk->f, &plane_idx);
-        create_info.subresourceRange.aspectMask = VK_IMAGE_ASPECT_PLANE_0_BIT << plane_idx;
     }
     else
     {
@@ -2598,97 +2559,4 @@ HRESULT CDECL wined3d_unordered_access_view_create(const struct wined3d_view_des
 
     adapter_ops = resource->device->adapter->adapter_ops;
     return adapter_ops->adapter_create_unordered_access_view(desc, resource, parent, parent_ops, view);
-}
-
-ULONG CDECL wined3d_decoder_output_view_incref(struct wined3d_decoder_output_view *view)
-{
-    unsigned int refcount;
-
-    if (view->desc.flags & WINED3D_VIEW_FORWARD_REFERENCE)
-        return wined3d_texture_incref(view->texture);
-
-    refcount = InterlockedIncrement(&view->refcount);
-    TRACE("%p increasing refcount to %u.\n", view, refcount);
-
-    return refcount;
-}
-
-void wined3d_decoder_output_view_cleanup(struct wined3d_decoder_output_view *view)
-{
-    view->parent_ops->wined3d_object_destroyed(view->parent);
-}
-
-ULONG CDECL wined3d_decoder_output_view_decref(struct wined3d_decoder_output_view *view)
-{
-    unsigned int refcount;
-
-    if (view->desc.flags & WINED3D_VIEW_FORWARD_REFERENCE)
-        return wined3d_texture_decref(view->texture);
-
-    refcount = InterlockedDecrement(&view->refcount);
-    TRACE("%p decreasing refcount to %u.\n", view, refcount);
-
-    if (!refcount)
-    {
-        struct wined3d_texture *texture = view->texture;
-
-        /* Release the resource after destroying the view.
-         * See wined3d_shader_resource_view_decref(). */
-        wined3d_mutex_lock();
-        texture->resource.device->adapter->adapter_ops->adapter_destroy_video_decoder_output_view(view);
-        wined3d_mutex_unlock();
-        wined3d_texture_decref(texture);
-    }
-
-    return refcount;
-}
-
-static HRESULT wined3d_decoder_output_view_init(struct wined3d_decoder_output_view *view,
-        const struct wined3d_view_desc *desc, struct wined3d_texture *texture,
-        void *parent, const struct wined3d_parent_ops *parent_ops)
-{
-    view->refcount = 1;
-    view->parent = parent;
-    view->parent_ops = parent_ops;
-
-    if (!(texture->resource.bind_flags & WINED3D_BIND_DECODER_OUTPUT))
-        return E_INVALIDARG;
-    /* validate_resource_view() checks that we are creating a view of a plane,
-     * which is required for all other types of views.
-     * At the same time, the only parameter that Direct3D 11 passes, and
-     * therefore the only parameter to validate, is the layer index. */
-    if (desc->u.texture.layer_idx >= texture->layer_count)
-        return E_INVALIDARG;
-    view->desc = *desc;
-
-    /* If WINED3D_VIEW_FORWARD_REFERENCE, the view shouldn't take a reference
-     * to the resource. However, the reference to the view returned by this
-     * function should translate to a resource reference, so we increment the
-     * resource's reference count anyway. */
-    wined3d_texture_incref(view->texture = texture);
-
-    return WINED3D_OK;
-}
-
-HRESULT wined3d_decoder_output_view_vk_init(struct wined3d_decoder_output_view_vk *view_vk,
-        const struct wined3d_view_desc *desc, struct wined3d_texture *texture,
-        void *parent, const struct wined3d_parent_ops *parent_ops)
-{
-    TRACE("view_vk %p, desc %s, texture %p, parent %p, parent_ops %p.\n",
-            view_vk, wined3d_debug_view_desc(desc, &texture->resource), texture, parent, parent_ops);
-
-    return wined3d_decoder_output_view_init(&view_vk->v, desc, texture, parent, parent_ops);
-}
-
-HRESULT CDECL wined3d_decoder_output_view_create(const struct wined3d_view_desc *desc,
-        struct wined3d_texture *texture, void *parent, const struct wined3d_parent_ops *parent_ops,
-        struct wined3d_decoder_output_view **view)
-{
-    const struct wined3d_adapter_ops *adapter_ops;
-
-    TRACE("desc %s, texture %p, parent %p, parent_ops %p, view %p.\n",
-            wined3d_debug_view_desc(desc, &texture->resource), texture, parent, parent_ops, view);
-
-    adapter_ops = texture->resource.device->adapter->adapter_ops;
-    return adapter_ops->adapter_create_video_decoder_output_view(desc, texture, parent, parent_ops, view);
 }

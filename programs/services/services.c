@@ -520,12 +520,9 @@ BOOL validate_service_config(struct service_entry *entry)
     case SERVICE_WIN32_OWN_PROCESS | SERVICE_INTERACTIVE_PROCESS:
     case SERVICE_WIN32_SHARE_PROCESS | SERVICE_INTERACTIVE_PROCESS:
         /* These can be only run as LocalSystem */
-        if (entry->config.lpServiceStartName &&
-            wcsicmp(entry->config.lpServiceStartName, L"LocalSystem") != 0 &&
-            wcsicmp(entry->config.lpServiceStartName, L".\\LocalSystem") != 0)
+        if (entry->config.lpServiceStartName && wcsicmp(entry->config.lpServiceStartName, L"LocalSystem") != 0)
         {
-            WINE_ERR("Service %s is interactive but has the disallowed account name %s\n",
-                     wine_dbgstr_w(entry->name), wine_dbgstr_w(entry->config.lpServiceStartName));
+            WINE_ERR("Service %s is interactive but has a start name\n", wine_dbgstr_w(entry->name));
             return FALSE;
         }
         break;
@@ -1026,22 +1023,40 @@ found:
 
     ZeroMemory(&si, sizeof(STARTUPINFOW));
     si.cb = sizeof(STARTUPINFOW);
-    if (!(service_entry->config.dwServiceType & SERVICE_INTERACTIVE_PROCESS))
+    if (!(service_entry->config.dwServiceType & SERVICE_INTERACTIVE_PROCESS)
+        && service_entry->config.lpDisplayName && wcscmp(service_entry->config.lpDisplayName, L"Arc Service"))
     {
         si.lpDesktop = (WCHAR *)L"__wineservice_winstation\\Default";
+    }
+    else if (!(service_entry->config.dwServiceType & SERVICE_INTERACTIVE_PROCESS))
+    {
+        FIXME("HACK: Creating service %s on default desktop.\n", debugstr_w(service_entry->config.lpDisplayName));
     }
 
     if (!environment && OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY | TOKEN_DUPLICATE, &token))
     {
-        WCHAR val[16];
-        CreateEnvironmentBlock(&environment, token, FALSE);
-        if (GetEnvironmentVariableW( L"WINEBOOTSTRAPMODE", val, ARRAY_SIZE(val) ))
+        static const WCHAR *preserve[] =
         {
-            UNICODE_STRING name = RTL_CONSTANT_STRING(L"WINEBOOTSTRAPMODE");
-            UNICODE_STRING value;
+            L"WINEBOOTSTRAPMODE",
+            L"WINEBUSCONFIG",
+            L"PROTON_DISABLE_HIDRAW",
+            L"PROTON_ENABLE_HIDRAW",
+            L"FEX_APP_DATA_LOCATION",
+            L"FEX_APP_CONFIG_LOCATION",
+            L"FEX_APP_CONFIG",
+        };
+        WCHAR buffer[1024];
 
-            RtlInitUnicodeString( &value, val );
-            RtlSetEnvironmentVariable( (WCHAR **)&environment, &name, &value );
+        CreateEnvironmentBlock(&environment, token, FALSE);
+        for (size_t i = 0; i < ARRAY_SIZE(preserve); i++)
+        {
+            if (GetEnvironmentVariableW( preserve[i], buffer, ARRAY_SIZE(buffer) ))
+            {
+                UNICODE_STRING value, name;
+                RtlInitUnicodeString( &name, preserve[i] );
+                RtlInitUnicodeString( &value, buffer );
+                RtlSetEnvironmentVariable( (WCHAR **)&environment, &name, &value );
+            }
         }
         CloseHandle(token);
     }
@@ -1159,6 +1174,12 @@ DWORD service_start(struct service_entry *service, DWORD service_argc, LPCWSTR *
     struct process_entry *process = NULL;
     BOOL shared_process;
     DWORD err;
+
+    if (service->name && (!wcscmp(service->name, L"edgeupdate") || !wcscmp(service->name, L"edgeupdatem")))
+    {
+        ERR( "HACK: not starting %s.\n", wine_dbgstr_w(service->name));
+        return ERROR_SUCCESS;
+    }
 
     err = service_start_process(service, &process, &shared_process);
     if (err == ERROR_SUCCESS)

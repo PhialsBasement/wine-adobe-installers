@@ -29,6 +29,7 @@
 #include <time.h>
 
 #include "ntstatus.h"
+#define WIN32_NO_STATUS
 #include "windef.h"
 #include "winternl.h"
 #include "wine/debug.h"
@@ -60,7 +61,7 @@ DWORD WINAPI RtlRunOnceBeginInitialize( RTL_RUN_ONCE *once, ULONG flags, void **
 {
     if (flags & RTL_RUN_ONCE_CHECK_ONLY)
     {
-        ULONG_PTR val = (ULONG_PTR)ReadPointerAcquire( &once->Ptr );
+        ULONG_PTR val = (ULONG_PTR)once->Ptr;
 
         if (flags & RTL_RUN_ONCE_ASYNC) return STATUS_INVALID_PARAMETER;
         if ((val & 3) != 2) return STATUS_UNSUCCESSFUL;
@@ -70,7 +71,7 @@ DWORD WINAPI RtlRunOnceBeginInitialize( RTL_RUN_ONCE *once, ULONG flags, void **
 
     for (;;)
     {
-        ULONG_PTR next, val = (ULONG_PTR)ReadPointerAcquire( &once->Ptr );
+        ULONG_PTR next, val = (ULONG_PTR)once->Ptr;
 
         switch (val & 3)
         {
@@ -115,7 +116,7 @@ DWORD WINAPI RtlRunOnceComplete( RTL_RUN_ONCE *once, ULONG flags, void *context 
 
     for (;;)
     {
-        ULONG_PTR val = (ULONG_PTR)ReadPointerAcquire( &once->Ptr );
+        ULONG_PTR val = (ULONG_PTR)once->Ptr;
 
         switch (val & 3)
         {
@@ -930,8 +931,8 @@ void WINAPI RtlWakeAddressAll( const void *addr )
 {
     struct futex_queue *queue = get_futex_queue( addr );
     struct futex_entry *entry, *next;
-    unsigned int count = 0;
-    HANDLE tids[256];
+    unsigned int count = 0, i;
+    DWORD tids[256];
 
     TRACE("%p\n", addr);
 
@@ -948,20 +949,19 @@ void WINAPI RtlWakeAddressAll( const void *addr )
         {
             entry->addr = NULL;
             list_remove( &entry->entry );
-            if (count == ARRAY_SIZE(tids))
-            {
-                NtAlertMultipleThreadByThreadId( tids, count, NULL, NULL );
-                count = 0;
-            }
-            tids[count++] = (HANDLE)(ULONG_PTR)entry->tid;
+            /* Try to buffer wakes, so that we don't make a system call while
+             * holding a spinlock. */
+            if (count < ARRAY_SIZE(tids))
+                tids[count++] = entry->tid;
+            else
+                NtAlertThreadByThreadId( (HANDLE)(DWORD_PTR)entry->tid );
         }
     }
 
-    /* Try not to make a system call while holding a spinlock (even if that can be responsible for spurious wake
-     * up scenario). */
     spin_unlock( &queue->lock );
-    if (count)
-        NtAlertMultipleThreadByThreadId( tids, count, NULL, NULL );
+
+    for (i = 0; i < count; ++i)
+        NtAlertThreadByThreadId( (HANDLE)(DWORD_PTR)tids[i] );
 }
 
 /***********************************************************************

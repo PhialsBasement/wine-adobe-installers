@@ -50,7 +50,7 @@ folgenden Betriebssysteme:
 - FreeBSD 12.4 oder neuer
 - Solaris x86 9 oder neuer
 - NetBSD-current
-- macOS 10.12 oder neuer
+- Mac OS X 10.12 oder neuer
 
 Da Wine Thread-Unterstützung auf Kernelebene benötigt, werden nur die oben
 aufgeführten Betriebssysteme unterstützt.

@@ -23,7 +23,6 @@
 #include "roparameterizediid.h"
 #include "roerrorapi.h"
 #include "winstring.h"
-#include "errhandlingapi.h"
 
 #include "combase_private.h"
 
@@ -193,10 +192,6 @@ HRESULT WINAPI DECLSPEC_HOTPATCH RoGetActivationFactory(HSTRING classid, REFIID 
             module = NULL;
         }
         IActivationFactory_Release(factory);
-    }
-    else
-    {
-        ERR("Class %s not found in %s, hr %#lx.\n", wine_dbgstr_hstring(classid), debugstr_w(library), hr);
     }
 
 done:
@@ -429,15 +424,6 @@ HRESULT WINAPI RoGetAgileReference(enum AgileReferenceOptions option, REFIID rii
 }
 
 /***********************************************************************
- *      RoFailFastWithErrorContextInternal2 (combase.@)
- */
-void WINAPI RoFailFastWithErrorContextInternal2(HRESULT error, ULONG exception_count, /* PSTOWED_EXCEPTION_INFORMATION_V2 */void *information)
-{
-    FIXME("%#lx, %lu, %p stub.\n", error, exception_count, information);
-    RaiseFailFastException(NULL, NULL, 0);
-}
-
-/***********************************************************************
  *      RoGetApartmentIdentifier (combase.@)
  */
 HRESULT WINAPI RoGetApartmentIdentifier(UINT64 *identifier)
@@ -503,15 +489,6 @@ HRESULT WINAPI GetRestrictedErrorInfo(IRestrictedErrorInfo **info)
 }
 
 /***********************************************************************
- *      SetRestrictedErrorInfo (combase.@)
- */
-HRESULT WINAPI SetRestrictedErrorInfo(IRestrictedErrorInfo *info)
-{
-    FIXME( "(%p)\n", info );
-    return E_NOTIMPL;
-}
-
-/***********************************************************************
  *      RoOriginateLanguageException (combase.@)
  */
 BOOL WINAPI RoOriginateLanguageException(HRESULT error, HSTRING message, IUnknown *language_exception)
@@ -530,24 +507,6 @@ BOOL WINAPI RoOriginateError(HRESULT error, HSTRING message)
 }
 
 /***********************************************************************
- *      RoOriginateErrorW (combase.@)
- */
-BOOL WINAPI RoOriginateErrorW(HRESULT error, UINT max_len, const WCHAR *message)
-{
-    FIXME("%#lx, %u, %p: stub\n", error, max_len, message);
-    return FALSE;
-}
-
-/***********************************************************************
- *      RoReportUnhandledError (combase.@)
- */
-HRESULT WINAPI RoReportUnhandledError(IRestrictedErrorInfo *info)
-{
-    FIXME("(%p): stub\n", info);
-    return S_OK;
-}
-
-/***********************************************************************
  *      RoSetErrorReportingFlags (combase.@)
  */
 HRESULT WINAPI RoSetErrorReportingFlags(UINT32 flags)
@@ -555,21 +514,6 @@ HRESULT WINAPI RoSetErrorReportingFlags(UINT32 flags)
     FIXME("(%08x): stub\n", flags);
     return S_OK;
 }
-
-/***********************************************************************
- *      RoGetErrorReportingFlags (combase.@)
- */
-HRESULT WINAPI RoGetErrorReportingFlags(UINT32 *flags)
-{
-    FIXME("(%p): stub\n", flags);
-
-    if (!flags)
-        return E_POINTER;
-
-    *flags = RO_ERROR_REPORTING_USESETERRORINFO;
-    return S_OK;
-}
-
 
 /***********************************************************************
  *      CleanupTlsOleState (combase.@)
@@ -587,13 +531,4 @@ HRESULT WINAPI DllGetActivationFactory(HSTRING classid, IActivationFactory **fac
     FIXME("(%s, %p): stub\n", debugstr_hstring(classid), factory);
 
     return REGDB_E_CLASSNOTREG;
-}
-
-/***********************************************************************
- *      RoFailFastWithErrorContext (combase.@)
- */
-void WINAPI RoFailFastWithErrorContext(HRESULT hr)
-{
-    FIXME("(0x%08lx)\n", hr);
-    RaiseFailFastException(NULL, NULL, 0);
 }

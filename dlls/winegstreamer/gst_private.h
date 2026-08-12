@@ -29,6 +29,8 @@
 #include <stdio.h>
 
 #define COBJMACROS
+#define NONAMELESSSTRUCT
+#define NONAMELESSUNION
 #include "dshow.h"
 #include "mfidl.h"
 #include "wine/debug.h"
@@ -70,7 +72,7 @@ HRESULT wg_sample_queue_create(struct wg_sample_queue **out);
 void wg_sample_queue_destroy(struct wg_sample_queue *queue);
 void wg_sample_queue_flush(struct wg_sample_queue *queue, bool all);
 
-wg_parser_t wg_parser_create(bool output_compressed);
+wg_parser_t wg_parser_create(bool output_compressed, bool use_opengl);
 void wg_parser_destroy(wg_parser_t parser);
 
 HRESULT wg_parser_connect(wg_parser_t parser, uint64_t file_size, const WCHAR *uri);
@@ -165,7 +167,7 @@ HRESULT wg_transform_push_quartz(wg_transform_t transform, struct wg_sample *sam
 HRESULT wg_transform_push_dmo(wg_transform_t transform, IMediaBuffer *media_buffer,
         DWORD flags, REFERENCE_TIME time_stamp, REFERENCE_TIME time_length, struct wg_sample_queue *queue);
 HRESULT wg_transform_read_mf(wg_transform_t transform, IMFSample *sample,
-        DWORD mf_sample_size, DWORD *flags, bool *preserve_timestamps);
+        DWORD sample_size, DWORD *flags, bool *preserve_timestamps);
 HRESULT wg_transform_read_quartz(wg_transform_t transform, struct wg_sample *sample);
 HRESULT wg_transform_read_dmo(wg_transform_t transform, DMO_OUTPUT_DATA_BUFFER *buffer);
 
@@ -181,9 +183,11 @@ unsigned int wg_format_get_stride(const struct wg_format *format);
 
 bool wg_video_format_is_rgb(enum wg_video_format format);
 
+HRESULT audio_decoder_create(REFIID riid, void **ret);
 HRESULT aac_decoder_create(REFIID riid, void **ret);
 HRESULT h264_decoder_create(REFIID riid, void **ret);
 HRESULT video_processor_create(REFIID riid, void **ret);
+HRESULT gstreamer_scheme_handler_create(REFIID riid, void **ret);
 
 HRESULT h264_encoder_create(REFIID riid, void **ret);
 

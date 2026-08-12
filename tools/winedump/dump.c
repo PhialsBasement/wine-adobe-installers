@@ -111,87 +111,26 @@ unsigned int strlenW( const WCHAR *str )
     return s - str;
 }
 
-/* dump an ASCII string with proper escaping */
-int dump_strA( const char *str, size_t len )
+void dump_unicode_str( const WCHAR *str, int len )
 {
-    static const char escapes[32] = ".......abtnvfr.............e....";
-    char buffer[256];
-    char *pos = buffer;
-    int count = 0;
-
-    for (; len; str++, len--)
+    if (len == -1) len = strlenW( str );
+    printf( "L\"");
+    while (len-- > 0 && *str)
     {
-        if (pos > buffer + sizeof(buffer) - 8)
+        WCHAR c = *str++;
+        switch (c)
         {
-            fwrite( buffer, pos - buffer, 1, stdout );
-            count += pos - buffer;
-            pos = buffer;
+        case '\n': printf( "\\n" ); break;
+        case '\r': printf( "\\r" ); break;
+        case '\t': printf( "\\t" ); break;
+        case '"':  printf( "\\\"" ); break;
+        case '\\': printf( "\\\\" ); break;
+        default:
+            if (c >= ' ' && c <= 126) putchar(c);
+            else printf( "\\u%04x",c);
         }
-        if ((unsigned char)*str > 127)  /* hex escape */
-        {
-            pos += sprintf( pos, "\\x%02x", (unsigned char)*str );
-            continue;
-        }
-        if (*str < 32)  /* octal or C escape */
-        {
-            if (!*str && len == 1) continue;  /* do not output terminating NULL */
-            if (escapes[(unsigned char)*str] != '.')
-                pos += sprintf( pos, "\\%c", escapes[(unsigned char)*str] );
-            else if (len > 1 && str[1] >= '0' && str[1] <= '7')
-                pos += sprintf( pos, "\\%03o", *str );
-            else
-                pos += sprintf( pos, "\\%o", *str );
-            continue;
-        }
-        if (*str == '\\') *pos++ = '\\';
-        *pos++ = *str;
     }
-    fwrite( buffer, pos - buffer, 1, stdout );
-    count += pos - buffer;
-    return count;
-}
-
-/* dump a Unicode string with proper escaping */
-int dump_strW( const WCHAR *str, size_t len )
-{
-    static const char escapes[32] = ".......abtnvfr.............e....";
-    char buffer[256];
-    char *pos = buffer;
-    int count = 0;
-
-    for (; len; str++, len--)
-    {
-        if (pos > buffer + sizeof(buffer) - 8)
-        {
-            fwrite( buffer, pos - buffer, 1, stdout );
-            count += pos - buffer;
-            pos = buffer;
-        }
-        if (*str > 127)  /* hex escape */
-        {
-            if (len > 1 && str[1] < 128 && isxdigit((char)str[1]))
-                pos += sprintf( pos, "\\x%04x", *str );
-            else
-                pos += sprintf( pos, "\\x%x", *str );
-            continue;
-        }
-        if (*str < 32)  /* octal or C escape */
-        {
-            if (!*str && len == 1) continue;  /* do not output terminating NULL */
-            if (escapes[*str] != '.')
-                pos += sprintf( pos, "\\%c", escapes[*str] );
-            else if (len > 1 && str[1] >= '0' && str[1] <= '7')
-                pos += sprintf( pos, "\\%03o", *str );
-            else
-                pos += sprintf( pos, "\\%o", *str );
-            continue;
-        }
-        if (*str == '\\') *pos++ = '\\';
-        *pos++ = *str;
-    }
-    fwrite( buffer, pos - buffer, 1, stdout );
-    count += pos - buffer;
-    return count;
+    printf( "\"" );
 }
 
 const char *get_hexint64_str( DWORD64 l )
@@ -285,15 +224,13 @@ static const struct dumper
     enum FileSig        kind;
     enum FileSig        (*get_kind)(void);
     file_dumper         dumper; /* default dump tool */
-    enum FileSig        (*alt_get_kind)( int fd );
-    void                (*alt_dumper)( int fd );
 }
 dumpers[] =
 {
     {SIG_DOS,           get_kind_exec,  dos_dump},
     {SIG_PE,            get_kind_exec,  pe_dump},
     {SIG_DBG,           get_kind_dbg,   dbg_dump},
-    {SIG_PDB,           .alt_get_kind = get_kind_pdb,   .alt_dumper = pdb_dump},
+    {SIG_PDB,           get_kind_pdb,   pdb_dump},
     {SIG_NE,            get_kind_exec,  ne_dump},
     {SIG_LE,            get_kind_exec,  le_dump},
     {SIG_COFFLIB,       get_kind_lib,   lib_dump},
@@ -312,57 +249,31 @@ dumpers[] =
 BOOL dump_analysis(const char *name, file_dumper fn, enum FileSig wanted_sig)
 {
     BOOL                ret = TRUE;
-    const struct dumper*dpr;
-    int                 fd;
-    struct stat         st;
+    const struct dumper *dpr;
 
     setbuf(stdout, NULL);
 
-    if ((fd = open( name, O_RDONLY | O_BINARY )) == -1) fatal( "Cannot read file" );
-    fstat( fd, &st );
-    printf("Contents of %s: %llu bytes\n\n", name, (unsigned long long)st.st_size);
+    if (!(dump_base = read_file( name, &dump_total_len ))) fatal( "Cannot read file" );
+
+    printf("Contents of %s: %zu bytes\n\n", name, dump_total_len);
 
     for (dpr = dumpers; dpr->kind != SIG_UNKNOWN; dpr++)
     {
-        if (!dpr->alt_get_kind) continue;
-        /* alt interface isn't compatible with incoming file_dumper */
-        if (wanted_sig == dpr->kind)
-            assert( !fn );
-
-        lseek( fd, 0, SEEK_SET );
-        if (dpr->alt_get_kind( fd ) == dpr->kind &&
+        if (dpr->get_kind() == dpr->kind &&
             (wanted_sig == SIG_UNKNOWN || wanted_sig == dpr->kind))
         {
-            lseek( fd, 0, SEEK_SET );
-            dpr->alt_dumper( fd );
+            if (fn) fn(); else dpr->dumper();
             break;
         }
     }
-    close(fd);
-
     if (dpr->kind == SIG_UNKNOWN)
     {
-        if (!(dump_base = read_file( name, &dump_total_len ))) fatal( "Cannot read file" );
-
-        for (dpr = dumpers; dpr->kind != SIG_UNKNOWN; dpr++)
-        {
-            if (!dpr->get_kind) continue;
-            if (dpr->get_kind() == dpr->kind &&
-                (wanted_sig == SIG_UNKNOWN || wanted_sig == dpr->kind))
-            {
-                if (fn) fn(); else dpr->dumper();
-                break;
-            }
-        }
-        if (dpr->kind == SIG_UNKNOWN)
-        {
-            printf("Can't get a suitable file signature, aborting\n");
-            ret = FALSE;
-        }
-
-        free( dump_base );
+	printf("Can't get a suitable file signature, aborting\n");
+        ret = FALSE;
     }
+
     if (ret) printf("Done dumping %s\n", name);
+    free( dump_base );
 
     return ret;
 }

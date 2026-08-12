@@ -193,15 +193,24 @@ HRESULT WINAPI DwmGetWindowAttribute(HWND hwnd, DWORD attribute, PVOID pv_attrib
         return E_HANDLE;
     if (!IsWindow(hwnd))
         return E_HANDLE;
+    if (!pv_attribute)
+        return E_INVALIDARG;
 
     switch (attribute) {
+    case DWMWA_NCRENDERING_ENABLED:
+        if (size < sizeof(BOOL))
+            return E_INVALIDARG;
+
+        WARN("DWMWA_NCRENDERING_ENABLED: always returning FALSE.\n");
+        *(BOOL*)(pv_attribute) = FALSE;
+        hr = S_OK;
+        break;
+
     case DWMWA_EXTENDED_FRAME_BOUNDS:
     {
         RECT *rect = (RECT *)pv_attribute;
         DPI_AWARENESS_CONTEXT context;
 
-        if (!rect)
-            return E_INVALIDARG;
         if (size < sizeof(*rect))
             return E_NOT_SUFFICIENT_BUFFER;
         if (GetWindowLongW(hwnd, GWL_STYLE) & WS_CHILD)
@@ -217,6 +226,15 @@ HRESULT WINAPI DwmGetWindowAttribute(HWND hwnd, DWORD attribute, PVOID pv_attrib
         SetThreadDpiAwarenessContext(context);
         break;
     }
+    case DWMWA_CLOAKED:
+        if (size < sizeof(DWORD))
+            return E_INVALIDARG;
+
+        FIXME("DWMWA_CLOAKED: always returning 0.\n");
+        *(DWORD*)(pv_attribute) = 0;
+        hr = S_OK;
+        break;
+
     default:
         FIXME("attribute %ld not implemented.\n", attribute);
         hr = E_NOTIMPL;
@@ -300,9 +318,9 @@ HRESULT WINAPI DwmFlush(void)
     static BOOL once;
 
     if (!once++)
-        FIXME("stub.\n");
+        FIXME("() stub\n");
     else
-        TRACE("stub.\n");
+        TRACE(".\n");
 
     display_frequency = get_display_frequency();
     NtQueryPerformanceCounter(&qpc, &qpf);
@@ -375,13 +393,4 @@ HRESULT WINAPI DwmpGetColorizationParameters(void *params)
 {
     FIXME("(%p) stub\n", params);
     return E_NOTIMPL;
-}
-
-/**********************************************************************
- *           DwmShowContact         (DWMAPI.@)
- */
-HRESULT WINAPI DwmShowContact(DWORD pointer_id, enum DWM_SHOWCONTACT showcontact)
-{
-    FIXME("pointer_id %#lx, showcontact %#x stub\n", pointer_id, showcontact);
-    return S_OK;
 }

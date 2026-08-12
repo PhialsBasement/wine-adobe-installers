@@ -210,7 +210,7 @@ typedef enum tagWMT_STORAGE_FORMAT
     WMT_Storage_Format_V1   = 1
 } WMT_STORAGE_FORMAT;
 
-#pragma pack(push,2)
+#include <pshpack2.h>
 typedef struct _WMStreamPrioritizationRecord
 {
     WORD wStreamNumber;
@@ -224,7 +224,7 @@ typedef struct _WMT_TIMECODE_EXTENSION_DATA
     DWORD dwUserbits;
     DWORD dwAmFlags;
 } WMT_TIMECODE_EXTENSION_DATA;
-#pragma pack(pop)
+#include <poppack.h>
 
 typedef struct _WM_PORT_NUMBER_RANGE
 {

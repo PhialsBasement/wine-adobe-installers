@@ -327,8 +327,7 @@ static HRESULT WINAPI media_seeking_ChangeCurrent(IMediaSeeking *iface)
     struct asf_stream *stream = impl_from_IMediaSeeking(iface);
     struct asf_reader *filter = asf_reader_from_asf_stream(stream);
     struct SourceSeeking *seek = &stream->seek;
-    WMT_STATUS filter_status = filter->status;
-    HRESULT hr = S_OK;
+    HRESULT hr;
     UINT i;
 
     TRACE("iface %p.\n", iface);
@@ -336,23 +335,22 @@ static HRESULT WINAPI media_seeking_ChangeCurrent(IMediaSeeking *iface)
     /* Send begin flush commands downstream. */
     for (i = 0; i < filter->stream_count; ++i)
     {
-        if (stream->source.pin.peer && FAILED(IPin_BeginFlush(stream->source.pin.peer)))
+        if (FAILED(IPin_BeginFlush(stream->source.pin.peer)))
             WARN("Failed to BeginFlush for stream %u.\n", i);
     }
 
     /* Stop the reader. */
-    if (filter_status == WMT_STARTED && FAILED(hr = asf_reader_stop_stream(filter)))
-        return hr;
+    hr = asf_reader_stop_stream(filter);
 
     /* Send end flush commands downstream. */
     for (i = 0; i < filter->stream_count; ++i)
     {
-        if (stream->source.pin.peer && FAILED(IPin_EndFlush(stream->source.pin.peer)))
+        if (FAILED(IPin_EndFlush(stream->source.pin.peer)))
             WARN("Failed to EndFlush for stream %u.\n", i);
     }
 
-    /* Start the reader again if it was started. */
-    if (filter_status == WMT_STARTED)
+    /* Start the reader. */
+    if (hr == S_OK)
         hr = asf_reader_start_stream(filter, seek->llCurrent, seek->llDuration, seek->dRate);
 
     return hr;
@@ -446,8 +444,6 @@ static void asf_reader_destroy(struct strmbase_filter *iface)
     struct asf_reader *filter = impl_from_strmbase_filter(iface);
     struct strmbase_source *source;
 
-    IWMReader_Release(filter->reader);
-
     while (filter->stream_count--)
     {
         source = &filter->streams[filter->stream_count].source;
@@ -458,6 +454,7 @@ static void asf_reader_destroy(struct strmbase_filter *iface)
 
     free(filter->file_name);
     IWMReaderCallback_Release(filter->callback);
+    IWMReader_Release(filter->reader);
 
     strmbase_filter_cleanup(&filter->filter);
 
@@ -486,13 +483,14 @@ static HRESULT asf_reader_init_stream(struct strmbase_filter *iface)
     struct asf_reader *filter = impl_from_strmbase_filter(iface);
     WMT_STREAM_SELECTION selections[ARRAY_SIZE(filter->streams)];
     WORD stream_numbers[ARRAY_SIZE(filter->streams)];
-    IWMReaderAdvanced *reader_advanced;
+    IWMReaderAdvanced2 *reader_advanced;
     HRESULT hr = S_OK;
+    BOOL value;
     int i;
 
     TRACE("iface %p\n", iface);
 
-    if (FAILED(hr = IWMReader_QueryInterface(filter->reader, &IID_IWMReaderAdvanced, (void **)&reader_advanced)))
+    if (FAILED(hr = IWMReader_QueryInterface(filter->reader, &IID_IWMReaderAdvanced2, (void **)&reader_advanced)))
         return hr;
 
     for (i = 0; i < filter->stream_count; ++i)
@@ -506,13 +504,21 @@ static HRESULT asf_reader_init_stream(struct strmbase_filter *iface)
         if (!stream->source.pin.peer)
             continue;
 
+        value = IMemInputPin_ReceiveCanBlock(stream->source.pMemInputPin) == S_OK;
+        if (FAILED(hr = IWMReaderAdvanced2_SetOutputSetting(reader_advanced, i, L"DedicatedDeliveryThread",
+                WMT_TYPE_BOOL, (BYTE *)&value, sizeof(value))))
+        {
+            WARN("Failed to set DedicatedDeliveryThread for stream %u, hr %#lx\n", i, hr);
+            break;
+        }
+
         if (FAILED(hr = IMemAllocator_Commit(stream->source.pAllocator)))
         {
             WARN("Failed to commit stream %u allocator, hr %#lx\n", i, hr);
             break;
         }
 
-        if (FAILED(hr = IWMReaderAdvanced_SetAllocateForOutput(reader_advanced, i, TRUE)))
+        if (FAILED(hr = IWMReaderAdvanced2_SetAllocateForOutput(reader_advanced, i, TRUE)))
         {
             WARN("Failed to enable allocation for stream %u, hr %#lx\n", i, hr);
             break;
@@ -534,7 +540,7 @@ static HRESULT asf_reader_init_stream(struct strmbase_filter *iface)
             break;
         }
 
-        if (FAILED(hr = IPin_NewSegment(stream->source.pin.peer, 0, 0, 1)))
+        if (FAILED(hr = IPin_NewSegment(stream->source.pin.peer, stream->seek.llCurrent, stream->seek.llStop, stream->seek.dRate)))
         {
             WARN("Failed to start stream %u new segment, hr %#lx\n", i, hr);
             break;
@@ -543,11 +549,19 @@ static HRESULT asf_reader_init_stream(struct strmbase_filter *iface)
         selections[i] = WMT_ON;
     }
 
-    if (SUCCEEDED(hr) && FAILED(hr = IWMReaderAdvanced_SetStreamsSelected(reader_advanced,
+    if (SUCCEEDED(hr) && FAILED(hr = IWMReaderAdvanced2_SetStreamsSelected(reader_advanced,
             filter->stream_count, stream_numbers, selections)))
         WARN("Failed to set reader %p stream selection, hr %#lx\n", filter->reader, hr);
 
-    IWMReaderAdvanced_Release(reader_advanced);
+    if (SUCCEEDED(hr) && FAILED(hr = IWMReaderAdvanced2_SetUserProvidedClock(reader_advanced, !filter->filter.clock)))
+        WARN("Failed to set user provided clock, hr %#lx\n", hr);
+    else if (!filter->filter.clock)
+    {
+        if (SUCCEEDED(hr) && FAILED(hr = IWMReaderAdvanced2_DeliverTime(reader_advanced, -1)))
+            WARN("Failed to set user time, hr %#lx\n", hr);
+    }
+
+    IWMReaderAdvanced2_Release(reader_advanced);
 
     if (FAILED(hr))
         return hr;
@@ -617,7 +631,11 @@ static HRESULT WINAPI asf_reader_DecideBufferSize(struct strmbase_source *iface,
         buffer_size = format->nAvgBytesPerSec;
     }
 
-    req_props->cBuffers = max(req_props->cBuffers, 1);
+    if (IsEqualGUID(&stream->source.pin.mt.majortype, &MEDIATYPE_Audio))
+        req_props->cBuffers = max(req_props->cBuffers, 50);
+    else
+        req_props->cBuffers = max(req_props->cBuffers, 10);
+
     req_props->cbBuffer = max(req_props->cbBuffer, buffer_size);
     req_props->cbAlign = max(req_props->cbAlign, 1);
     return IMemAllocator_SetProperties(allocator, req_props, &ret_props);
@@ -838,11 +856,20 @@ static HRESULT WINAPI reader_callback_OnStatus(IWMReaderCallback *iface, WMT_STA
             for (i = 0; i < stream_count; ++i)
             {
                 struct asf_stream *stream = filter->streams + i;
+                const char *sgi = getenv("SteamGameId");
 
                 if (FAILED(hr = asf_stream_get_media_type(&stream->source.pin, 0, &stream_media_type)))
                     WARN("Failed to get stream media type, hr %#lx.\n", hr);
                 if (IsEqualGUID(&stream_media_type.majortype, &MEDIATYPE_Video))
-                    swprintf(name, ARRAY_SIZE(name), L"Raw Video %u", stream->index);
+                {
+                    /* King of Fighters XIII requests the WMV decoder filter pins by name
+                     * to connect them to a Sample Grabber filter.
+                     */
+                    if (sgi && (!strcmp(sgi, "222940") || !strcmp(sgi, "3050220")))
+                        swprintf(name, ARRAY_SIZE(name), L"out0");
+                    else
+                        swprintf(name, ARRAY_SIZE(name), L"Raw Video %u", stream->index);
+                }
                 else
                     swprintf(name, ARRAY_SIZE(name), L"Raw Audio %u", stream->index);
                 FreeMediaType(&stream_media_type);

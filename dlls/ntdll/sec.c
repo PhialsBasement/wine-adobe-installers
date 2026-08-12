@@ -27,11 +27,9 @@
 #include <math.h>
 
 #include "ntstatus.h"
+#define WIN32_NO_STATUS
 #include "windef.h"
-#include "winbase.h"
-#include "tomcrypt.h"
 #include "ntdll_misc.h"
-#include "ddk/ntddk.h"
 #include "wine/exception.h"
 #include "wine/debug.h"
 
@@ -1866,82 +1864,5 @@ NTSTATUS WINAPI RtlDefaultNpAcl(PACL *pAcl)
     FIXME("%p - stub\n", pAcl);
 
     *pAcl = NULL;
-    return STATUS_SUCCESS;
-}
-
-/******************************************************************************
- * RtlCreateServiceSid [NTDLL.@]
- */
-NTSTATUS WINAPI RtlCreateServiceSid( PUNICODE_STRING name, PSID pSid, LPDWORD len )
-{
-    static const SID_IDENTIFIER_AUTHORITY nt_authority = { SECURITY_NT_AUTHORITY };
-    DWORD sid_length;
-    NTSTATUS status;
-    UNICODE_STRING name_upper;
-    hash_state hash_ctx;
-    ULONG hash[5];
-    SID *sid = (SID *)pSid;
-
-    if (name == NULL || len == NULL) return STATUS_INVALID_PARAMETER;
-
-    sid_length = RtlLengthRequiredSid( 1 + ARRAY_SIZE(hash) );
-    if (*len < sid_length)
-    {
-        *len = sid_length;
-        return STATUS_BUFFER_TOO_SMALL;
-    }
-
-    sid->Revision = SID_REVISION;
-    sid->IdentifierAuthority = nt_authority;
-    sid->SubAuthorityCount = 1 + ARRAY_SIZE(hash);
-    sid->SubAuthority[0] = SECURITY_SERVICE_ID_BASE_RID;
-    *len = sid_length;
-
-    if ((status = RtlUpcaseUnicodeString( &name_upper, name, TRUE ))) return status;
-
-    sha1_init( &hash_ctx );
-    sha1_process( &hash_ctx, (UCHAR *)name_upper.Buffer, name_upper.Length );
-    sha1_done( &hash_ctx, (UCHAR *)hash );
-    RtlFreeUnicodeString( &name_upper );
-    memcpy( sid->SubAuthority + 1, hash, sizeof(hash) );
-    return STATUS_SUCCESS;
-}
-
-/******************************************************************************
- * RtlDeriveCapabilitySidsFromName (NTDLL.@)
- */
-NTSTATUS WINAPI RtlDeriveCapabilitySidsFromName( UNICODE_STRING *cap_name, PSID cap_group_sid, PSID cap_sid )
-{
-    static const SID_IDENTIFIER_AUTHORITY app_authority = { SECURITY_APP_PACKAGE_AUTHORITY };
-    static const SID_IDENTIFIER_AUTHORITY nt_authority = { SECURITY_NT_AUTHORITY };
-    UNICODE_STRING cap_upcase;
-    hash_state hash_ctx;
-    NTSTATUS status;
-    ULONG hash[8];
-    SID *sid;
-
-    TRACE( "cap_name %s, cap_group_sid %p, cap_sid %p.\n", debugstr_us(cap_name), cap_group_sid, cap_sid );
-
-    if ((status = RtlUpcaseUnicodeString( &cap_upcase, cap_name, TRUE ))) return status;
-    sha256_init( &hash_ctx );
-    sha256_process( &hash_ctx, (UCHAR *)cap_upcase.Buffer, cap_upcase.Length );
-    sha256_done( &hash_ctx, (UCHAR *)hash );
-    RtlFreeUnicodeString( &cap_upcase );
-
-    sid = cap_sid;
-    sid->Revision = SID_REVISION;
-    sid->IdentifierAuthority = app_authority;
-    sid->SubAuthorityCount = 2 + ARRAY_SIZE(hash);
-    sid->SubAuthority[0] = SECURITY_BATCH_RID;
-    sid->SubAuthority[1] = SECURITY_CAPABILITY_APP_RID;
-    memcpy( sid->SubAuthority + 2, hash, sizeof(hash) );
-
-    sid = cap_group_sid;
-    sid->Revision = SID_REVISION;
-    sid->IdentifierAuthority = nt_authority;
-    sid->SubAuthorityCount = 1 + ARRAY_SIZE(hash);
-    sid->SubAuthority[0] = SECURITY_BUILTIN_DOMAIN_RID;
-    memcpy( sid->SubAuthority + 1, hash, sizeof(hash) );
-
     return STATUS_SUCCESS;
 }

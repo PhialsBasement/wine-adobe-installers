@@ -62,13 +62,14 @@
 #include <unistd.h>
 
 #include <ntstatus.h>
+#define WIN32_NO_STATUS
 #include <windows.h>
 #include <ws2tcpip.h>
 #include <winternl.h>
 #include <ddk/wdm.h>
 #include <sddl.h>
+#include <ntsecapi.h>
 #include <wine/svcctl.h>
-#include <wine/list.h>
 #include <wine/asm.h>
 #include <wine/debug.h>
 
@@ -77,8 +78,8 @@
 #include <shlwapi.h>
 #include <shellapi.h>
 #include <setupapi.h>
-#include <wininet.h>
 #include <newdev.h>
+#include <wincrypt.h>
 #include "resource.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(wineboot);
@@ -89,7 +90,6 @@ extern void kill_processes( BOOL kill_desktop );
 
 static WCHAR windowsdir[MAX_PATH];
 static const BOOL is_64bit = sizeof(void *) > sizeof(int);
-static SYSTEM_SUPPORTED_PROCESSOR_ARCHITECTURES_INFORMATION machines[8];
 
 /* retrieve the path to the wine.inf file */
 static WCHAR *get_wine_inf_path(void)
@@ -195,6 +195,81 @@ static DWORD set_reg_value_dword( HKEY hkey, const WCHAR *name, DWORD value )
 
 #if defined(__i386__) || defined(__x86_64__)
 
+extern UINT64 WINAPI do_xgetbv( unsigned int cx);
+#ifdef __i386__
+__ASM_STDCALL_FUNC( do_xgetbv, 4,
+                   "movl 4(%esp),%ecx\n\t"
+                   "xgetbv\n\t"
+                   "ret $4" )
+#else
+__ASM_GLOBAL_FUNC( do_xgetbv,
+                   "xgetbv\n\t"
+                   "shlq $32,%rdx\n\t"
+                   "orq %rdx,%rax\n\t"
+                   "ret" )
+#endif
+
+static void initialize_xstate_features(struct _KUSER_SHARED_DATA *data)
+{
+    static const ULONG64 wine_xstate_supported_features = 0xfc; /* XSTATE_AVX, XSTATE_MPX_BNDREGS, XSTATE_MPX_BNDCSR,
+                                                                 * XSTATE_AVX512_KMASK, XSTATE_AVX512_ZMM_H, XSTATE_AVX512_ZMM */
+    XSTATE_CONFIGURATION *xstate = &data->XState;
+    ULONG64 supported_mask;
+    unsigned int i, off;
+    int regs[4];
+
+    if (!data->ProcessorFeatures[PF_AVX_INSTRUCTIONS_AVAILABLE])
+        return;
+
+    __cpuidex(regs, 0, 0);
+
+    TRACE("Max cpuid level %#x.\n", regs[0]);
+    if (regs[0] < 0xd)
+        return;
+
+    __cpuidex(regs, 1, 0);
+    TRACE("CPU features %#x, %#x, %#x, %#x.\n", regs[0], regs[1], regs[2], regs[3]);
+    if (!(regs[2] & (0x1 << 27))) /* xsave OS enabled */
+        return;
+
+    __cpuidex(regs, 0xd, 0);
+    TRACE("XSAVE details %#x, %#x, %#x, %#x.\n", regs[0], regs[1], regs[2], regs[3]);
+    supported_mask = ((ULONG64)regs[3] << 32) | regs[0];
+    supported_mask &= do_xgetbv(0) & wine_xstate_supported_features;
+    if (!(supported_mask >> 2))
+        return;
+
+    xstate->EnabledFeatures = (1 << XSTATE_LEGACY_FLOATING_POINT) | (1 << XSTATE_LEGACY_SSE) | supported_mask;
+    xstate->EnabledVolatileFeatures = xstate->EnabledFeatures;
+    xstate->AllFeatureSize = regs[1];
+
+    __cpuidex(regs, 0xd, 1);
+    xstate->OptimizedSave = regs[0] & 1;
+    xstate->CompactionEnabled = !!(regs[0] & 2);
+
+    xstate->Features[0].Size = xstate->AllFeatures[0] = offsetof(XSAVE_FORMAT, XmmRegisters);
+    xstate->Features[1].Size = xstate->AllFeatures[1] = sizeof(M128A) * 16;
+    xstate->Features[1].Offset = xstate->Features[0].Size;
+    off = sizeof(XSAVE_FORMAT) + sizeof(XSAVE_AREA_HEADER);
+    supported_mask >>= 2;
+    for (i = 2; supported_mask; ++i, supported_mask >>= 1)
+    {
+        if (!(supported_mask & 1)) continue;
+        __cpuidex( regs, 0xd, i );
+        xstate->Features[i].Offset = regs[1];
+        xstate->Features[i].Size = xstate->AllFeatures[i] = regs[0];
+        if (regs[2] & 2)
+        {
+            xstate->AlignedFeatures |= (ULONG64)1 << i;
+            off = (off + 63) & ~63;
+        }
+        off += xstate->Features[i].Size;
+        TRACE("xstate[%d] offset %lu, size %lu, aligned %d.\n", i, xstate->Features[i].Offset, xstate->Features[i].Size, !!(regs[2] & 2));
+    }
+    xstate->Size = xstate->CompactionEnabled ? off : xstate->Features[i - 1].Offset + xstate->Features[i - 1].Size;
+    TRACE("xstate size %lu, compacted %d, optimized %d.\n", xstate->Size, xstate->CompactionEnabled, xstate->OptimizedSave);
+}
+
 static BOOL is_tsc_trusted_by_the_kernel(void)
 {
     char buf[4] = {0};
@@ -287,7 +362,13 @@ static UINT64 read_tsc_frequency(void)
     }
     while (error > 500 && --retries);
 
-    if (!retries) WARN( "TSC frequency calibration failed, unstable TSC?\n" );
+    if (!retries)
+    {
+        FIXME( "TSC frequency calibration failed, unstable TSC?");
+        FIXME( "time0 %I64u ns, time1 %I64u ns\n", time0 * 100, time1 * 100 );
+        FIXME( "tsc2 - tsc0 %I64u, tsc3 - tsc1 %I64u\n", tsc2 - tsc0, tsc3 - tsc1 );
+        FIXME( "freq0 %I64u Hz, freq2 %I64u Hz, error %I64u ppm\n", freq0, freq1, error );
+    }
     else
     {
         freq = (freq0 + freq1) / 2;
@@ -299,14 +380,45 @@ static UINT64 read_tsc_frequency(void)
 
 #elif defined(__aarch64__)
 
+#define FEX_TSC_SCALE_MAXIMUM 1000000000
+
 static UINT64 read_tsc_frequency(void)
 {
     UINT64 tsc_frequency;
     __asm__ volatile( "mrs %[Res], CNTFRQ_EL0" : [Res] "=r" (tsc_frequency) );
+
+    /* FEX hack in order to support games relying on this to read the x86 TSC
+     * frequency which FEX scales as below, assumes SmallTSCScale is enabled. */
+    while (tsc_frequency < FEX_TSC_SCALE_MAXIMUM)
+            tsc_frequency <<= 1;
+
     return tsc_frequency;
 }
 
+static void initialize_xstate_features(struct _KUSER_SHARED_DATA *data)
+{
+    XSTATE_CONFIGURATION *xstate = &data->XState;
+
+    xstate->EnabledFeatures = (1 << XSTATE_LEGACY_FLOATING_POINT) | (1 << XSTATE_LEGACY_SSE) | (1 << XSTATE_AVX);
+    xstate->EnabledVolatileFeatures = xstate->EnabledFeatures;
+    xstate->AllFeatureSize = 0x340;
+
+    xstate->OptimizedSave = 0;
+    xstate->CompactionEnabled = 0;
+
+    xstate->Features[0].Size = xstate->AllFeatures[0] = offsetof(XSAVE_FORMAT, XmmRegisters);
+    xstate->Features[1].Size = xstate->AllFeatures[1] = sizeof(M128A) * 16;
+    xstate->Features[1].Offset = xstate->Features[0].Size;
+    xstate->Features[2].Offset = 0x240;
+    xstate->Features[2].Size = 0x100;
+    xstate->Size = 0x340;
+}
+
 #else
+
+static void initialize_xstate_features(struct _KUSER_SHARED_DATA *data)
+{
+}
 
 static UINT64 read_tsc_frequency(void)
 {
@@ -317,12 +429,18 @@ static UINT64 read_tsc_frequency(void)
 
 static void create_user_shared_data(void)
 {
+    SYSTEM_SUPPORTED_PROCESSOR_ARCHITECTURES_INFORMATION machines[8];
     struct _KUSER_SHARED_DATA *data;
     RTL_OSVERSIONINFOEXW version;
+    SYSTEM_CPU_INFORMATION sci;
+    SYSTEM_BASIC_INFORMATION sbi;
+    BOOLEAN *features;
     OBJECT_ATTRIBUTES attr = {sizeof(attr)};
     UNICODE_STRING name = RTL_CONSTANT_STRING( L"\\KernelObjects\\__wine_user_shared_data" );
     NTSTATUS status;
     HANDLE handle;
+    ULONG i;
+    HANDLE process = 0;
 
     InitializeObjectAttributes( &attr, &name, OBJ_OPENIF, NULL, NULL );
     if ((status = NtOpenSection( &handle, SECTION_ALL_ACCESS, &attr )))
@@ -340,19 +458,117 @@ static void create_user_shared_data(void)
 
     version.dwOSVersionInfoSize = sizeof(version);
     RtlGetVersion( &version );
+    NtQuerySystemInformation( SystemBasicInformation, &sbi, sizeof(sbi), NULL );
+    NtQuerySystemInformation( SystemCpuInformation, &sci, sizeof(sci), NULL );
 
+    data->TickCountMultiplier         = 1 << 24;
+    data->LargePageMinimum            = 2 * 1024 * 1024;
     data->NtBuildNumber               = version.dwBuildNumber;
     data->NtProductType               = version.wProductType;
     data->ProductTypeIsValid          = TRUE;
+    data->NativeProcessorArchitecture = sci.ProcessorArchitecture;
     data->NtMajorVersion              = version.dwMajorVersion;
     data->NtMinorVersion              = version.dwMinorVersion;
     data->SuiteMask                   = version.wSuiteMask;
+    data->NumberOfPhysicalPages       = sbi.MmNumberOfPhysicalPages;
+    data->NXSupportPolicy             = NX_SUPPORT_POLICY_OPTIN;
     wcscpy( data->NtSystemRoot, L"C:\\windows" );
+
+    features = data->ProcessorFeatures;
+    switch (sci.ProcessorArchitecture)
+    {
+    case PROCESSOR_ARCHITECTURE_INTEL:
+    case PROCESSOR_ARCHITECTURE_AMD64:
+        features[PF_COMPARE_EXCHANGE_DOUBLE]              = !!(sci.ProcessorFeatureBits & CPU_FEATURE_CX8);
+        features[PF_MMX_INSTRUCTIONS_AVAILABLE]           = !!(sci.ProcessorFeatureBits & CPU_FEATURE_MMX);
+        features[PF_XMMI_INSTRUCTIONS_AVAILABLE]          = !!(sci.ProcessorFeatureBits & CPU_FEATURE_SSE);
+        features[PF_3DNOW_INSTRUCTIONS_AVAILABLE]         = !!(sci.ProcessorFeatureBits & CPU_FEATURE_3DNOW);
+        features[PF_RDTSC_INSTRUCTION_AVAILABLE]          = !!(sci.ProcessorFeatureBits & CPU_FEATURE_TSC);
+        features[PF_PAE_ENABLED]                          = !!(sci.ProcessorFeatureBits & CPU_FEATURE_PAE);
+        features[PF_XMMI64_INSTRUCTIONS_AVAILABLE]        = !!(sci.ProcessorFeatureBits & CPU_FEATURE_SSE2);
+        features[PF_SSE3_INSTRUCTIONS_AVAILABLE]          = !!(sci.ProcessorFeatureBits & CPU_FEATURE_SSE3);
+        features[PF_SSSE3_INSTRUCTIONS_AVAILABLE]         = !!(sci.ProcessorFeatureBits & CPU_FEATURE_SSSE3);
+        features[PF_XSAVE_ENABLED]                        = !!(sci.ProcessorFeatureBits & CPU_FEATURE_XSAVE);
+        features[PF_COMPARE_EXCHANGE128]                  = !!(sci.ProcessorFeatureBits & CPU_FEATURE_CX128);
+        features[PF_SSE_DAZ_MODE_AVAILABLE]               = !!(sci.ProcessorFeatureBits & CPU_FEATURE_DAZ);
+        features[PF_NX_ENABLED]                           = !!(sci.ProcessorFeatureBits & CPU_FEATURE_NX);
+        features[PF_SECOND_LEVEL_ADDRESS_TRANSLATION]     = !!(sci.ProcessorFeatureBits & CPU_FEATURE_2NDLEV);
+        features[PF_VIRT_FIRMWARE_ENABLED]                = !!(sci.ProcessorFeatureBits & CPU_FEATURE_VIRT);
+        features[PF_RDWRFSGSBASE_AVAILABLE]               = !!(sci.ProcessorFeatureBits & CPU_FEATURE_RDFS);
+        features[PF_FASTFAIL_AVAILABLE]                   = TRUE;
+        features[PF_SSE4_1_INSTRUCTIONS_AVAILABLE]        = !!(sci.ProcessorFeatureBits & CPU_FEATURE_SSE41);
+        features[PF_SSE4_2_INSTRUCTIONS_AVAILABLE]        = !!(sci.ProcessorFeatureBits & CPU_FEATURE_SSE42);
+        features[PF_AVX_INSTRUCTIONS_AVAILABLE]           = !!(sci.ProcessorFeatureBits & CPU_FEATURE_AVX);
+        features[PF_AVX2_INSTRUCTIONS_AVAILABLE]          = !!(sci.ProcessorFeatureBits & CPU_FEATURE_AVX2);
+        break;
+
+    case PROCESSOR_ARCHITECTURE_ARM:
+        features[PF_ARM_VFP_32_REGISTERS_AVAILABLE]       = !!(sci.ProcessorFeatureBits & CPU_FEATURE_ARM_VFP_32);
+        features[PF_ARM_NEON_INSTRUCTIONS_AVAILABLE]      = !!(sci.ProcessorFeatureBits & CPU_FEATURE_ARM_NEON);
+        break;
+
+    case PROCESSOR_ARCHITECTURE_ARM64:
+        features[PF_ARM_V8_INSTRUCTIONS_AVAILABLE]        = TRUE;
+        features[PF_ARM_V8_CRC32_INSTRUCTIONS_AVAILABLE]  = !!(sci.ProcessorFeatureBits & CPU_FEATURE_ARM_V8_CRC32);
+        features[PF_ARM_V8_CRYPTO_INSTRUCTIONS_AVAILABLE] = !!(sci.ProcessorFeatureBits & CPU_FEATURE_ARM_V8_CRYPTO);
+        features[PF_ARM_V81_ATOMIC_INSTRUCTIONS_AVAILABLE]= !!(sci.ProcessorFeatureBits & CPU_FEATURE_ARM_V81_ATOMIC);
+        features[PF_ARM_V82_DP_INSTRUCTIONS_AVAILABLE]    = !!(sci.ProcessorFeatureBits & CPU_FEATURE_ARM_V82_DP);
+        features[PF_ARM_V83_JSCVT_INSTRUCTIONS_AVAILABLE] = !!(sci.ProcessorFeatureBits & CPU_FEATURE_ARM_V83_JSCVT);
+        features[PF_ARM_V83_LRCPC_INSTRUCTIONS_AVAILABLE] = !!(sci.ProcessorFeatureBits & CPU_FEATURE_ARM_V83_LRCPC);
+        features[PF_ARM_SVE_INSTRUCTIONS_AVAILABLE]       = !!(sci.ProcessorFeatureBits & CPU_FEATURE_ARM_SVE);
+        features[PF_ARM_SVE2_INSTRUCTIONS_AVAILABLE]      = !!(sci.ProcessorFeatureBits & CPU_FEATURE_ARM_SVE2);
+        features[PF_ARM_SVE2_1_INSTRUCTIONS_AVAILABLE]    = !!(sci.ProcessorFeatureBits & CPU_FEATURE_ARM_SVE2_1);
+        features[PF_ARM_SVE_AES_INSTRUCTIONS_AVAILABLE]   = !!(sci.ProcessorFeatureBits & CPU_FEATURE_ARM_SVE_AES);
+        features[PF_ARM_SVE_PMULL128_INSTRUCTIONS_AVAILABLE] = !!(sci.ProcessorFeatureBits & CPU_FEATURE_ARM_SVE_PMULL128);
+        features[PF_ARM_SVE_BITPERM_INSTRUCTIONS_AVAILABLE] = !!(sci.ProcessorFeatureBits & CPU_FEATURE_ARM_SVE_BITPERM);
+        features[PF_ARM_SVE_BF16_INSTRUCTIONS_AVAILABLE]  = !!(sci.ProcessorFeatureBits & CPU_FEATURE_ARM_SVE_BF16);
+        features[PF_ARM_SVE_EBF16_INSTRUCTIONS_AVAILABLE] = !!(sci.ProcessorFeatureBits & CPU_FEATURE_ARM_SVE_EBF16);
+        features[PF_ARM_SVE_B16B16_INSTRUCTIONS_AVAILABLE] = !!(sci.ProcessorFeatureBits & CPU_FEATURE_ARM_SVE_B16B16);
+        features[PF_ARM_SVE_SHA3_INSTRUCTIONS_AVAILABLE]  = !!(sci.ProcessorFeatureBits & CPU_FEATURE_ARM_SVE_SHA3);
+        features[PF_ARM_SVE_SM4_INSTRUCTIONS_AVAILABLE]   = !!(sci.ProcessorFeatureBits & CPU_FEATURE_ARM_SVE_SM4);
+        features[PF_ARM_SVE_I8MM_INSTRUCTIONS_AVAILABLE]  = !!(sci.ProcessorFeatureBits & CPU_FEATURE_ARM_SVE_I8MM);
+        features[PF_ARM_SVE_F32MM_INSTRUCTIONS_AVAILABLE] = !!(sci.ProcessorFeatureBits & CPU_FEATURE_ARM_SVE_F32MM);
+        features[PF_ARM_SVE_F64MM_INSTRUCTIONS_AVAILABLE] = !!(sci.ProcessorFeatureBits & CPU_FEATURE_ARM_SVE_F64MM);
+        features[PF_COMPARE_EXCHANGE_DOUBLE]              = TRUE;
+        features[PF_NX_ENABLED]                           = TRUE;
+        features[PF_FASTFAIL_AVAILABLE]                   = TRUE;
+        /* add features for other architectures supported by wow64 */
+        if (!NtQuerySystemInformationEx( SystemSupportedProcessorArchitectures, &process, sizeof(process),
+                                         machines, sizeof(machines), NULL ))
+        {
+            for (i = 0; machines[i].Machine; i++)
+            {
+                switch (machines[i].Machine)
+                {
+                case IMAGE_FILE_MACHINE_ARMNT:
+                    features[PF_ARM_VFP_32_REGISTERS_AVAILABLE]  = TRUE;
+                    features[PF_ARM_NEON_INSTRUCTIONS_AVAILABLE] = TRUE;
+                    break;
+                case IMAGE_FILE_MACHINE_I386:
+                    features[PF_MMX_INSTRUCTIONS_AVAILABLE]    = TRUE;
+                    features[PF_XMMI_INSTRUCTIONS_AVAILABLE]   = TRUE;
+                    features[PF_RDTSC_INSTRUCTION_AVAILABLE]   = TRUE;
+                    features[PF_XMMI64_INSTRUCTIONS_AVAILABLE] = TRUE;
+                    features[PF_SSE3_INSTRUCTIONS_AVAILABLE]   = TRUE;
+                    features[PF_RDTSCP_INSTRUCTION_AVAILABLE]  = TRUE;
+                    features[PF_SSSE3_INSTRUCTIONS_AVAILABLE]  = TRUE;
+                    features[PF_SSE4_1_INSTRUCTIONS_AVAILABLE] = TRUE;
+                    features[PF_SSE4_2_INSTRUCTIONS_AVAILABLE] = TRUE;
+                    break;
+                }
+            }
+        }
+        break;
+    }
+    data->ActiveProcessorCount = NtCurrentTeb()->Peb->NumberOfProcessors;
+    data->ActiveGroupCount = 1;
+
+    initialize_xstate_features( data );
 
     UnmapViewOfFile( data );
 }
 
-#pragma pack(push,1)
+#include "pshpack1.h"
 struct smbios_prologue
 {
     BYTE  calling_method;
@@ -474,7 +690,7 @@ struct smbios_wine_core_id_regs_arm64
     } regs[];
 };
 
-#pragma pack(pop)
+#include "poppack.h"
 
 #define RSMB (('R' << 24) | ('S' << 16) | ('M' << 8) | 'B')
 
@@ -683,7 +899,6 @@ static void create_bios_processor_values( HKEY system_key, const char *buf, UINT
             fpu_key = 0;
         break;
     }
-    set_reg_value( system_key, L"SystemBiosDate", L"01/01/70" );
 
     if (RegCreateKeyExW( system_key, L"CentralProcessor", 0, NULL, REG_OPTION_VOLATILE,
                          KEY_ALL_ACCESS, NULL, &cpu_key, NULL ))
@@ -833,16 +1048,15 @@ static void create_computer_name_keys(void)
 
     if (gethostname( buffer, sizeof(buffer) )) return;
     hints.ai_flags = AI_CANONNAME;
-    if (getaddrinfo( buffer, NULL, &hints, &res ) != 0)
-        res = NULL;
-    else if (res->ai_canonname && strcasecmp( res->ai_canonname, "localhost" ) != 0)
+    if (!getaddrinfo( buffer, NULL, &hints, &res ) &&
+        res->ai_canonname && strcasecmp(res->ai_canonname, "localhost") != 0)
         name = res->ai_canonname;
     dot = strchr( name, '.' );
     if (dot) *dot++ = 0;
     else dot = name + strlen(name);
     SetComputerNameExA( ComputerNamePhysicalDnsDomain, dot );
     SetComputerNameExA( ComputerNamePhysicalDnsHostname, name );
-    if (res) freeaddrinfo( res );
+    if (name != buffer) freeaddrinfo( res );
 
     if (RegOpenKeyW( HKEY_LOCAL_MACHINE, L"System\\CurrentControlSet\\Control\\ComputerName", &key ))
         return;
@@ -865,6 +1079,14 @@ static void create_computer_name_keys(void)
 
 static void create_volatile_environment_registry_key(void)
 {
+    static const WCHAR *preserve[] =
+    {
+        L"DXVK_ENABLE_NVAPI",
+        L"DXVK_NVAPI_ALLOW_OTHER_DRIVERS",
+        L"DXVK_NVAPI_DRIVER_VERSION",
+    };
+    const WCHAR *str;
+    unsigned int i;
     WCHAR path[MAX_PATH];
     WCHAR computername[MAX_COMPUTERNAME_LENGTH + 1 + 2];
     DWORD size;
@@ -909,158 +1131,13 @@ static void create_volatile_environment_registry_key(void)
     }
 
     set_reg_value( hkey, L"SESSIONNAME", L"Console" );
+
+    for (i = 0; i < ARRAY_SIZE(preserve); ++i)
+    {
+        if ((str = _wgetenv( preserve[i] ))) set_reg_value( hkey, preserve[i], str );
+    }
+
     RegCloseKey( hkey );
-}
-
-static const WCHAR *get_known_dll_ntdir( WORD machine )
-{
-    switch (machine)
-    {
-    case IMAGE_FILE_MACHINE_TARGET_HOST: return L"\\KnownDlls";
-    case IMAGE_FILE_MACHINE_I386:        return L"\\KnownDlls32";
-    case IMAGE_FILE_MACHINE_ARMNT:       return L"\\KnownDllsArm32";
-    default: return NULL;
-    }
-}
-
-static HANDLE create_known_dll_section( const WCHAR *sysdir, HANDLE root, const WCHAR *name )
-{
-    WCHAR buffer[MAX_PATH];
-    HANDLE handle, mapping;
-    OBJECT_ATTRIBUTES attr;
-    UNICODE_STRING strW;
-    IO_STATUS_BLOCK io;
-    LARGE_INTEGER size;
-
-    swprintf( buffer, MAX_PATH, L"\\??\\%s\\%s", sysdir, name );
-    RtlInitUnicodeString( &strW, buffer );
-    InitializeObjectAttributes( &attr, &strW, OBJ_CASE_INSENSITIVE, 0, NULL );
-
-    if (NtOpenFile( &handle, GENERIC_READ | SYNCHRONIZE, &attr, &io,
-                    FILE_SHARE_READ | FILE_SHARE_DELETE,
-                    FILE_SYNCHRONOUS_IO_NONALERT | FILE_NON_DIRECTORY_FILE ))
-        return 0;
-
-    RtlInitUnicodeString( &strW, name );
-    InitializeObjectAttributes( &attr, &strW, OBJ_CASE_INSENSITIVE | OBJ_PERMANENT, root, NULL );
-    size.QuadPart = 0;
-    if (NtCreateSection( &mapping,
-                         STANDARD_RIGHTS_REQUIRED | SECTION_QUERY | SECTION_MAP_READ | SECTION_MAP_EXECUTE,
-                         &attr, &size, PAGE_EXECUTE_READ, SEC_IMAGE, handle ))
-        mapping = 0;
-    NtClose( handle );
-    return mapping;
-}
-
-struct known_dll
-{
-    struct list entry;
-    WCHAR       name[64];
-};
-
-static void add_known_dll( struct list *dll_list, const WCHAR *name )
-{
-    struct known_dll *dll;
-
-    LIST_FOR_EACH_ENTRY( dll, dll_list, struct known_dll, entry )
-        if (!wcsicmp( name, dll->name )) return;
-
-    dll = malloc( sizeof(*dll) );
-    wcscpy( dll->name, name );
-    list_add_tail( dll_list, &dll->entry );
-}
-
-static void add_imports( struct list *dll_list, HANDLE mapping )
-{
-    const IMAGE_IMPORT_DESCRIPTOR *imp;
-    DWORD i, size;
-    void *module;
-
-    if (!(module = MapViewOfFile( mapping, FILE_MAP_READ, 0, 0, 0 ))) return;
-    if ((imp = RtlImageDirectoryEntryToData( module, TRUE, IMAGE_DIRECTORY_ENTRY_IMPORT, &size )))
-    {
-        for ( ; imp->Name; imp++)
-        {
-            unsigned char *str = (unsigned char *)module + imp->Name;
-            WCHAR name[64];
-            for (i = 0; str[i] && i < ARRAY_SIZE(name); i++) name[i] = (unsigned char)str[i];
-            if (i == ARRAY_SIZE(name)) continue;
-            name[i] = 0;
-            add_known_dll( dll_list, name );
-        }
-    }
-    UnmapViewOfFile( module );
-}
-
-
-static void create_known_dlls(void)
-{
-    struct list dlls = LIST_INIT( dlls );
-    struct known_dll *dll, *next;
-    WCHAR name[64], value[64], sysdir[MAX_PATH];
-    UNICODE_STRING str, target;
-    OBJECT_ATTRIBUTES attr;
-    HANDLE handle, root, mapping;
-    DWORD type, idx = 0;
-    HKEY key;
-
-    if (RegOpenKeyExW( HKEY_LOCAL_MACHINE,
-                       L"System\\CurrentControlSet\\Control\\Session Manager\\KnownDLLs",
-                       0, KEY_ALL_ACCESS, &key ))
-        return;
-
-    for (;;)
-    {
-        DWORD name_size = ARRAY_SIZE(name);
-        DWORD val_size = sizeof(value);
-        DWORD res = RegEnumValueW( key, idx++, name, &name_size, 0, &type, (BYTE *)value, &val_size );
-        if (res == ERROR_MORE_DATA) continue;  /* ignore it */
-        if (res) break;
-        add_known_dll( &dlls, value );
-    }
-
-    for (int i = 0; machines[i].Machine; i++)
-    {
-        WORD machine = machines[i].Native ? IMAGE_FILE_MACHINE_TARGET_HOST : machines[i].Machine;
-
-        if (!GetSystemWow64Directory2W( sysdir, MAX_PATH, machine )) continue;
-        RtlInitUnicodeString( &str, get_known_dll_ntdir( machine ));
-        InitializeObjectAttributes( &attr, &str, OBJ_PERMANENT, 0, NULL );
-        if (NtCreateDirectoryObject( &root, DIRECTORY_ALL_ACCESS, &attr )) continue;
-
-        RtlInitUnicodeString( &target, sysdir );
-        RtlInitUnicodeString( &str, L"KnownDllPath" );
-        InitializeObjectAttributes( &attr, &str, OBJ_PERMANENT, root, NULL );
-        if (!NtCreateSymbolicLinkObject( &handle, SYMBOLIC_LINK_ALL_ACCESS, &attr, &target ))
-            NtClose( handle );
-
-        LIST_FOR_EACH_ENTRY( dll, &dlls, struct known_dll, entry )
-        {
-            if (!(mapping = create_known_dll_section( sysdir, root, dll->name ))) continue;
-            if (machines[i].Native) add_imports( &dlls, mapping );
-            NtClose( mapping );
-        }
-        NtClose( root );
-    }
-
-    LIST_FOR_EACH_ENTRY_SAFE( dll, next, &dlls, struct known_dll, entry )
-    {
-        list_remove( &dll->entry );
-        free( dll );
-    }
-    RegCloseKey( key );
-}
-
-/* Some broken applications expect the ProxyEnable registry value to exist.
- * This value is automatically created by wininet when initializing.
- * This value is not initialized for new users on Windows, but it is created
- * for the admin user. */
-static void initialize_internet(void)
-{
-    HINTERNET inet;
-
-    if ((inet = InternetOpenW( L"Wine", INTERNET_OPEN_TYPE_PRECONFIG, NULL, NULL, 0 )))
-        InternetCloseHandle( inet );
 }
 
 /* Performs the rename operations dictated in %SystemRoot%\Wininit.ini.
@@ -1431,7 +1508,7 @@ static BOOL start_services_process(void)
     HANDLE wait_handles[2];
 
     if (!CreateProcessW(L"C:\\windows\\system32\\services.exe", NULL,
-                        NULL, NULL, TRUE, DETACHED_PROCESS, NULL, L"C:\\windows\\system32", &si, &pi))
+                        NULL, NULL, TRUE, DETACHED_PROCESS, NULL, NULL, &si, &pi))
     {
         WINE_ERR("Couldn't start services.exe: error %lu\n", GetLastError());
         return FALSE;
@@ -1455,64 +1532,6 @@ static BOOL start_services_process(void)
     CloseHandle(pi.hProcess);
     CloseHandle(wait_handles[0]);
     return TRUE;
-}
-
-static void set_wait_dialog_text( HWND hwnd, HWND text, const WCHAR *string )
-{
-    RECT win_rect, old_rect, new_rect;
-    HDC hdc = GetDC( text );
-
-    GetClientRect( text, &old_rect );
-    new_rect = old_rect;
-    SelectObject( hdc, (HFONT)SendMessageW( text, WM_GETFONT, 0, 0 ));
-    DrawTextW( hdc, string, -1, &new_rect, DT_CALCRECT | DT_EDITCONTROL | DT_WORDBREAK | DT_NOPREFIX );
-    ReleaseDC( text, hdc );
-    if (new_rect.bottom > old_rect.bottom)
-    {
-        GetWindowRect( hwnd, &win_rect );
-        win_rect.bottom += new_rect.bottom - old_rect.bottom;
-        SetWindowPos( hwnd, 0, 0, 0, win_rect.right - win_rect.left, win_rect.bottom - win_rect.top,
-                      SWP_NOMOVE | SWP_NOACTIVATE | SWP_NOZORDER );
-        SetWindowPos( text, 0, 0, 0, new_rect.right, new_rect.bottom,
-                      SWP_NOMOVE | SWP_NOACTIVATE | SWP_NOZORDER );
-    }
-    SendMessageW( text, WM_SETTEXT, 0, (LPARAM)string );
-}
-
-static INT_PTR CALLBACK wait_dlgproc( HWND hwnd, UINT msg, WPARAM wp, LPARAM lp )
-{
-    switch (msg)
-    {
-    case WM_INITDIALOG:
-        {
-            DWORD len, icon_size;
-            RECT rect;
-            WCHAR *buffer, text[1024];
-            const WCHAR *name = (WCHAR *)lp;
-            HICON icon;
-
-            GetClientRect( GetDlgItem( hwnd, IDC_WAITICON ), &rect );
-            icon_size = min( rect.right, rect.bottom );
-            icon = LoadImageW( 0, (LPCWSTR)IDI_WINLOGO, IMAGE_ICON, icon_size, icon_size, LR_SHARED );
-            SendDlgItemMessageW( hwnd, IDC_WAITICON, STM_SETICON, (WPARAM)icon, 0 );
-            SendDlgItemMessageW( hwnd, IDC_WAITTEXT, WM_GETTEXT, 1024, (LPARAM)text );
-            len = lstrlenW(text) + lstrlenW(name) + 1;
-            buffer = malloc( len * sizeof(WCHAR) );
-            swprintf( buffer, len, text, name );
-            set_wait_dialog_text( hwnd, GetDlgItem( hwnd, IDC_WAITTEXT ), buffer );
-            free( buffer );
-        }
-        break;
-    }
-    return 0;
-}
-
-static HWND show_wait_window(void)
-{
-    HWND hwnd = CreateDialogParamW( GetModuleHandleW(0), MAKEINTRESOURCEW(IDD_WAITDLG), 0,
-                                    wait_dlgproc, (LPARAM)prettyprint_configdir() );
-    ShowWindow( hwnd, SW_SHOWNORMAL );
-    return hwnd;
 }
 
 static HANDLE start_rundll32( const WCHAR *inf_path, const WCHAR *install, WORD machine )
@@ -1633,6 +1652,55 @@ static void update_user_profile(void)
     LocalFree(sid);
 }
 
+static void update_win_version(void)
+{
+    static const WCHAR win10_buildW[] = L"19045";
+    static const WCHAR win10_ntW[] = L"6.3";
+
+    HKEY cv_h;
+    DWORD type, sz;
+    WCHAR current_version[256];
+
+    if(RegOpenKeyExW(HKEY_LOCAL_MACHINE, L"Software\\Microsoft\\Windows NT\\CurrentVersion",
+                0, KEY_ALL_ACCESS, &cv_h) == ERROR_SUCCESS){
+        /* get the current windows version */
+        sz = sizeof(current_version);
+        if(RegQueryValueExW(cv_h, L"CurrentVersion", NULL, &type, (BYTE *)current_version, &sz) == ERROR_SUCCESS &&
+                type == REG_SZ){
+            if(!wcscmp(current_version, L"6.3") || !wcscmp(current_version, L"10.0")){
+                RegSetValueExW(cv_h, L"CurrentVersion", 0, REG_SZ, (const BYTE *)win10_ntW, sizeof(win10_ntW));
+                RegSetValueExW(cv_h, L"CurrentBuild", 0, REG_SZ, (const BYTE *)win10_buildW, sizeof(win10_buildW));
+                RegSetValueExW(cv_h, L"CurrentBuildNumber", 0, REG_SZ, (const BYTE *)win10_buildW, sizeof(win10_buildW));
+            }
+        }
+        RegCloseKey(cv_h);
+    }
+
+    if(RegOpenKeyExW(HKEY_LOCAL_MACHINE, L"Software\\Wow6432Node\\Microsoft\\Windows NT\\CurrentVersion",
+                0, KEY_ALL_ACCESS, &cv_h) == ERROR_SUCCESS){
+        /* get the current windows version */
+        sz = sizeof(current_version);
+        if(RegQueryValueExW(cv_h, L"CurrentVersion", NULL, &type, (BYTE *)current_version, &sz) == ERROR_SUCCESS &&
+                type == REG_SZ){
+            if(!wcscmp(current_version, L"6.3") || !wcscmp(current_version, L"10.0")){
+                RegSetValueExW(cv_h, L"CurrentVersion", 0, REG_SZ, (const BYTE *)win10_ntW, sizeof(win10_ntW));
+                RegSetValueExW(cv_h, L"CurrentBuild", 0, REG_SZ, (const BYTE *)win10_buildW, sizeof(win10_buildW));
+                RegSetValueExW(cv_h, L"CurrentBuildNumber", 0, REG_SZ, (const BYTE *)win10_buildW, sizeof(win10_buildW));
+            }
+        }
+        RegCloseKey(cv_h);
+    }
+}
+
+static void update_root_certs(void)
+{
+    HCERTSTORE store;
+
+    store = CertOpenStore( CERT_STORE_PROV_SYSTEM_REGISTRY_W, 0, 0, CERT_STORE_OPEN_EXISTING_FLAG
+                           | CERT_STORE_READONLY_FLAG | CERT_SYSTEM_STORE_LOCAL_MACHINE, L"Root");
+    CertCloseStore( store, 0 );
+}
+
 /* execute rundll32 on the wine.inf file if necessary */
 static void update_wineprefix( BOOL force )
 {
@@ -1657,12 +1725,15 @@ static void update_wineprefix( BOOL force )
 
     if (update_timestamp( config_dir, st.st_mtime ) || force)
     {
-        HANDLE process;
+        SYSTEM_SUPPORTED_PROCESSOR_ARCHITECTURES_INFORMATION machines[8];
+        HANDLE process = 0;
         DWORD count = 0;
+
+        if (NtQuerySystemInformationEx( SystemSupportedProcessorArchitectures, &process, sizeof(process),
+                                        machines, sizeof(machines), NULL )) machines[0].Machine = 0;
 
         if ((process = start_rundll32( inf_path, L"PreInstall", IMAGE_FILE_MACHINE_TARGET_HOST )))
         {
-            HWND hwnd = show_wait_window();
             for (;;)
             {
                 if (process)
@@ -1683,10 +1754,11 @@ static void update_wineprefix( BOOL force )
                     process = start_rundll32( inf_path, L"Wow64Install", machines[count].Machine );
                 count++;
             }
-            DestroyWindow( hwnd );
         }
         install_root_pnp_devices();
         update_user_profile();
+        update_win_version();
+        update_root_certs();
 
         TRACE( "wine: configuration in %s has been updated.\n", debugstr_w(prettyprint_configdir()) );
     }
@@ -1788,6 +1860,52 @@ static void usage( int status )
     exit( status );
 }
 
+static void create_digitalproductid(void)
+{
+    BYTE digital_product_id[0xa4];
+    char product_id[256];
+    LSTATUS status;
+    unsigned int i;
+    DWORD size;
+    DWORD type;
+    HKEY key;
+
+    if ((status = RegOpenKeyExW( HKEY_LOCAL_MACHINE, L"Software\\Microsoft\\Windows NT\\CurrentVersion",
+                       0, KEY_ALL_ACCESS, &key )))
+        return;
+    size = sizeof(product_id);
+    status = RegQueryValueExA( key, "ProductId", NULL, &type, (BYTE *)product_id, &size );
+    if (status) goto done;
+    if (!size) goto done;
+    if (product_id[size - 1])
+    {
+        if (size == sizeof(product_id)) goto done;
+        product_id[size++] = 0;
+    }
+
+    if (!RegQueryValueExA( key, "DigitalProductId", NULL, &type, NULL, &size ) && size == sizeof(digital_product_id))
+    {
+        if (RegQueryValueExA( key, "DigitalProductId", NULL, &type, digital_product_id, &size ))
+            goto done;
+        for (i = 0; i < size; ++i)
+            if (digital_product_id[i]) break;
+        if (i < size) goto done;
+    }
+
+    memset( digital_product_id, 0, sizeof(digital_product_id) );
+    *(DWORD *)digital_product_id = sizeof(digital_product_id);
+    digital_product_id[4] = 3;
+    strcpy( (char *)digital_product_id + 8, product_id );
+    *(DWORD *)(digital_product_id + 0x20) = 0x0cec;
+    *(DWORD *)(digital_product_id + 0x34) = 0x0cec;
+    strcpy( (char *)digital_product_id + 0x24, "[TH] X19-99481" );
+    digital_product_id[0x42] = 8;
+    RtlGenRandom( digital_product_id + 0x38, 0x18 );
+    RegSetValueExA( key, "DigitalProductId", 0, REG_BINARY, digital_product_id, sizeof(digital_product_id) );
+done:
+    RegCloseKey( key );
+}
+
 int __cdecl main( int argc, char *argv[] )
 {
     /* First, set the current directory to SystemRoot */
@@ -1796,7 +1914,6 @@ int __cdecl main( int argc, char *argv[] )
     HANDLE event;
     OBJECT_ATTRIBUTES attr;
     UNICODE_STRING nameW = RTL_CONSTANT_STRING( L"\\KernelObjects\\__wineboot_event" );
-    HANDLE process = 0;
     BOOL is_wow64;
 
     end_session = force = init = kill = restart = shutdown = update = FALSE;
@@ -1875,9 +1992,6 @@ int __cdecl main( int argc, char *argv[] )
 
     if (shutdown) return 0;
 
-    if (NtQuerySystemInformationEx( SystemSupportedProcessorArchitectures, &process, sizeof(process),
-                                    machines, sizeof(machines), NULL )) machines[0].Machine = 0;
-
     /* create event to be inherited by services.exe */
     InitializeObjectAttributes( &attr, &nameW, OBJ_OPENIF | OBJ_INHERIT, 0, NULL );
     NtCreateEvent( &event, EVENT_ALL_ACCESS, &attr, NotificationEvent, 0 );
@@ -1901,9 +2015,8 @@ int __cdecl main( int argc, char *argv[] )
     }
     if (init || update) update_wineprefix( update );
 
+    create_digitalproductid();
     create_volatile_environment_registry_key();
-    create_known_dlls();
-    initialize_internet();
 
     ProcessRunKeys( HKEY_LOCAL_MACHINE, L"RunOnce", TRUE, TRUE );
 

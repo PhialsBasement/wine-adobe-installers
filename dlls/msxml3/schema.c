@@ -33,7 +33,6 @@
 #include <libxml/xmlIO.h>
 #include <libxml/xmlversion.h>
 #include <libxml/xpath.h>
-#include <libxml/xmlsave.h>
 
 #include "windef.h"
 #include "winbase.h"
@@ -91,7 +90,7 @@ typedef struct
 {
     DispatchEx dispex;
     IXMLDOMSchemaCollection2 IXMLDOMSchemaCollection2_iface;
-    LONG refcount;
+    LONG ref;
 
     MSXML_VERSION version;
     xmlHashTablePtr cache;
@@ -123,6 +122,80 @@ static const tid_t schema_cache_se_tids[] = {
 #define DT_MAX_STR_LEN 11
 #define DT_MIN_HASH_VALUE 2
 #define DT_MAX_HASH_VALUE 115
+
+static const xmlChar DT_bin_base64[] = "bin.base64";
+static const xmlChar DT_bin_hex[] = "bin.hex";
+static const xmlChar DT_boolean[] = "boolean";
+static const xmlChar DT_char[] = "char";
+static const xmlChar DT_date[] = "date";
+static const xmlChar DT_date_tz[] = "date.tz";
+static const xmlChar DT_dateTime[] = "dateTime";
+static const xmlChar DT_dateTime_tz[] = "dateTime.tz";
+static const xmlChar DT_entity[] = "entity";
+static const xmlChar DT_entities[] = "entities";
+static const xmlChar DT_enumeration[] = "enumeration";
+static const xmlChar DT_fixed_14_4[] = "fixed.14.4";
+static const xmlChar DT_float[] = "float";
+static const xmlChar DT_i1[] = "i1";
+static const xmlChar DT_i2[] = "i2";
+static const xmlChar DT_i4[] = "i4";
+static const xmlChar DT_i8[] = "i8";
+static const xmlChar DT_id[] = "id";
+static const xmlChar DT_idref[] = "idref";
+static const xmlChar DT_idrefs[] = "idrefs";
+static const xmlChar DT_int[] = "int";
+static const xmlChar DT_nmtoken[] = "nmtoken";
+static const xmlChar DT_nmtokens[] = "nmtokens";
+static const xmlChar DT_notation[] = "notation";
+static const xmlChar DT_number[] = "number";
+static const xmlChar DT_r4[] = "r4";
+static const xmlChar DT_r8[] = "r8";
+static const xmlChar DT_string[] = "string";
+static const xmlChar DT_time[] = "time";
+static const xmlChar DT_time_tz[] = "time.tz";
+static const xmlChar DT_ui1[] = "ui1";
+static const xmlChar DT_ui2[] = "ui2";
+static const xmlChar DT_ui4[] = "ui4";
+static const xmlChar DT_ui8[] = "ui8";
+static const xmlChar DT_uri[] = "uri";
+static const xmlChar DT_uuid[] = "uuid";
+
+static const OLECHAR wDT_bin_base64[] = {'b','i','n','.','b','a','s','e','6','4',0};
+static const OLECHAR wDT_bin_hex[] = {'b','i','n','.','h','e','x',0};
+static const OLECHAR wDT_boolean[] = {'b','o','o','l','e','a','n',0};
+static const OLECHAR wDT_char[] = {'c','h','a','r',0};
+static const OLECHAR wDT_date[] = {'d','a','t','e',0};
+static const OLECHAR wDT_date_tz[] = {'d','a','t','e','.','t','z',0};
+static const OLECHAR wDT_dateTime[] = {'d','a','t','e','T','i','m','e',0};
+static const OLECHAR wDT_dateTime_tz[] = {'d','a','t','e','T','i','m','e','.','t','z',0};
+static const OLECHAR wDT_entity[] = {'e','n','t','i','t','y',0};
+static const OLECHAR wDT_entities[] = {'e','n','t','i','t','i','e','s',0};
+static const OLECHAR wDT_enumeration[] = {'e','n','u','m','e','r','a','t','i','o','n',0};
+static const OLECHAR wDT_fixed_14_4[] = {'f','i','x','e','d','.','1','4','.','4',0};
+static const OLECHAR wDT_float[] = {'f','l','o','a','t',0};
+static const OLECHAR wDT_i1[] = {'i','1',0};
+static const OLECHAR wDT_i2[] = {'i','2',0};
+static const OLECHAR wDT_i4[] = {'i','4',0};
+static const OLECHAR wDT_i8[] = {'i','8',0};
+static const OLECHAR wDT_id[] = {'i','d',0};
+static const OLECHAR wDT_idref[] = {'i','d','r','e','f',0};
+static const OLECHAR wDT_idrefs[] = {'i','d','r','e','f','s',0};
+static const OLECHAR wDT_int[] = {'i','n','t',0};
+static const OLECHAR wDT_nmtoken[] = {'n','m','t','o','k','e','n',0};
+static const OLECHAR wDT_nmtokens[] = {'n','m','t','o','k','e','n','s',0};
+static const OLECHAR wDT_notation[] = {'n','o','t','a','t','i','o','n',0};
+static const OLECHAR wDT_number[] = {'n','u','m','b','e','r',0};
+static const OLECHAR wDT_r4[] = {'r','4',0};
+static const OLECHAR wDT_r8[] = {'r','8',0};
+static const OLECHAR wDT_string[] = {'s','t','r','i','n','g',0};
+static const OLECHAR wDT_time[] = {'t','i','m','e',0};
+static const OLECHAR wDT_time_tz[] = {'t','i','m','e','.','t','z',0};
+static const OLECHAR wDT_ui1[] = {'u','i','1',0};
+static const OLECHAR wDT_ui2[] = {'u','i','2',0};
+static const OLECHAR wDT_ui4[] = {'u','i','4',0};
+static const OLECHAR wDT_ui8[] = {'u','i','8',0};
+static const OLECHAR wDT_uri[] = {'u','r','i',0};
+static const OLECHAR wDT_uuid[] = {'u','u','i','d',0};
 
 static const BYTE hash_assoc_values[] =
 {
@@ -323,52 +396,85 @@ static DWORD dt_hash_bstr(OLECHAR const* bstr, int len /* calculated if -1 */)
     return hval;
 }
 
-#define DT_ENTRY(name) { name, L##name }
-static const struct
+static const xmlChar *const DT_string_table[LAST_DT] =
 {
-    xmlChar x[16];
-    WCHAR w[16];
-}
-DT_string_table[LAST_DT] =
-{
-    DT_ENTRY("bin.base64"),
-    DT_ENTRY("bin.hex"),
-    DT_ENTRY("boolean"),
-    DT_ENTRY("char"),
-    DT_ENTRY("date"),
-    DT_ENTRY("date.tz"),
-    DT_ENTRY("dateTime"),
-    DT_ENTRY("dateTime.tz"),
-    DT_ENTRY("entity"),
-    DT_ENTRY("entities"),
-    DT_ENTRY("enumeration"),
-    DT_ENTRY("fixed.14.4"),
-    DT_ENTRY("float"),
-    DT_ENTRY("i1"),
-    DT_ENTRY("i2"),
-    DT_ENTRY("i4"),
-    DT_ENTRY("i8"),
-    DT_ENTRY("id"),
-    DT_ENTRY("idref"),
-    DT_ENTRY("idrefs"),
-    DT_ENTRY("int"),
-    DT_ENTRY("nmtoken"),
-    DT_ENTRY("nmtokens"),
-    DT_ENTRY("notation"),
-    DT_ENTRY("number"),
-    DT_ENTRY("r4"),
-    DT_ENTRY("r8"),
-    DT_ENTRY("string"),
-    DT_ENTRY("time"),
-    DT_ENTRY("time.tz"),
-    DT_ENTRY("ui1"),
-    DT_ENTRY("ui2"),
-    DT_ENTRY("ui4"),
-    DT_ENTRY("ui8"),
-    DT_ENTRY("uri"),
-    DT_ENTRY("uuid"),
+    DT_bin_base64,
+    DT_bin_hex,
+    DT_boolean,
+    DT_char,
+    DT_date,
+    DT_date_tz,
+    DT_dateTime,
+    DT_dateTime_tz,
+    DT_entity,
+    DT_entities,
+    DT_enumeration,
+    DT_fixed_14_4,
+    DT_float,
+    DT_i1,
+    DT_i2,
+    DT_i4,
+    DT_i8,
+    DT_id,
+    DT_idref,
+    DT_idrefs,
+    DT_int,
+    DT_nmtoken,
+    DT_nmtokens,
+    DT_notation,
+    DT_number,
+    DT_r4,
+    DT_r8,
+    DT_string,
+    DT_time,
+    DT_time_tz,
+    DT_ui1,
+    DT_ui2,
+    DT_ui4,
+    DT_ui8,
+    DT_uri,
+    DT_uuid
 };
-#undef DT_ENTRY
+
+static const WCHAR *const DT_wstring_table[LAST_DT] =
+{
+    wDT_bin_base64,
+    wDT_bin_hex,
+    wDT_boolean,
+    wDT_char,
+    wDT_date,
+    wDT_date_tz,
+    wDT_dateTime,
+    wDT_dateTime_tz,
+    wDT_entity,
+    wDT_entities,
+    wDT_enumeration,
+    wDT_fixed_14_4,
+    wDT_float,
+    wDT_i1,
+    wDT_i2,
+    wDT_i4,
+    wDT_i8,
+    wDT_id,
+    wDT_idref,
+    wDT_idrefs,
+    wDT_int,
+    wDT_nmtoken,
+    wDT_nmtokens,
+    wDT_notation,
+    wDT_number,
+    wDT_r4,
+    wDT_r8,
+    wDT_string,
+    wDT_time,
+    wDT_time_tz,
+    wDT_ui1,
+    wDT_ui2,
+    wDT_ui4,
+    wDT_ui8,
+    wDT_uri,
+    wDT_uuid
+};
 
 static const XDR_DT DT_lookup_table[] =
 {
@@ -440,7 +546,7 @@ XDR_DT str_to_dt(xmlChar const* str, int len /* calculated if -1 */)
     if (hash <= DT_MAX_HASH_VALUE)
         dt = DT_lookup_table[hash];
 
-    if (dt != DT_INVALID && xmlStrcasecmp(str, DT_string_table[dt].x) == 0)
+    if (dt != DT_INVALID && xmlStrcasecmp(str, DT_string_table[dt]) == 0)
         return dt;
 
     return DT_INVALID;
@@ -454,7 +560,7 @@ XDR_DT bstr_to_dt(OLECHAR const* bstr, int len /* calculated if -1 */)
     if (hash <= DT_MAX_HASH_VALUE)
         dt = DT_lookup_table[hash];
 
-    if (dt != DT_INVALID && wcsicmp(bstr, DT_string_table[dt].w) == 0)
+    if (dt != DT_INVALID && lstrcmpiW(bstr, DT_wstring_table[dt]) == 0)
         return dt;
 
     return DT_INVALID;
@@ -465,7 +571,7 @@ xmlChar const* dt_to_str(XDR_DT dt)
     if (dt == DT_INVALID)
         return NULL;
 
-    return DT_string_table[dt].x;
+    return DT_string_table[dt];
 }
 
 OLECHAR const* dt_to_bstr(XDR_DT dt)
@@ -473,23 +579,22 @@ OLECHAR const* dt_to_bstr(XDR_DT dt)
     if (dt == DT_INVALID)
         return NULL;
 
-    return DT_string_table[dt].w;
+    return DT_wstring_table[dt];
 }
 
 const char* debugstr_dt(XDR_DT dt)
 {
-    return debugstr_a(dt != DT_INVALID ? (const char*)DT_string_table[dt].x : NULL);
+    return debugstr_a(dt != DT_INVALID ? (const char*)DT_string_table[dt] : NULL);
 }
 
-HRESULT dt_validate(XDR_DT dt, const WCHAR *contentW)
+HRESULT dt_validate(XDR_DT dt, xmlChar const* content)
 {
     xmlDocPtr tmp_doc;
-    xmlChar *content;
     xmlNodePtr node;
     xmlNsPtr ns;
     HRESULT hr;
 
-    TRACE("(dt:%s, %s)\n", debugstr_dt(dt), debugstr_w(contentW));
+    TRACE("(dt:%s, %s)\n", debugstr_dt(dt), debugstr_a((char const*)content));
 
     if (!datatypes_schema)
     {
@@ -542,10 +647,8 @@ HRESULT dt_validate(XDR_DT dt, const WCHAR *contentW)
                 return S_OK;
             }
 
-            if (contentW && *contentW)
+            if (content && xmlStrlen(content))
             {
-                content = xmlchar_from_wchar(contentW);
-
                 tmp_doc = xmlNewDoc(NULL);
                 node = xmlNewChild((xmlNodePtr)tmp_doc, NULL, dt_to_str(dt), content);
                 ns = xmlNewNs(node, DT_nsURI, BAD_CAST "dt");
@@ -554,8 +657,6 @@ HRESULT dt_validate(XDR_DT dt, const WCHAR *contentW)
 
                 hr = Schema_validate_tree(datatypes_schema, (xmlNodePtr)tmp_doc);
                 xmlFreeDoc(tmp_doc);
-
-                free(content);
             }
             else
             {   /* probably the node is being created manually and has no content yet */
@@ -667,11 +768,14 @@ static LONG cache_entry_release(cache_entry* entry)
     {
         if (entry->type == CacheEntryType_XSD)
         {
+            xmldoc_release(entry->doc);
             entry->schema->doc = NULL;
             xmlSchemaFree(entry->schema);
         }
         else if (entry->type == CacheEntryType_XDR)
         {
+            xmldoc_release(entry->doc);
+            xmldoc_release(entry->schema->doc);
             entry->schema->doc = NULL;
             xmlSchemaFree(entry->schema);
         }
@@ -764,7 +868,9 @@ static cache_entry* cache_entry_from_xsd_doc(xmlDocPtr doc, xmlChar const* nsURI
 
     if ((entry->schema = Schema_parse(spctx)))
     {
+        xmldoc_init(entry->schema->doc, v);
         entry->doc = entry->schema->doc;
+        xmldoc_add_ref(entry->doc);
     }
     else
     {
@@ -792,6 +898,10 @@ static cache_entry* cache_entry_from_xdr_doc(xmlDocPtr doc, xmlChar const* nsURI
     if ((entry->schema = Schema_parse(spctx)))
     {
         entry->doc = new_doc;
+        xmldoc_init(entry->schema->doc, version);
+        xmldoc_init(entry->doc, version);
+        xmldoc_add_ref(entry->doc);
+        xmldoc_add_ref(entry->schema->doc);
     }
     else
     {
@@ -806,41 +916,35 @@ static cache_entry* cache_entry_from_xdr_doc(xmlDocPtr doc, xmlChar const* nsURI
     return entry;
 }
 
-static HRESULT cache_entry_on_data_available(void *obj, char *ptr, DWORD len)
+static cache_entry* cache_entry_from_url(VARIANT url, xmlChar const* nsURI, MSXML_VERSION version)
 {
-    xmlDocPtr *doc = obj;
-
-    if ((!(*doc = xmlParseMemory(ptr, len))))
-    {
-        WARN("Failed to parse a document.\n");
-        return E_FAIL;
-    }
-
-    return S_OK;
-}
-
-static cache_entry* cache_entry_from_url(const WCHAR *url, xmlChar const* nsURI, MSXML_VERSION version)
-{
-    CacheEntryType type = CacheEntryType_Invalid;
-    xmlDocPtr doc = NULL;
     cache_entry* entry;
-    IMoniker *moniker;
-    HRESULT hr;
-    bsc_t *bsc;
+    IXMLDOMDocument3* domdoc = NULL;
+    xmlDocPtr doc = NULL;
+    HRESULT hr = dom_document_create(version, (void **)&domdoc);
+    VARIANT_BOOL b = VARIANT_FALSE;
+    CacheEntryType type = CacheEntryType_Invalid;
 
-    if (FAILED(hr = create_moniker_from_url(url, &moniker)))
+    if (hr != S_OK)
     {
-        WARN("Failed to create a url moniker, hr %#lx.\n", hr);
+        FIXME("failed to create domdoc\n");
         return NULL;
     }
+    assert(domdoc != NULL);
+    assert(V_VT(&url) == VT_BSTR);
 
-    hr = bind_url(moniker, cache_entry_on_data_available, &doc, &bsc);
-    IMoniker_Release(moniker);
-    if (FAILED(hr))
-        return NULL;
-
-    detach_bsc(bsc);
-
+    hr = IXMLDOMDocument3_load(domdoc, url, &b);
+    if (hr != S_OK)
+    {
+        ERR("load() returned %#lx.\n", hr);
+        if (b != VARIANT_TRUE)
+        {
+            FIXME("Failed to load doc at %s\n", debugstr_w(V_BSTR(&url)));
+            IXMLDOMDocument3_Release(domdoc);
+            return NULL;
+        }
+    }
+    doc = xmlNodePtr_from_domnode((IXMLDOMNode*)domdoc, XML_DOCUMENT_NODE)->doc;
     type = cache_type_from_xmlDocPtr(doc);
 
     switch (type)
@@ -856,8 +960,7 @@ static cache_entry* cache_entry_from_url(const WCHAR *url, xmlChar const* nsURI,
             FIXME("invalid schema\n");
             break;
     }
-
-    xmlFreeDoc(doc);
+    IXMLDOMDocument3_Release(domdoc);
 
     return entry;
 }
@@ -916,35 +1019,22 @@ static void cache_remove_entry(schema_cache *cache, const xmlChar *uri)
     }
 }
 
-static xmlDocPtr create_xmldoc_for_text(BSTR xml)
-{
-    xmlChar *str = xmlchar_from_wchar(xml);
-    xmlDocPtr doc;
-
-    doc = xmlParseMemory((const char *)str, xmlStrlen(str));
-    free(str);
-    return doc;
-}
-
 /* This one adds all namespaces defined in document to a cache, without anything
    associated with uri obviously.
    Unfortunately namespace:: axis implementation in libxml2 differs from what we need,
    it uses additional node type to describe namespace definition attribute while
    in msxml it's expected to be a normal attribute - as a workaround document is
    queried at libxml2 level here. */
-HRESULT cache_from_doc_ns(IXMLDOMSchemaCollection2 *iface, struct domnode *node)
+HRESULT cache_from_doc_ns(IXMLDOMSchemaCollection2 *iface, xmlnode *node)
 {
     schema_cache* This = impl_from_IXMLDOMSchemaCollection2(iface);
     static const xmlChar query[] = "//*/namespace::*";
     xmlXPathObjectPtr nodeset;
     xmlXPathContextPtr ctxt;
-    xmlNodePtr xmlnode;
-    xmlDocPtr doc;
 
     This->read_only = 1;
 
-    doc = create_xmldoc_from_domdoc(node, &xmlnode);
-    ctxt = xmlXPathNewContext(doc);
+    ctxt = xmlXPathNewContext(node->node->doc);
 
     nodeset = xmlXPathEvalExpression(query, ctxt);
     xmlXPathFreeContext(ctxt);
@@ -982,8 +1072,6 @@ HRESULT cache_from_doc_ns(IXMLDOMSchemaCollection2 *iface, struct domnode *node)
 
         xmlXPathFreeObject(nodeset);
     }
-
-    xmlFreeDoc(doc);
 
     return S_OK;
 }
@@ -1034,35 +1122,32 @@ static HRESULT WINAPI schema_cache_QueryInterface(IXMLDOMSchemaCollection2* ifac
     return S_OK;
 }
 
-static ULONG WINAPI schema_cache_AddRef(IXMLDOMSchemaCollection2 *iface)
+static ULONG WINAPI schema_cache_AddRef(IXMLDOMSchemaCollection2* iface)
 {
-    schema_cache *cache = impl_from_IXMLDOMSchemaCollection2(iface);
-    LONG refcount = InterlockedIncrement(&cache->refcount);
-
-    TRACE("%p, refcount %ld.\n", iface, refcount);
-
-    return refcount;
+    schema_cache* This = impl_from_IXMLDOMSchemaCollection2(iface);
+    LONG ref = InterlockedIncrement(&This->ref);
+    TRACE("%p, refcount %ld.\n", iface, ref);
+    return ref;
 }
 
 static ULONG WINAPI schema_cache_Release(IXMLDOMSchemaCollection2* iface)
 {
-    schema_cache *cache = impl_from_IXMLDOMSchemaCollection2(iface);
-    LONG refcount = InterlockedDecrement(&cache->refcount);
+    schema_cache* This = impl_from_IXMLDOMSchemaCollection2(iface);
+    LONG ref = InterlockedDecrement(&This->ref);
+    TRACE("%p, refcount %ld.\n", iface, ref);
 
-    TRACE("%p, refcount %ld.\n", iface, refcount);
-
-    if (!refcount)
+    if (!ref)
     {
         int i;
 
-        for (i = 0; i < cache->count; i++)
-            free(cache->uris[i]);
-        free(cache->uris);
-        xmlHashFree(cache->cache, cache_free);
-        free(cache);
+        for (i = 0; i < This->count; i++)
+            free(This->uris[i]);
+        free(This->uris);
+        xmlHashFree(This->cache, cache_free);
+        free(This);
     }
 
-    return refcount;
+    return ref;
 }
 
 static HRESULT WINAPI schema_cache_GetTypeInfoCount(IXMLDOMSchemaCollection2* iface,
@@ -1102,12 +1187,12 @@ static HRESULT WINAPI schema_cache_Invoke(IXMLDOMSchemaCollection2* iface,
 
 static HRESULT WINAPI schema_cache_add(IXMLDOMSchemaCollection2* iface, BSTR uri, VARIANT var)
 {
-    schema_cache *cache = impl_from_IXMLDOMSchemaCollection2(iface);
+    schema_cache* This = impl_from_IXMLDOMSchemaCollection2(iface);
     xmlChar* name;
 
-    TRACE("%p, %s, %s.\n", iface, debugstr_w(uri), debugstr_variant(&var));
+    TRACE("(%p)->(%s %s)\n", This, debugstr_w(uri), debugstr_variant(&var));
 
-    if (cache->read_only) return E_FAIL;
+    if (This->read_only) return E_FAIL;
 
     name = uri ? xmlchar_from_wchar(uri) : xmlchar_from_wchar(emptyW);
 
@@ -1115,13 +1200,13 @@ static HRESULT WINAPI schema_cache_add(IXMLDOMSchemaCollection2* iface, BSTR uri
     {
         case VT_NULL:
             {
-                cache_remove_entry(cache, name);
+                cache_remove_entry(This, name);
             }
             break;
 
         case VT_BSTR:
             {
-                cache_entry* entry = cache_entry_from_url(V_BSTR(&var), name, cache->version);
+                cache_entry* entry = cache_entry_from_url(var, name, This->version);
 
                 if (entry)
                 {
@@ -1133,7 +1218,7 @@ static HRESULT WINAPI schema_cache_add(IXMLDOMSchemaCollection2* iface, BSTR uri
                     return E_FAIL;
                 }
 
-                cache_add_entry(cache, name, entry);
+                cache_add_entry(This, name, entry);
             }
             break;
 
@@ -1144,9 +1229,6 @@ static HRESULT WINAPI schema_cache_add(IXMLDOMSchemaCollection2* iface, BSTR uri
                 cache_entry* entry;
                 CacheEntryType type;
                 IXMLDOMNode* domnode = NULL;
-                IXMLDOMDocument *domdoc;
-                BSTR xml;
-
                 IUnknown_QueryInterface(V_UNKNOWN(&var), &IID_IXMLDOMNode, (void**)&domnode);
 
                 if (domnode)
@@ -1154,44 +1236,50 @@ static HRESULT WINAPI schema_cache_add(IXMLDOMSchemaCollection2* iface, BSTR uri
                     DOMNodeType type;
 
                     IXMLDOMNode_get_nodeType(domnode, &type);
-                    if (type == NODE_ELEMENT || type == NODE_DOCUMENT)
+                    switch (type)
                     {
+                    case NODE_ELEMENT:
+                    {
+                        IXMLDOMDocument *domdoc;
+                        VARIANT_BOOL b;
+                        BSTR xml;
+
                         IXMLDOMNode_get_xml(domnode, &xml);
+                        dom_document_create(This->version, (void **)&domdoc);
+                        IXMLDOMDocument_loadXML(domdoc, xml, &b);
+                        SysFreeString(xml);
+                        doc = xmlNodePtr_from_domnode((IXMLDOMNode*)domdoc, XML_DOCUMENT_NODE)->doc;
+                        break;
                     }
-                    else
-                    {
-                        IXMLDOMNode_get_ownerDocument(domnode, &domdoc);
-                        IXMLDOMDocument_get_xml(domdoc, &xml);
-                        IXMLDOMDocument_Release(domdoc);
+                    default:
+                        doc = xmlNodePtr_from_domnode(domnode, XML_DOCUMENT_NODE)->doc;
+                        break;
                     }
-
-                    IXMLDOMNode_Release(domnode);
-
-                    doc = create_xmldoc_for_text(xml);
-                    SysFreeString(xml);
                 }
 
                 if (!doc)
                 {
+                    IXMLDOMNode_Release(domnode);
                     free(name);
                     return E_INVALIDARG;
                 }
-
                 type = cache_type_from_xmlDocPtr(doc);
+
                 if (type == CacheEntryType_XSD)
                 {
-                    entry = cache_entry_from_xsd_doc(doc, name, cache->version);
+                    entry = cache_entry_from_xsd_doc(doc, name, This->version);
                 }
                 else if (type == CacheEntryType_XDR)
                 {
-                    entry = cache_entry_from_xdr_doc(doc, name, cache->version);
+                    entry = cache_entry_from_xdr_doc(doc, name, This->version);
                 }
                 else
                 {
                     WARN("invalid schema!\n");
                     entry = NULL;
                 }
-                xmlFreeDoc(doc);
+
+                IXMLDOMNode_Release(domnode);
 
                 if (entry)
                 {
@@ -1203,7 +1291,7 @@ static HRESULT WINAPI schema_cache_add(IXMLDOMSchemaCollection2* iface, BSTR uri
                     return E_FAIL;
                 }
 
-                cache_add_entry(cache, name, entry);
+                cache_add_entry(This, name, entry);
             }
             break;
 
@@ -1219,15 +1307,13 @@ static HRESULT WINAPI schema_cache_add(IXMLDOMSchemaCollection2* iface, BSTR uri
 static HRESULT WINAPI schema_cache_get(IXMLDOMSchemaCollection2* iface, BSTR uri,
                                        IXMLDOMNode** node)
 {
-    schema_cache *cache = impl_from_IXMLDOMSchemaCollection2(iface);
+    schema_cache* This = impl_from_IXMLDOMSchemaCollection2(iface);
     cache_entry* entry;
     xmlChar* name;
-    HRESULT hr;
-    VARIANT v;
 
-    TRACE("%p, %s, %p.\n", iface, debugstr_w(uri), node);
+    TRACE("(%p)->(%s %p)\n", This, debugstr_w(uri), node);
 
-    if (cache->version == MSXML6)
+    if (This->version == MSXML6)
     {
         if (node) *node = NULL;
         return E_NOTIMPL;
@@ -1239,68 +1325,40 @@ static HRESULT WINAPI schema_cache_get(IXMLDOMSchemaCollection2* iface, BSTR uri
     *node = NULL;
 
     name = uri ? xmlchar_from_wchar(uri) : xmlchar_from_wchar(emptyW);
-    entry = (cache_entry *) xmlHashLookup(cache->cache, name);
+    entry = (cache_entry*) xmlHashLookup(This->cache, name);
     free(name);
 
     /* TODO: this should be read-only */
     if (entry && entry->doc)
-    {
-        ISequentialStream *stream;
-        IXMLDOMDocument *doc;
-        xmlBufferPtr buffer;
-        xmlSaveCtxtPtr save;
-        VARIANT_BOOL b;
-
-        buffer = xmlBufferCreate();
-        save = xmlSaveToBuffer(buffer, "UTF-8", 0);
-        xmlSaveDoc(save, entry->doc);
-
-        dom_document_create(cache->version, (void **)&doc);
-        if (SUCCEEDED(hr = stream_wrapper_create(xmlBufferContent(buffer), xmlBufferLength(buffer), &stream)))
-        {
-            V_VT(&v) = VT_UNKNOWN;
-            V_UNKNOWN(&v) = (IUnknown *)stream;
-            hr = IXMLDOMDocument_load(doc, v, &b);
-            ISequentialStream_Release(stream);
-        }
-
-        xmlSaveClose(save);
-        xmlBufferFree(buffer);
-
-        hr = IXMLDOMDocument_QueryInterface(doc, &IID_IXMLDOMNode, (void **)node);
-        IXMLDOMDocument_Release(doc);
-
-        return hr;
-    }
+        return get_domdoc_from_xmldoc(entry->doc, (IXMLDOMDocument3**)node);
 
     return S_OK;
 }
 
-static HRESULT WINAPI schema_cache_remove(IXMLDOMSchemaCollection2 *iface, BSTR uri)
+static HRESULT WINAPI schema_cache_remove(IXMLDOMSchemaCollection2* iface, BSTR uri)
 {
-    schema_cache *cache = impl_from_IXMLDOMSchemaCollection2(iface);
-    xmlChar *name;
+    schema_cache* This = impl_from_IXMLDOMSchemaCollection2(iface);
+    xmlChar* name;
 
-    TRACE("%p, %s.\n", iface, debugstr_w(uri));
+    TRACE("(%p)->(%s)\n", This, debugstr_w(uri));
 
-    if (cache->version == MSXML6) return E_NOTIMPL;
+    if (This->version == MSXML6) return E_NOTIMPL;
 
     name = uri ? xmlchar_from_wchar(uri) : xmlchar_from_wchar(emptyW);
-    cache_remove_entry(cache, name);
+    cache_remove_entry(This, name);
     free(name);
     return S_OK;
 }
 
-static HRESULT WINAPI schema_cache_get_length(IXMLDOMSchemaCollection2 *iface, LONG *length)
+static HRESULT WINAPI schema_cache_get_length(IXMLDOMSchemaCollection2* iface, LONG* length)
 {
-    schema_cache *cache = impl_from_IXMLDOMSchemaCollection2(iface);
-
-    TRACE("%p, %p.\n", iface, length);
+    schema_cache* This = impl_from_IXMLDOMSchemaCollection2(iface);
+    TRACE("(%p)->(%p)\n", This, length);
 
     if (!length)
         return E_POINTER;
 
-    *length = cache->count;
+    *length = This->count;
     return S_OK;
 }
 
@@ -1336,13 +1394,13 @@ static void cache_copy(void* data, void* dest, const xmlChar* name)
     }
 }
 
-static HRESULT WINAPI schema_cache_addCollection(IXMLDOMSchemaCollection2 *iface,
-        IXMLDOMSchemaCollection *collection)
+static HRESULT WINAPI schema_cache_addCollection(IXMLDOMSchemaCollection2* iface,
+                                                 IXMLDOMSchemaCollection* collection)
 {
     schema_cache* This = impl_from_IXMLDOMSchemaCollection2(iface);
     schema_cache* That;
 
-    TRACE("%p, %p.\n", iface, collection);
+    TRACE("(%p)->(%p)\n", This, collection);
 
     if (!collection)
         return E_POINTER;
@@ -1360,17 +1418,17 @@ static HRESULT WINAPI schema_cache_addCollection(IXMLDOMSchemaCollection2 *iface
     return S_OK;
 }
 
-static HRESULT WINAPI schema_cache_get__newEnum(IXMLDOMSchemaCollection2 *iface, IUnknown **enumv)
+static HRESULT WINAPI schema_cache_get__newEnum(IXMLDOMSchemaCollection2* iface, IUnknown** enumv)
 {
-    TRACE("%p, %p.\n", iface, enumv);
-
-    return create_enumvariant((IUnknown *)iface, TRUE, &schemacache_enumvariant, (IEnumVARIANT **)enumv);
+    schema_cache* This = impl_from_IXMLDOMSchemaCollection2(iface);
+    TRACE("(%p)->(%p)\n", This, enumv);
+    return create_enumvariant((IUnknown*)iface, TRUE, &schemacache_enumvariant, (IEnumVARIANT**)enumv);
 }
 
 static HRESULT WINAPI schema_cache_validate(IXMLDOMSchemaCollection2* iface)
 {
-    FIXME("%p: stub\n", iface);
-
+    schema_cache* This = impl_from_IXMLDOMSchemaCollection2(iface);
+    FIXME("(%p): stub\n", This);
     return E_NOTIMPL;
 }
 
@@ -1387,31 +1445,33 @@ static HRESULT WINAPI schema_cache_put_validateOnLoad(IXMLDOMSchemaCollection2* 
     return E_NOTIMPL;
 }
 
-static HRESULT WINAPI schema_cache_get_validateOnLoad(IXMLDOMSchemaCollection2 *iface, VARIANT_BOOL *value)
+static HRESULT WINAPI schema_cache_get_validateOnLoad(IXMLDOMSchemaCollection2* iface,
+                                                      VARIANT_BOOL* value)
 {
-    schema_cache *cache = impl_from_IXMLDOMSchemaCollection2(iface);
-
-    TRACE("%p, %p.\n", iface, value);
+    schema_cache* This = impl_from_IXMLDOMSchemaCollection2(iface);
+    TRACE("(%p)->(%p)\n", This, value);
 
     if (!value) return E_POINTER;
-    *value = cache->validateOnLoad;
+    *value = This->validateOnLoad;
 
     return S_OK;
 }
 
-static HRESULT WINAPI schema_cache_getSchema(IXMLDOMSchemaCollection2 *iface, BSTR namespaceURI, ISchema **schema)
+static HRESULT WINAPI schema_cache_getSchema(IXMLDOMSchemaCollection2* iface,
+                                             BSTR namespaceURI, ISchema** schema)
 {
-    FIXME("%p, %s, %p: stub\n", iface, debugstr_w(namespaceURI), schema);
-
+    schema_cache* This = impl_from_IXMLDOMSchemaCollection2(iface);
+    FIXME("(%p)->(%s %p): stub\n", This, debugstr_w(namespaceURI), schema);
     if (schema)
         *schema = NULL;
     return E_NOTIMPL;
 }
 
-static HRESULT WINAPI schema_cache_getDeclaration(IXMLDOMSchemaCollection2 *iface, IXMLDOMNode *node, ISchemaItem **item)
+static HRESULT WINAPI schema_cache_getDeclaration(IXMLDOMSchemaCollection2* iface,
+                                                  IXMLDOMNode* node, ISchemaItem** item)
 {
-    FIXME("%p, %p, %p: stub\n", iface, node, item);
-
+    schema_cache* This = impl_from_IXMLDOMSchemaCollection2(iface);
+    FIXME("(%p)->(%p %p): stub\n", This, node, item);
     if (item)
         *item = NULL;
     return E_NOTIMPL;
@@ -1440,15 +1500,15 @@ static const struct IXMLDOMSchemaCollection2Vtbl XMLDOMSchemaCollection2Vtbl =
     schema_cache_getDeclaration
 };
 
-static xmlSchemaElementPtr lookup_schema_elemDecl(xmlSchemaPtr schema, const xmlChar *name, const xmlChar *uri)
+static xmlSchemaElementPtr lookup_schema_elemDecl(xmlSchemaPtr schema, xmlNodePtr node)
 {
     xmlSchemaElementPtr decl = NULL;
-    xmlChar const* nsURI = uri;
+    xmlChar const* nsURI = get_node_nsURI(node);
 
-    TRACE("%p, %s, %s.\n", schema, debugstr_a((const char *)name), debugstr_a((const char *)uri));
+    TRACE("(%p, %p)\n", schema, node);
 
     if (xmlStrEqual(nsURI, schema->targetNamespace))
-        decl = xmlHashLookup(schema->elemDecl, name);
+        decl = xmlHashLookup(schema->elemDecl, node->name);
 
     if (!decl && xmlHashSize(schema->schemasImports) > 1)
     {
@@ -1466,9 +1526,9 @@ static xmlSchemaElementPtr lookup_schema_elemDecl(xmlSchemaPtr schema, const xml
     return decl;
 }
 
-static inline xmlNodePtr lookup_schema_element(xmlSchemaPtr schema, const xmlChar *name, const xmlChar *uri)
+static inline xmlNodePtr lookup_schema_element(xmlSchemaPtr schema, xmlNodePtr node)
 {
-    xmlSchemaElementPtr decl = lookup_schema_elemDecl(schema, name, uri);
+    xmlSchemaElementPtr decl = lookup_schema_elemDecl(schema, node);
     while (decl != NULL && decl->refDecl != NULL)
         decl = decl->refDecl;
     return (decl != NULL)? decl->node : NULL;
@@ -1498,30 +1558,22 @@ HRESULT SchemaCache_validate_tree(IXMLDOMSchemaCollection2* iface, xmlNodePtr tr
     return E_FAIL;
 }
 
-XDR_DT SchemaCache_get_node_dt(IXMLDOMSchemaCollection2* iface, const WCHAR *nameW, const WCHAR *uriW)
+XDR_DT SchemaCache_get_node_dt(IXMLDOMSchemaCollection2* iface, xmlNodePtr node)
 {
-    schema_cache *cache = impl_from_IXMLDOMSchemaCollection2(iface);
-    xmlSchemaPtr schema = NULL;
+    schema_cache* This = impl_from_IXMLDOMSchemaCollection2(iface);
+    xmlSchemaPtr schema = get_node_schema(This, node);
     XDR_DT dt = DT_INVALID;
-    xmlChar *uri, *name;
-    cache_entry *entry;
 
-    TRACE("%p, %s, %s.\n", cache, debugstr_w(nameW), debugstr_w(uriW));
+    TRACE("(%p, %p)\n", This, node);
 
-    uri = uriW ? xmlchar_from_wchar(uriW) : NULL;
-    name = xmlchar_from_wchar(nameW);
-
-    if ((entry = get_entry(cache, uri)))
-        schema = entry->schema;
-
-    if (uri && xmlStrEqual(uri, DT_nsURI))
+    if (node->ns && xmlStrEqual(node->ns->href, DT_nsURI))
     {
-        dt = str_to_dt(name, -1);
+        dt = str_to_dt(node->name, -1);
     }
     else if (schema)
     {
         xmlChar* str;
-        xmlNodePtr schema_node = lookup_schema_element(schema, name, uri);
+        xmlNodePtr schema_node = lookup_schema_element(schema, node);
 
         str = xmlGetNsProp(schema_node, BAD_CAST "dt", DT_nsURI);
         if (str)
@@ -1531,45 +1583,40 @@ XDR_DT SchemaCache_get_node_dt(IXMLDOMSchemaCollection2* iface, const WCHAR *nam
         }
     }
 
-    free(uri);
-    free(name);
-
     return dt;
 }
 
-static const tid_t schemacache_iface_tids[] =
-{
+static const tid_t schemacache_iface_tids[] = {
     IXMLDOMSchemaCollection2_tid,
     0
 };
 
-static dispex_static_data_t schemacache_dispex =
-{
+static dispex_static_data_t schemacache_dispex = {
     NULL,
     IXMLDOMSchemaCollection2_tid,
     NULL,
     schemacache_iface_tids
 };
 
-HRESULT SchemaCache_create(MSXML_VERSION version, void **ret)
+HRESULT SchemaCache_create(MSXML_VERSION version, void** obj)
 {
-    schema_cache *object;
-
-    TRACE("%d, %p.\n", version, ret);
-
-    if (!(object = calloc(1, sizeof(*object))))
+    schema_cache* This = malloc(sizeof(schema_cache));
+    if (!This)
         return E_OUTOFMEMORY;
 
-    object->IXMLDOMSchemaCollection2_iface.lpVtbl = &XMLDOMSchemaCollection2Vtbl;
-    object->cache = xmlHashCreate(DEFAULT_HASHTABLE_SIZE);
-    object->allocated = 10;
-    object->uris = malloc(object->allocated * sizeof(xmlChar*));
-    object->refcount = 1;
-    object->version = version;
-    object->validateOnLoad = VARIANT_TRUE;
-    init_dispex(&object->dispex, (IUnknown *)&object->IXMLDOMSchemaCollection2_iface, &schemacache_dispex);
+    TRACE("(%d %p)\n", version, obj);
 
-    *ret = &object->IXMLDOMSchemaCollection2_iface;
+    This->IXMLDOMSchemaCollection2_iface.lpVtbl = &XMLDOMSchemaCollection2Vtbl;
+    This->cache = xmlHashCreate(DEFAULT_HASHTABLE_SIZE);
+    This->allocated = 10;
+    This->count = 0;
+    This->uris = malloc(This->allocated * sizeof(xmlChar*));
+    This->ref = 1;
+    This->version = version;
+    This->validateOnLoad = VARIANT_TRUE;
+    This->read_only = 0;
+    init_dispex(&This->dispex, (IUnknown*)&This->IXMLDOMSchemaCollection2_iface, &schemacache_dispex);
 
+    *obj = &This->IXMLDOMSchemaCollection2_iface;
     return S_OK;
 }

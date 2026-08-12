@@ -1,5 +1,0 @@
-TESTDLL = windows.ui.core.textinput.dll
-IMPORTS = combase
-
-SOURCES = \
-	textinput.c

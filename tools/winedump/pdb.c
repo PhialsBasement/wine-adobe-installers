@@ -30,35 +30,27 @@
 #include "winbase.h"
 #include "winedump.h"
 
-#define NUMBER_OF(x, y) (((x) + (y) - 1) / (y))
-
 struct pdb_reader
 {
-    int fd;
     union
     {
         struct
         {
-            struct PDB_JG_HEADER        header;
+            const struct PDB_JG_HEADER* header;
             const struct PDB_JG_TOC*    toc;
             const struct PDB_JG_ROOT*   root;
         } jg;
         struct
         {
-            struct PDB_DS_HEADER        header;
+            const struct PDB_DS_HEADER* header;
             const struct PDB_DS_TOC*    toc;
             const struct PDB_DS_ROOT*   root;
         } ds;
     } u;
     void*       (*read_stream)(struct pdb_reader*, DWORD);
-    DWORD       *stream_used;
+    DWORD       stream_used[1024];
     PDB_STRING_TABLE* global_string_table;
 };
-
-static size_t pdb_read_at(int fd, void *buffer, size_t count, off_t offset)
-{
-    return lseek(fd, offset, SEEK_SET) == (off_t)-1 ? (size_t)-1 : read(fd, buffer, count);
-}
 
 static inline BOOL has_stream_been_read(struct pdb_reader* reader, unsigned stream_nr)
 {
@@ -75,23 +67,20 @@ static inline void clear_stream_been_read(struct pdb_reader* reader, unsigned st
     reader->stream_used[stream_nr / 32] &= ~(1 << (stream_nr % 32));
 }
 
-static void* pdb_jg_read(int fd, const struct PDB_JG_HEADER* pdb, const WORD* block_list, int size)
+static void* pdb_jg_read(const struct PDB_JG_HEADER* pdb, const WORD* block_list, int size)
 {
     int                 i, nBlocks;
     BYTE*               buffer;
 
     if (!size) return NULL;
 
-    nBlocks = NUMBER_OF(size, pdb->block_size);
+    nBlocks = (size + pdb->block_size - 1) / pdb->block_size;
     buffer = xmalloc(nBlocks * pdb->block_size);
 
     for (i = 0; i < nBlocks; i++)
-        if (pdb_read_at(fd, buffer + i * pdb->block_size, pdb->block_size,
-                        block_list[i] * pdb->block_size) != pdb->block_size)
-        {
-            free(buffer);
-            return NULL;
-        }
+        memcpy(buffer + i * pdb->block_size,
+               (const char*)pdb + block_list[i] * pdb->block_size, pdb->block_size);
+
     return buffer;
 }
 
@@ -108,36 +97,25 @@ static void* pdb_jg_read_stream(struct pdb_reader* reader, DWORD stream_nr)
         return NULL;
     block_list = (const WORD*) &reader->u.jg.toc->streams[reader->u.jg.toc->num_streams];
     for (i = 0; i < stream_nr; i++)
-        block_list += NUMBER_OF(reader->u.jg.toc->streams[i].size, reader->u.jg.header.block_size);
+        block_list += (reader->u.jg.toc->streams[i].size +
+                       reader->u.jg.header->block_size - 1) / reader->u.jg.header->block_size;
 
-    return pdb_jg_read(reader->fd, &reader->u.jg.header, block_list,
+    return pdb_jg_read(reader->u.jg.header, block_list,
                        reader->u.jg.toc->streams[stream_nr].size);
 }
 
-static BOOL pdb_jg_init(int fd, struct pdb_reader* reader)
+static BOOL pdb_jg_init(struct pdb_reader* reader)
 {
-    unsigned size_blocks;
-    WORD    *blocks;
-    BOOL     ret = FALSE;
-
-    if (pdb_read_at(fd, &reader->u.jg.header, sizeof(reader->u.jg.header), 0) != sizeof(reader->u.jg.header)) return FALSE;
-    reader->fd = fd;
+    reader->u.jg.header = PRD(0, sizeof(struct PDB_JG_HEADER));
+    if (!reader->u.jg.header) return FALSE;
     reader->read_stream = pdb_jg_read_stream;
-    size_blocks = NUMBER_OF(reader->u.jg.header.toc.size, reader->u.jg.header.block_size) * sizeof(blocks[0]);
-    blocks = xmalloc(size_blocks);
-    ret = pdb_read_at(fd, blocks, size_blocks, sizeof(struct PDB_JG_HEADER)) == size_blocks;
-
-    if (ret)
-        ret = (reader->u.jg.toc = pdb_jg_read(fd, &reader->u.jg.header, blocks,
-                                              reader->u.jg.header.toc.size)) != NULL;
-    free(blocks);
-    if (ret)
-        ret = (reader->stream_used = calloc(sizeof(DWORD),
-                                            NUMBER_OF(reader->u.jg.toc->num_streams, sizeof(DWORD) * 8))) != NULL;
-    if (ret)
-        ret = (reader->u.jg.root = reader->read_stream(reader, 1)) != NULL;
-
-    return ret;
+    reader->u.jg.toc = pdb_jg_read(reader->u.jg.header,
+                                   (unsigned short *)(reader->u.jg.header + 1),
+                                   reader->u.jg.header->toc.size);
+    memset(reader->stream_used, 0, sizeof(reader->stream_used));
+    reader->u.jg.root = reader->read_stream(reader, 1);
+    if (!reader->u.jg.root) return FALSE;
+    return TRUE;
 }
 
 static DWORD    pdb_get_num_streams(const struct pdb_reader* reader)
@@ -178,7 +156,6 @@ static void pdb_exit(struct pdb_reader* reader)
         }
     }
     free(reader->global_string_table);
-    free(reader->stream_used);
     if (reader->read_stream == pdb_jg_read_stream)
     {
         free((char*)reader->u.jg.root);
@@ -427,14 +404,17 @@ static void dump_public_symbol(struct pdb_reader* reader, unsigned stream)
     free(hdr);
 }
 
-static void pdb_dump_dbi_module(struct pdb_reader* reader, const PDB_SYMBOL_FILE_EX* sym_file,
-                                const char* file_name, const char* lib_name, unsigned index)
+static const void* pdb_dump_dbi_module(struct pdb_reader* reader, const PDB_SYMBOL_FILE_EX* sym_file,
+                                       const char* file_name)
 {
-    BOOL new_format = file_name == sym_file->filename;
+    const char* lib_name;
     unsigned char* modimage;
+    BOOL new_format = !file_name;
 
-    printf("\t--------compilation unit #%u-----------\n", index);
+    if (new_format) file_name = sym_file->filename;
+    printf("\t--------symbol file-----------\n");
     printf("\tName: %s\n", file_name);
+    lib_name = file_name + strlen(file_name) + 1;
     if (strcmp(file_name, lib_name)) printf("\tLibrary: %s\n", lib_name);
     printf("\t\tunknown1:   %08x\n"
            "\t\trange\n"
@@ -460,7 +440,7 @@ static void pdb_dump_dbi_module(struct pdb_reader* reader, const PDB_SYMBOL_FILE
                "\t\t\tunknown:         %08x\n",
                sym_file->range.timestamp,
                sym_file->range.unknown);
-    printf("\t\tflag:       %04x (%x%s%s)\n"
+    printf("\t\tflag:       %04x\n"
            "\t\tstream:     %04x\n"
            "\t\tsymb size:  %08x\n"
            "\t\tline size:  %08x\n"
@@ -468,9 +448,6 @@ static void pdb_dump_dbi_module(struct pdb_reader* reader, const PDB_SYMBOL_FILE
            "\t\tnSrcFiles:  %08x\n"
            "\t\tattribute:  %08x\n",
            sym_file->flag,
-           HIBYTE(sym_file->flag),
-           sym_file->flag & 0x01 ? ";Dirty" : "",
-           sym_file->flag & 0x02 ? ";EC" : "",
            sym_file->stream,
            sym_file->symbol_size,
            sym_file->lineno_size,
@@ -488,7 +465,6 @@ static void pdb_dump_dbi_module(struct pdb_reader* reader, const PDB_SYMBOL_FILE
     {
         int total_size = pdb_get_stream_size(reader, sym_file->stream);
 
-        /* first (skipped) DWORD is always 4... */
         if (sym_file->symbol_size)
             codeview_dump_symbols((const char*)modimage, sizeof(DWORD), sym_file->symbol_size);
 
@@ -504,6 +480,7 @@ static void pdb_dump_dbi_module(struct pdb_reader* reader, const PDB_SYMBOL_FILE
                       total_size - (sym_file->symbol_size + sym_file->lineno_size + sym_file->lineno2_size), "    ");
         free(modimage);
     }
+    return (const void*)((DWORD_PTR)(lib_name + strlen(lib_name) + 1 + 3) & ~3);
 }
 
 static void pdb_dump_symbols(struct pdb_reader* reader)
@@ -514,7 +491,6 @@ static void pdb_dump_symbols(struct pdb_reader* reader)
     char                tcver[32];
     const unsigned short* sub_streams = NULL;
     unsigned            num_sub_streams = 0;
-    const char*         section_filter;
 
     symbols = reader->read_stream(reader, 3);
     if (!symbols) return;
@@ -603,9 +579,10 @@ static void pdb_dump_symbols(struct pdb_reader* reader)
                        (symbols->sectcontrib_size - sizeof(unsigned)) / size,
                        size,
                        (symbols->sectcontrib_size - sizeof(unsigned)) % size);
-            for (src += sizeof(unsigned); src + size <= last; src += size)
+            src += sizeof(unsigned);
+            while (src + size <= last)
             {
-                range = (const PDB_SYMBOL_RANGE_EX*)src;
+                range = (const PDB_SYMBOL_RANGE_EX*)(src + sizeof(unsigned));
                 printf("\tRange #%tu\n",
                        ((const BYTE*)range - ((const BYTE*)symbols + sizeof(PDB_SYMBOLS) + symbols->module_size)) / size);
                 printf("\t\tsegment:         %04x\n"
@@ -630,6 +607,7 @@ static void pdb_dump_symbols(struct pdb_reader* reader)
                        range->unknown);
                 if (version == 0xeffe0000 + 20140516)
                     printf("\t\tcoff_section:    %08x\n", *(unsigned*)(range + 1));
+                src += size;
             }
         }
     }
@@ -637,8 +615,7 @@ static void pdb_dump_symbols(struct pdb_reader* reader)
     if (symbols->srcmodule_size && globals_dump_sect("DBI"))
     {
         const PDB_SYMBOL_SOURCE*src;
-        unsigned int            i, j, cfile;
-        unsigned int            num_source_files;
+        int                     i, j, cfile;
         const WORD*             indx;
         const DWORD*            offset;
         const char*             start_cstr;
@@ -664,23 +641,15 @@ static void pdb_dump_symbols(struct pdb_reader* reader)
          *    0-terminated string (depending on version)
          */
         indx = &src->table[src->nModules];
-        /* the file format limits the number of source files to 64K... so always
-         * recompute the number of source files and use that result instead of nSrcFiles
-         */
-        num_source_files = 0;
-        for (i = 0; i < src->nModules; i++)
-            num_source_files += indx[i];
-        if (num_source_files != src->nSrcFiles)
-            printf("\t\tnSrcFiles:        %u (overriden by computed value)\n", num_source_files);
         offset = (const DWORD*)&src->table[2 * src->nModules];
-        cstr = (const char*)&src->table[2 * (src->nModules + num_source_files)];
+        cstr = (const char*)&src->table[2 * (src->nModules + src->nSrcFiles)];
         start_cstr = cstr;
 
         for (i = cfile = 0; i < src->nModules; i++)
         {
             printf("\t\tModule[%2d]:\n", i);
             cfile = src->table[i];
-            for (j = cfile; j < num_source_files && j < cfile + indx[i]; j++)
+            for (j = cfile; j < src->nSrcFiles && j < cfile + indx[i]; j++)
             {
                 /* FIXME: in some cases, it's a p_string but WHEN ? */
                 if (cstr + offset[j] >= start_cstr /* wrap around */ &&
@@ -707,14 +676,14 @@ static void pdb_dump_symbols(struct pdb_reader* reader)
         while (imp < (const PDB_SYMBOL_IMPORT*)last)
         {
             ptr = (const char*)imp + sizeof(*imp) + strlen(imp->filename);
-            printf("\tImport: %x\n"
+            printf("\tImport: %lx\n"
                    "\t\tUnknown1:      %08x\n"
                    "\t\tUnknown2:      %08x\n"
                    "\t\tTimeDateStamp: %08x\n"
                    "\t\tAge:           %08u\n"
                    "\t\tfile1:         %s\n"
                    "\t\tfile2:         %s\n",
-                   (int)((const char*)imp - first),
+                   (ULONG_PTR)((const char*)imp - first),
                    imp->unknown1,
                    imp->unknown2,
                    imp->TimeDateStamp,
@@ -784,35 +753,24 @@ static void pdb_dump_symbols(struct pdb_reader* reader)
 
     /* Read global symbol table */
     modimage = reader->read_stream(reader, symbols->gsym_stream);
-    if (modimage)
+    if (modimage && globals_dump_sect("DBI"))
     {
-        unsigned from = 0, to = pdb_get_stream_size(reader, symbols->gsym_stream);
-
-        if (globals_dump_sect_with_range("DBI", &from, &to))
-        {
-            printf("\t------------globals-------------\n");
-            codeview_dump_symbols(modimage, from, to);
-            free(modimage);
-        }
+        printf("\t------------globals-------------\n");
+        codeview_dump_symbols(modimage, 0, pdb_get_stream_size(reader, symbols->gsym_stream));
+        free(modimage);
     }
 
     /* Read per-module symbol / linenumber tables */
-    section_filter = NULL;
-    if (symbols->module_size && globals_dump_sect_with_option("DBI", "compiland", &section_filter))
+    if (symbols->module_size && globals_dump_sect("DBI"))
     {
         SIZE_T module_header_size = symbols->version < 19970000 ? sizeof(PDB_SYMBOL_FILE) : sizeof(PDB_SYMBOL_FILE_EX);
-        unsigned compiland_index = 0;
 
         file = (const char*)symbols + sizeof(PDB_SYMBOLS);
         while (file + module_header_size <= (const char*)symbols + sizeof(PDB_SYMBOLS) + symbols->module_size)
         {
-            PDB_SYMBOL_FILE_EX copy;
-            const PDB_SYMBOL_FILE_EX *sym_file_ex;
-            const char *file_name;
-            const char *lib_name;
-
             if (symbols->version < 19970000)
             {
+                PDB_SYMBOL_FILE_EX copy;
                 const PDB_SYMBOL_FILE* sym_file = (const PDB_SYMBOL_FILE*)file;
 
                 copy.unknown1 = sym_file->unknown1;
@@ -834,19 +792,10 @@ static void pdb_dump_symbols(struct pdb_reader* reader)
                 copy.attribute = sym_file->attribute;
                 copy.reserved[0] = 0;
                 copy.reserved[1] = 0;
-                file_name = sym_file->filename;
-                sym_file_ex = &copy;
+                file = pdb_dump_dbi_module(reader, &copy, sym_file->filename);
             }
             else
-            {
-                sym_file_ex = (const void*)file;
-                file_name = sym_file_ex->filename;
-            }
-            lib_name = file_name + strlen(file_name) + 1;
-            if (!section_filter || strstr(file_name, section_filter) != NULL)
-                pdb_dump_dbi_module(reader, sym_file_ex, file_name, lib_name, compiland_index);
-            compiland_index++;
-            file = (const void*)((DWORD_PTR)(lib_name + strlen(lib_name) + 1 + 3) & ~3);
+                file = pdb_dump_dbi_module(reader, (const PDB_SYMBOL_FILE_EX*)file, NULL);
         }
     }
     dump_global_symbol(reader, symbols->global_hash_stream);
@@ -964,7 +913,7 @@ static void pdb_dump_types_hash(struct pdb_reader* reader, const PDB_TYPES* type
     }
     printf("\n\tIndexes => offsets:\n");
     table = (const unsigned*)((const BYTE*)hash + types->search_offset);
-    for (i = 0; i < types->search_size / (2 * sizeof(unsigned)); i++)
+    for (i = 0; i < types->search_size / (2 * sizeof(unsigned)); i += 2)
     {
         printf("\t\t%08x => %08x\n", table[2 * i + 0], table[2 * i + 1]);
     }
@@ -1021,10 +970,8 @@ static void pdb_dump_types(struct pdb_reader* reader, unsigned strmidx, const ch
 {
     PDB_TYPES*  types = NULL;
     BOOL used = has_stream_been_read(reader, strmidx);
-    unsigned from = 0x1000, to = ~0u;
 
-    if (!globals_dump_sect_with_range(strmidx == 2 ? "TPI" : "IPI", &from, &to)) return;
-
+    if (!globals_dump_sect(strmidx == 2 ? "TPI" : "IPI")) return;
     if (pdb_get_stream_size(reader, strmidx) < sizeof(*types))
     {
         if (strmidx == 2)
@@ -1084,7 +1031,7 @@ static void pdb_dump_types(struct pdb_reader* reader, unsigned strmidx, const ch
            types->search_size,
            types->type_remap_offset,
            types->type_remap_size);
-    codeview_dump_types_from_block((const char*)types + types->type_offset, types->type_size, from, to);
+    codeview_dump_types_from_block((const char*)types + types->type_offset, types->type_size);
     pdb_dump_types_hash(reader, types, strmname);
     free(types);
 }
@@ -1185,11 +1132,11 @@ static void pdb_jg_dump_header_root(struct pdb_reader* reader)
            "\tblock_size:        %08x\n"
            "\tfree_list_block:   %04x\n"
            "\ttotal_alloc:       %04x\n",
-           (int)sizeof(pdb2) - 1, reader->u.jg.header.ident,
-           reader->u.jg.header.signature,
-           reader->u.jg.header.block_size,
-           reader->u.jg.header.free_list_block,
-           reader->u.jg.header.total_alloc);
+           (int)sizeof(pdb2) - 1, reader->u.jg.header->ident,
+           reader->u.jg.header->signature,
+           reader->u.jg.header->block_size,
+           reader->u.jg.header->free_list_block,
+           reader->u.jg.header->total_alloc);
 
     printf("Root:\n"
            "\tVersion:       %u\n"
@@ -1241,23 +1188,19 @@ static void pdb_jg_dump_header_root(struct pdb_reader* reader)
     }
 }
 
-static void* pdb_ds_read(int fd, const struct PDB_DS_HEADER* header, const UINT *block_list, unsigned int size)
+static void* pdb_ds_read(const struct PDB_DS_HEADER* header, const UINT *block_list, int size)
 {
-    unsigned int        i, nBlocks;
+    int                 i, nBlocks;
     BYTE*               buffer;
 
     if (!size) return NULL;
 
-    nBlocks = NUMBER_OF(size, header->block_size);
+    nBlocks = (size + header->block_size - 1) / header->block_size;
     buffer = xmalloc(nBlocks * header->block_size);
 
     for (i = 0; i < nBlocks; i++)
-        if (pdb_read_at(fd, buffer + i * header->block_size, header->block_size,
-                        (size_t)block_list[i] * header->block_size) != header->block_size)
-        {
-            free(buffer);
-            return NULL;
-        }
+        memcpy(buffer + i * header->block_size,
+               (const char*)header + block_list[i] * header->block_size, header->block_size);
 
     return buffer;
 }
@@ -1275,35 +1218,24 @@ static void* pdb_ds_read_stream(struct pdb_reader* reader, DWORD stream_number)
         return NULL;
     block_list = reader->u.ds.toc->stream_size + reader->u.ds.toc->num_streams;
     for (i = 0; i < stream_number; i++)
-        block_list += NUMBER_OF(reader->u.ds.toc->stream_size[i], reader->u.ds.header.block_size);
+        block_list += (reader->u.ds.toc->stream_size[i] + reader->u.ds.header->block_size - 1) /
+            reader->u.ds.header->block_size;
 
-    return pdb_ds_read(reader->fd, &reader->u.ds.header, block_list, reader->u.ds.toc->stream_size[stream_number]);
+    return pdb_ds_read(reader->u.ds.header, block_list, reader->u.ds.toc->stream_size[stream_number]);
 }
 
-static BOOL pdb_ds_init(int fd, struct pdb_reader* reader)
+static BOOL pdb_ds_init(struct pdb_reader* reader)
 {
-    unsigned  size_blocks;
-    unsigned *blocks;
-    BOOL      ret;
-
-    if (pdb_read_at(fd, &reader->u.ds.header, sizeof(reader->u.ds.header), 0) != sizeof(reader->u.ds.header)) return FALSE;
-    reader->fd = fd;
+    reader->u.ds.header = PRD(0, sizeof(*reader->u.ds.header));
+    if (!reader->u.ds.header) return FALSE;
     reader->read_stream = pdb_ds_read_stream;
-    size_blocks = NUMBER_OF(reader->u.ds.header.toc_size, reader->u.ds.header.block_size) * sizeof(blocks[0]);
-    blocks = xmalloc(size_blocks);
-    ret = pdb_read_at(fd, blocks, size_blocks,
-                      (size_t)reader->u.ds.header.toc_block * reader->u.ds.header.block_size) == size_blocks;
-    if (ret)
-        ret = (reader->u.ds.toc = pdb_ds_read(reader->fd, &reader->u.ds.header,
-                                              blocks, reader->u.ds.header.toc_size)) != NULL;
-    free(blocks);
-    if (ret)
-        ret = (reader->stream_used = calloc(sizeof(DWORD),
-                                            NUMBER_OF(reader->u.ds.toc->num_streams, sizeof(DWORD) * 8))) != NULL;
-    if (ret)
-        ret = (reader->u.ds.root = reader->read_stream(reader, 1)) != NULL;
-
-    return ret;
+    reader->u.ds.toc = pdb_ds_read(reader->u.ds.header,
+                                   (const UINT *)((const char*)reader->u.ds.header + reader->u.ds.header->toc_block * reader->u.ds.header->block_size),
+                                   reader->u.ds.header->toc_size);
+    memset(reader->stream_used, 0, sizeof(reader->stream_used));
+    reader->u.ds.root = reader->read_stream(reader, 1);
+    if (!reader->u.ds.root) return FALSE;
+    return TRUE;
 }
 
 static const char       pdb7[] = "Microsoft C/C++ MSF 7.00";
@@ -1326,19 +1258,19 @@ static void pdb_ds_dump_header_root(struct pdb_reader* reader)
            "\ttoc_size:         %08x\n"
            "\tunknown2:         %08x\n"
            "\ttoc_block:        %08x\n",
-           (int)sizeof(pdb7) - 1, reader->u.ds.header.signature,
-           reader->u.ds.header.block_size,
-           reader->u.ds.header.free_list_block,
-           reader->u.ds.header.num_blocks,
-           reader->u.ds.header.toc_size,
-           reader->u.ds.header.unknown2,
-           reader->u.ds.header.toc_block);
+           (int)sizeof(pdb7) - 1, reader->u.ds.header->signature,
+           reader->u.ds.header->block_size,
+           reader->u.ds.header->free_list_block,
+           reader->u.ds.header->num_blocks,
+           reader->u.ds.header->toc_size,
+           reader->u.ds.header->unknown2,
+           reader->u.ds.header->toc_block);
 
     block_list = reader->u.ds.toc->stream_size + reader->u.ds.toc->num_streams;
     printf("\t\tnum_streams:    %u\n", reader->u.ds.toc->num_streams);
     for (ofs = i = 0; i < reader->u.ds.toc->num_streams; i++)
     {
-        unsigned int nblk = NUMBER_OF(reader->u.ds.toc->stream_size[i], reader->u.ds.header.block_size);
+        unsigned int nblk = (reader->u.ds.toc->stream_size[i] + reader->u.ds.header->block_size - 1) / reader->u.ds.header->block_size;
         printf("\t\tstream[%#x]:\tsize: %u\n", i, reader->u.ds.toc->stream_size[i]);
         if (nblk)
         {
@@ -1416,46 +1348,46 @@ static void pdb_ds_dump_header_root(struct pdb_reader* reader)
     }
 }
 
-enum FileSig get_kind_pdb(int fd)
+enum FileSig get_kind_pdb(void)
 {
-    char tmp[max(sizeof(pdb7), sizeof(pdb2)) - 1];
+    const char* head;
 
-    if (read(fd, tmp, sizeof(tmp)) == sizeof(tmp) &&
-        (!memcmp(tmp, pdb2, sizeof(pdb2) - 1) ||
-         !memcmp(tmp, pdb7, sizeof(pdb7) - 1)))
+    head = PRD(0, sizeof(pdb2) - 1);
+    if (head && !memcmp(head, pdb2, sizeof(pdb2) - 1))
+        return SIG_PDB;
+    head = PRD(0, sizeof(pdb7) - 1);
+    if (head && !memcmp(head, pdb7, sizeof(pdb7) - 1))
         return SIG_PDB;
     return SIG_UNKNOWN;
 }
 
-void pdb_dump(int fd)
+void pdb_dump(void)
 {
-    char tmp[max(sizeof(pdb2), sizeof(pdb7)) - 1];
+    const BYTE* head;
     const char** saved_dumpsect = globals.dumpsect;
     static const char* default_dumpsect[] = {"DBI", "TPI", "IPI", NULL};
     struct pdb_reader reader;
 
     if (!globals.dumpsect) globals.dumpsect = default_dumpsect;
 
-    if (read(fd, tmp, sizeof(tmp)) == sizeof(tmp))
+    if ((head = PRD(0, sizeof(pdb2) - 1)) && !memcmp(head, pdb2, sizeof(pdb2) - 1))
     {
-        if (!memcmp(tmp, pdb2, sizeof(pdb2) - 1))
+        if (!pdb_jg_init(&reader))
         {
-            if (!pdb_jg_init(fd, &reader))
-            {
-                printf("Unable to get header information\n");
-                return;
-            }
-            pdb_jg_dump_header_root(&reader);
+            printf("Unable to get header information\n");
+            return;
         }
-        else if (!memcmp(tmp, pdb7, sizeof(pdb7) - 1))
+
+        pdb_jg_dump_header_root(&reader);
+    }
+    else if ((head = PRD(0, sizeof(pdb7) - 1)) && !memcmp(head, pdb7, sizeof(pdb7) - 1))
+    {
+        if (!pdb_ds_init(&reader))
         {
-            if (!pdb_ds_init(fd, &reader))
-            {
-                printf("Unable to get header information\n");
-                return;
-            }
-            pdb_ds_dump_header_root(&reader);
+            printf("Unable to get header information\n");
+            return;
         }
+        pdb_ds_dump_header_root(&reader);
     }
     mark_stream_been_read(&reader, 0); /* mark stream #0 (old TOC) as read */
 

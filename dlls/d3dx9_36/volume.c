@@ -201,12 +201,7 @@ HRESULT WINAPI D3DXLoadVolumeFromFileInMemory(IDirect3DVolume9 *dst_volume, cons
     if (FAILED(hr))
         return D3DXERR_INVALIDDATA;
 
-    if (!d3dximage_info_from_d3dx_image(&image_info, &image))
-    {
-        hr = D3DXERR_INVALIDDATA;
-        goto exit;
-    }
-
+    d3dximage_info_from_d3dx_image(&image_info, &image);
     if (src_box)
     {
         if (src_box->Right > image_info.Width
@@ -289,11 +284,13 @@ HRESULT WINAPI D3DXSaveVolumeToFileInMemory(ID3DXBuffer **dst_buffer, D3DXIMAGE_
         IDirect3DVolume9 *src_volume, const PALETTEENTRY *src_palette, const D3DBOX *src_box)
 {
     const struct pixel_format_desc *src_fmt_desc;
+    RECT src_rect_aligned, src_rect_unaligned;
+    D3DBOX src_box_aligned, src_box_tmp;
+    enum d3dx_pixel_format_id dst_fmt;
     struct d3dx_pixels src_pixels;
     D3DLOCKED_BOX locked_box;
     ID3DXBuffer *buffer;
     D3DVOLUME_DESC desc;
-    D3DBOX src_box_tmp;
     HRESULT hr;
 
     TRACE("dst_buffer %p, file_format %#x, src_volume %p, src_palette %p, src_box %p.\n",
@@ -309,7 +306,7 @@ HRESULT WINAPI D3DXSaveVolumeToFileInMemory(ID3DXBuffer **dst_buffer, D3DXIMAGE_
         case D3DXIFF_PFM:
         case D3DXIFF_PPM:
             FIXME("File format %s is not supported yet.\n",
-                    debug_d3dx_image_file_format(d3dx_image_file_format_from_d3dximage_fileformat(file_format)));
+                    debug_d3dx_image_file_format((enum d3dx_image_file_format)file_format));
             return E_NOTIMPL;
 
         default:
@@ -343,25 +340,35 @@ HRESULT WINAPI D3DXSaveVolumeToFileInMemory(ID3DXBuffer **dst_buffer, D3DXIMAGE_
         }
     }
 
-    hr = IDirect3DVolume9_LockBox(src_volume, &locked_box, NULL, D3DLOCK_READONLY);
+    hr = d3dx_get_save_pixel_format_from_image_file_format(src_fmt_desc, file_format, &dst_fmt);
     if (FAILED(hr))
         return hr;
 
-    hr = d3dx_pixels_init(locked_box.pBits, locked_box.RowPitch, locked_box.SlicePitch, src_palette,
-            src_fmt_desc->format, src_box->Left, src_box->Top, src_box->Right, src_box->Bottom, src_box->Front,
-            src_box->Back, &src_pixels);
+    get_aligned_rect(src_box->Left, src_box->Top, src_box->Right, src_box->Bottom, desc.Width, desc.Height,
+        src_fmt_desc, &src_rect_aligned);
+    set_d3dbox(&src_box_aligned, src_rect_aligned.left, src_rect_aligned.top, src_rect_aligned.right,
+            src_rect_aligned.bottom, src_box->Front, src_box->Back);
+
+    hr = IDirect3DVolume9_LockBox(src_volume, &locked_box, &src_box_aligned, 0);
+    if (FAILED(hr))
+        return hr;
+
+    SetRect(&src_rect_unaligned, src_box->Left, src_box->Top, src_box->Right, src_box->Bottom);
+    OffsetRect(&src_rect_unaligned, -src_rect_aligned.left, -src_rect_aligned.top);
+    set_d3dx_pixels(&src_pixels, locked_box.pBits, locked_box.RowPitch, locked_box.SlicePitch, src_palette,
+            (src_box_aligned.Right - src_box_aligned.Left), (src_box_aligned.Bottom - src_box_aligned.Top),
+            (src_box_aligned.Back - src_box_aligned.Front), &src_rect_unaligned);
+
+    hr = d3dx_save_pixels_to_memory(&src_pixels, src_fmt_desc, (enum d3dx_image_file_format)file_format, dst_fmt, &buffer);
     if (FAILED(hr))
     {
         IDirect3DVolume9_UnlockBox(src_volume);
         return hr;
     }
 
-    hr = d3dx9_save_pixels_to_memory(&src_pixels, src_fmt_desc, file_format, &buffer);
     IDirect3DVolume9_UnlockBox(src_volume);
-    if (SUCCEEDED(hr))
-        *dst_buffer = buffer;
-
-    return hr;
+    *dst_buffer = buffer;
+    return D3D_OK;
 }
 
 HRESULT WINAPI D3DXSaveVolumeToFileA(const char *dst_filename, D3DXIMAGE_FILEFORMAT file_format,
@@ -369,10 +376,10 @@ HRESULT WINAPI D3DXSaveVolumeToFileA(const char *dst_filename, D3DXIMAGE_FILEFOR
 {
     ID3DXBuffer *buffer;
     WCHAR *filename;
+    int32_t len;
     HRESULT hr;
-    int len;
 
-    TRACE("dst_filename %s, file_format %#x, src_volume %p, src_palette %p, src_box %p.\n",
+    TRACE("(%s, %#x, %p, %p, %p): relay\n",
             wine_dbgstr_a(dst_filename), file_format, src_volume, src_palette, src_box);
 
     if (!dst_filename)
@@ -401,8 +408,8 @@ HRESULT WINAPI D3DXSaveVolumeToFileW(const WCHAR *dst_filename, D3DXIMAGE_FILEFO
     ID3DXBuffer *buffer;
     HRESULT hr;
 
-    TRACE("dst_filename %s, file_format %#x, src_volume %p, src_palette %p, src_box %p.\n",
-            wine_dbgstr_w(dst_filename), file_format, src_volume, src_palette, src_box);
+    TRACE("(%s, %#x, %p, %p, %p): relay\n",
+        wine_dbgstr_w(dst_filename), file_format, src_volume, src_palette, src_box);
 
     if (!dst_filename)
         return D3DERR_INVALIDCALL;

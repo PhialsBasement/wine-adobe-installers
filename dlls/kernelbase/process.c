@@ -22,15 +22,18 @@
 #include <string.h>
 
 #include "ntstatus.h"
+#define WIN32_NO_STATUS
 #include "windef.h"
 #include "winbase.h"
 #include "winnls.h"
+#include "winver.h"
 #include "wincontypes.h"
 #include "winternl.h"
 
 #include "kernelbase.h"
 #include "wine/debug.h"
 #include "wine/condrv.h"
+#include "wine/heap.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(process);
 
@@ -63,7 +66,6 @@ static BOOL find_exe_file( const WCHAR *name, WCHAR *buffer, DWORD buflen )
         HANDLE handle = CreateFileW( buffer, GENERIC_READ, FILE_SHARE_READ|FILE_SHARE_DELETE,
                                      NULL, OPEN_EXISTING, 0, 0 );
         if ((ret = (handle != INVALID_HANDLE_VALUE))) CloseHandle( handle );
-        else SetLastError( ERROR_FILE_NOT_FOUND );
     }
     RtlReleasePath( load_path );
     return ret;
@@ -87,8 +89,6 @@ static WCHAR *get_file_name( WCHAR *cmdline, WCHAR *buffer, DWORD buflen )
     if (cmdline[0] == '"' && (p = wcschr( cmdline + 1, '"' )))
     {
         int len = p - cmdline - 1;
-        /* trim spaces in quotes */
-        while (len && cmdline[len] == L' ') len--;
         /* extract the quoted portion as file name */
         if (!(name = RtlAllocateHeap( GetProcessHeap(), 0, (len + 1) * sizeof(WCHAR) ))) return NULL;
         memcpy( name, cmdline + 1, len * sizeof(WCHAR) );
@@ -116,12 +116,15 @@ static WCHAR *get_file_name( WCHAR *cmdline, WCHAR *buffer, DWORD buflen )
             ret = cmdline;
             break;
         }
-        if (GetLastError() != ERROR_FILE_NOT_FOUND) break;
         if (!first_space) first_space = pos;
         if (!(*pos++ = *p++)) break;
     }
 
-    if (ret && first_space)  /* build a new command-line with quotes */
+    if (!ret)
+    {
+        SetLastError( ERROR_FILE_NOT_FOUND );
+    }
+    else if (first_space)  /* build a new command-line with quotes */
     {
         if (!(ret = HeapAlloc( GetProcessHeap(), 0, (lstrlenW(cmdline) + 3) * sizeof(WCHAR) )))
             goto done;
@@ -501,6 +504,171 @@ done:
     return ret;
 }
 
+static char *get_product_name( const WCHAR *app_name )
+{
+    WCHAR full_path[MAX_PATH];
+    char *product_name, *ret;
+    DWORD *translation;
+    char buf[100];
+    void *block;
+    UINT size;
+
+    if (!GetLongPathNameW( app_name, full_path, MAX_PATH )) lstrcpynW( full_path, app_name, MAX_PATH );
+    if (!GetFullPathNameW( full_path, MAX_PATH, full_path, NULL )) lstrcpynW( full_path, app_name, MAX_PATH );
+
+    size = GetFileVersionInfoSizeExW(0, full_path, NULL);
+    if (!size)
+        return NULL;
+
+    block = HeapAlloc( GetProcessHeap(), 0, size );
+
+    if (!GetFileVersionInfoExW(0, full_path, 0, size, block))
+    {
+        HeapFree( GetProcessHeap(), 0, block );
+        return NULL;
+    }
+
+    if (!VerQueryValueA(block, "\\VarFileInfo\\Translation", (void **) &translation, &size) || size != 4)
+    {
+        HeapFree( GetProcessHeap(), 0, block );
+        return NULL;
+    }
+
+    sprintf(buf, "\\StringFileInfo\\%08lx\\ProductName", MAKELONG(HIWORD(*translation), LOWORD(*translation)));
+
+    if (!VerQueryValueA(block, buf, (void **) &product_name, &size))
+    {
+        HeapFree( GetProcessHeap(), 0, block );
+        return NULL;
+    }
+
+
+    ret = HeapAlloc( GetProcessHeap(), 0, strlen( product_name ) + 1 );
+    strcpy( ret, product_name );
+    HeapFree( GetProcessHeap(), 0, block );
+    return ret;
+}
+
+static int battleye_launcher_redirect_hack( const WCHAR *app_name, WCHAR *new_name, DWORD new_name_len,
+                                            WCHAR **orig_app_name, const char *product_name )
+{
+    static const WCHAR belauncherW[] = L"c:\\windows\\system32\\belauncher.exe";
+    unsigned int len;
+
+    if (GetEnvironmentVariableW(L"PROTON_ORIG_LAUNCHER_NAME", NULL, 0))
+    {
+        /* run from builtin belauncher. */
+        return 0;
+    }
+
+    /* We detect the BattlEye launcher executable through the product name property, as the executable name varies */
+    if (!product_name || strcmp( product_name, "BattlEye Launcher" ))
+        return 0;
+
+    TRACE( "Detected launch of a BattlEye Launcher, redirecting to Proton version.\n" );
+
+    if (new_name_len < wcslen( belauncherW ) + 1)
+    {
+        ERR( "Game executable path doesn't fit in buffer.\n" );
+        return 0;
+    }
+
+    len = (wcslen( app_name ) + 1) * sizeof(*app_name);
+    if (!(*orig_app_name = HeapAlloc( GetProcessHeap(), 0, len )))
+    {
+        ERR( "No memory.\n" );
+        return 0;
+    }
+    memcpy( *orig_app_name, app_name, len );
+    wcscpy( new_name, belauncherW );
+    return 1;
+}
+
+static const WCHAR *hack_append_command_line( const WCHAR *cmd )
+{
+    static const struct
+    {
+        const WCHAR *exe_name;
+        const WCHAR *append;
+        const char *steamgameid;
+    }
+    options[] =
+    {
+        {L"Click&Fight.exe", L" --disable_direct_composition=1"},
+        {L"Willful.exe", L" --disable_direct_composition=1"},
+        {L"Banyu Lintar Angin - Little Storm -.exe", L" --disable_direct_composition=1"},
+        {L"Super\\Super.exe", L" --disable_direct_composition=1"},
+        {L"A Raven Monologue.exe", L" --use-angle=d3d9"},
+        {L"antenna\\antenna.exe", L" --use-angle=d3d9"},
+        {L"Bloody Walls\\game.exe", L" --disable_direct_composition=1"},
+        {L"Insanitys Blade\\nw.exe", L" --use-gl=swiftshader"},
+        {L"Warhammer2.exe", L" --in-process-gpu"},
+        {L"SummerIslands.exe", L" --in-process-gpu"},
+        {L"Paradox Launcher.exe", L" --use-angle=gl"},
+        {L"Montaro\\nw.exe", L" --use-gl=swiftshader"},
+        {L"Aisling and the Tavern of Elves\\nw.exe", L" --use-gl=swiftshader"},
+        {L"Snares of Ruin 2\\SoR2.exe", L" --use-gl=swiftshader"},
+        {L"OlympiaRising.exe", L" --use-gl=swiftshader"},
+        {L"nw.exe.exe", L" --use-angle=d3d9"},
+        {L"DC Universe Online\\LaunchPad.exe", L" --use-gl=swiftshader"},
+        {L"PlanetSide 2\\LaunchPad.exe", L" --use-gl=swiftshader"},
+        {L"PaladinLias\\Game.exe", L" --use-gl=desktop"},
+        {L"EverQuest 2\\LaunchPad.exe", L" --use-gl=swiftshader"},
+        {L"Everquest F2P\\LaunchPad.exe", L" --use-gl=swiftshader"},
+        {L"Red Tie Runner.exe", L" --use-angle=gl"},
+        {L"UnrealCEFSubProcess.exe", L" --use-gl=swiftshader", "2316580"},
+        {L"UnrealCEFSubProcess.exe", L" --use-angle=d3d9", "2684500"},
+    };
+    unsigned int i;
+    char sgi[64];
+
+    if (!cmd) return NULL;
+
+    for (i = 0; i < ARRAY_SIZE(options); ++i)
+    {
+        if (wcsstr( cmd, options[i].exe_name ))
+        {
+            if (options[i].steamgameid && !(GetEnvironmentVariableA( "SteamGameId", sgi, sizeof(sgi) )
+                && !strcmp( sgi, options[i].steamgameid )))
+                continue;
+            FIXME( "HACK: appending %s to command line.\n", debugstr_w(options[i].append) );
+            return options[i].append;
+        }
+    }
+    return NULL;
+}
+
+static void sync_env_var_to_unix( WCHAR *env, const char *name )
+{
+    UNICODE_STRING us_name, us_value;
+    WCHAR valuew[256];
+    WCHAR namew[64];
+    char value[256];
+    NTSTATUS status;
+    int len;
+
+    MultiByteToWideChar( CP_ACP, 0, name, -1, namew, ARRAY_SIZE(namew) );
+    RtlInitUnicodeString( &us_name, namew );
+    us_value.Length = 0;
+    us_value.MaximumLength = sizeof(valuew) - sizeof(WCHAR);
+    us_value.Buffer = valuew;
+
+    status = RtlQueryEnvironmentVariable_U( env, &us_name, &us_value );
+    if (status && status != STATUS_VARIABLE_NOT_FOUND)
+    {
+        ERR( "status %#lx.\n", status );
+        return;
+    }
+    if (!status)
+    {
+        len = us_value.Length / sizeof(WCHAR);
+        valuew[len] = 0;
+        WideCharToMultiByte( CP_ACP, 0, valuew, len + 1, value, sizeof(value), NULL, NULL );
+        __wine_set_unix_env( name, value );
+        TRACE( "set %s to %s.\n", debugstr_a(name), debugstr_a(value) );
+    } else __wine_set_unix_env( name, NULL );
+}
+
 /**********************************************************************
  *           CreateProcessInternalW   (kernelbase.@)
  */
@@ -513,17 +681,19 @@ BOOL WINAPI DECLSPEC_HOTPATCH CreateProcessInternalW( HANDLE token, const WCHAR 
 {
     const struct proc_thread_attr *handle_list = NULL, *job_list = NULL;
     WCHAR name[MAX_PATH];
-    WCHAR *p, *tidy_cmdline = cmd_line;
+    WCHAR *p, *tidy_cmdline = cmd_line, *orig_app_name = NULL;
     RTL_USER_PROCESS_PARAMETERS *params = NULL;
-    RTL_USER_PROCESS_INFORMATION rtl_info = { 0 };
+    RTL_USER_PROCESS_INFORMATION rtl_info;
     HANDLE parent = 0, debug = 0;
+    char *product_name = NULL;
+    const WCHAR *append;
     ULONG nt_flags = 0;
     USHORT machine = 0;
     NTSTATUS status;
 
     /* Process the AppName and/or CmdLine to get module name and path */
 
-    TRACE( "app %s cmdline %s\n", debugstr_w(app_name), debugstr_w(cmd_line) );
+    TRACE( "app %s cmdline %s, inherit %d, flags %#lx, env %p (%s)\n", debugstr_w(app_name), debugstr_w(cmd_line), inherit, flags, env, debugstr_w(env) );
 
     if (new_token) FIXME( "No support for returning created process token\n" );
 
@@ -535,12 +705,45 @@ BOOL WINAPI DECLSPEC_HOTPATCH CreateProcessInternalW( HANDLE token, const WCHAR 
                 return FALSE;
             swprintf( tidy_cmdline, lstrlenW(app_name) + 3, L"\"%s\"", app_name );
         }
+        else if ((append = hack_append_command_line( app_name )))
+        {
+            tidy_cmdline = RtlAllocateHeap( GetProcessHeap(), 0,
+                                            sizeof(WCHAR) * (lstrlenW(cmd_line) + lstrlenW(append) + 1) );
+            lstrcpyW(tidy_cmdline, cmd_line);
+            lstrcatW(tidy_cmdline, append);
+        }
     }
     else
     {
-        if (!(tidy_cmdline = get_file_name( cmd_line, name, ARRAY_SIZE(name) ))) return FALSE;
+        WCHAR *cmdline_new = NULL;
+
+        if ((append = hack_append_command_line( cmd_line )))
+        {
+            cmdline_new = RtlAllocateHeap( GetProcessHeap(), 0, sizeof(WCHAR)
+                                           * (lstrlenW(cmd_line) + lstrlenW(append) + 1) );
+            lstrcpyW(cmdline_new, cmd_line);
+            lstrcatW(cmdline_new, append);
+        }
+
+        tidy_cmdline = get_file_name( cmdline_new ? cmdline_new : cmd_line, name, ARRAY_SIZE(name) );
+
+        if (!tidy_cmdline)
+        {
+            HeapFree( GetProcessHeap(), 0, cmdline_new );
+            return FALSE;
+        }
+
+        if (cmdline_new)
+        {
+            if (cmdline_new == tidy_cmdline) cmd_line = NULL;
+            else HeapFree( GetProcessHeap(), 0, cmdline_new );
+        }
         app_name = name;
     }
+
+    product_name = get_product_name( app_name );
+    if (battleye_launcher_redirect_hack( app_name, name, ARRAY_SIZE(name), &orig_app_name, product_name ))
+        app_name = name;
 
     /* Warn if unsupported features are used */
 
@@ -563,8 +766,51 @@ BOOL WINAPI DECLSPEC_HOTPATCH CreateProcessInternalW( HANDLE token, const WCHAR 
 
     if (!(params = create_process_params( app_name, tidy_cmdline, cur_dir, env, flags, startup_info )))
     {
+        HeapFree( GetProcessHeap(), 0, orig_app_name );
         status = STATUS_NO_MEMORY;
         goto done;
+    }
+
+    /* Set PROTON_EAC_LAUNCHER_PROCESS when launching the EAC launcher to let ntdll know to load the native EAC client library.
+      - We don't do this check in ntdll itself because it's harder to get the product name there
+      - we don't overwrite WINEDLLOVERRIDES because it's fetched from the unix environment */
+    {
+        UNICODE_STRING name, value;
+
+        WCHAR *new_env = RtlAllocateHeap( GetProcessHeap(), 0, params->EnvironmentSize );
+        memcpy(new_env, params->Environment, params->EnvironmentSize);
+
+        RtlDestroyProcessParameters( params );
+
+        if (product_name && !strcmp( product_name, "Easy Anti-Cheat Bootstrapper (EOS)" ))
+        {
+            /* EOS EAC bootstrapper will start the game process directly without using WINAPI, so env vars set on the
+             * PE side will be lost. Preserve some critical ones. */
+            sync_env_var_to_unix( new_env, "UPLAY_ARGUMENTS" );
+            sync_env_var_to_unix( new_env, "UPC_GAME_STARTER_RUNNING" );
+        }
+
+        RtlInitUnicodeString( &name, L"PROTON_EAC_LAUNCHER_PROCESS" );
+        RtlInitUnicodeString( &value, L"1" );
+        RtlSetEnvironmentVariable( &new_env, &name,
+                                   product_name && !strcmp( product_name, "EasyAntiCheat Launcher" ) ? &value : NULL );
+
+        if (orig_app_name)
+        {
+            RtlInitUnicodeString( &name, L"PROTON_ORIG_LAUNCHER_NAME" );
+            RtlInitUnicodeString( &value, orig_app_name );
+            RtlSetEnvironmentVariable( &new_env, &name, &value );
+        }
+
+        HeapFree( GetProcessHeap(), 0, orig_app_name );
+        params = create_process_params( app_name, tidy_cmdline, cur_dir, new_env, flags | CREATE_UNICODE_ENVIRONMENT, startup_info );
+
+        RtlFreeHeap(GetProcessHeap(), 0, new_env);
+        if (!params)
+        {
+            status = STATUS_NO_MEMORY;
+            goto done;
+        }
     }
 
     if (flags & (DEBUG_PROCESS | DEBUG_ONLY_THIS_PROCESS))
@@ -607,17 +853,6 @@ BOOL WINAPI DECLSPEC_HOTPATCH CreateProcessInternalW( HANDLE token, const WCHAR 
                             TRACE( "PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE %p reference %p\n",
                                    console, console->reference );
                             params->ConsoleHandle = console->reference;
-                            if (!(flags & DETACHED_PROCESS))
-                            {
-                                params->ConsoleFlags |= 2;
-                                /* don't inherit standard handles bound to parent console (but inherit the others) */
-                                if (!(startup_info->dwFlags & STARTF_USESTDHANDLES))
-                                {
-                                    if (is_console_handle(params->hStdInput))  params->hStdInput = NULL;
-                                    if (is_console_handle(params->hStdOutput)) params->hStdOutput = NULL;
-                                    if (is_console_handle(params->hStdError))  params->hStdError = NULL;
-                                }
-                            }
                             break;
                         }
                     case PROC_THREAD_ATTRIBUTE_JOB_LIST:
@@ -686,6 +921,7 @@ BOOL WINAPI DECLSPEC_HOTPATCH CreateProcessInternalW( HANDLE token, const WCHAR 
  done:
     RtlDestroyProcessParameters( params );
     if (tidy_cmdline != cmd_line) HeapFree( GetProcessHeap(), 0, tidy_cmdline );
+    HeapFree( GetProcessHeap(), 0, product_name );
     return set_ntstatus( status );
 }
 
@@ -827,49 +1063,17 @@ BOOL WINAPI DECLSPEC_HOTPATCH GetHandleInformation( HANDLE handle, DWORD *flags 
 
 
 /***********************************************************************
- *           GetMachineTypeAttributes   (kernelbase.@)
- */
-HRESULT WINAPI GetMachineTypeAttributes( USHORT machine, MACHINE_ATTRIBUTES *attr )
-{
-    SYSTEM_SUPPORTED_PROCESSOR_ARCHITECTURES_INFORMATION machines[8];
-    HANDLE process = NULL;
-    NTSTATUS status;
-
-    status = NtQuerySystemInformationEx( SystemSupportedProcessorArchitectures2, &process, sizeof(process),
-                                         machines, sizeof(machines), NULL );
-    if (status) return HRESULT_FROM_NT(status);
-
-    *attr = 0;
-
-    for (unsigned int i = 0; machines[i].Machine; i++)
-    {
-        if (machines[i].Machine == machine)
-        {
-            if (machines[i].KernelMode)
-                *attr |= KernelEnabled;
-            if (machines[i].UserMode)
-                *attr |= UserEnabled;
-            if (machines[i].WoW64Container)
-                *attr |= Wow64Container;
-        }
-    }
-
-    return S_OK;
-}
-
-
-/***********************************************************************
  *           GetPriorityClass   (kernelbase.@)
  */
 DWORD WINAPI DECLSPEC_HOTPATCH GetPriorityClass( HANDLE process )
 {
-    PROCESS_PRIORITY_CLASS priority;
+    PROCESS_BASIC_INFORMATION pbi;
 
-    if (!set_ntstatus( NtQueryInformationProcess( process, ProcessPriorityClass,
-                                                  &priority, sizeof(priority), NULL )))
+    if (!set_ntstatus( NtQueryInformationProcess( process, ProcessBasicInformation,
+                                                  &pbi, sizeof(pbi), NULL )))
         return 0;
 
-    switch (priority.PriorityClass)
+    switch (pbi.BasePriority)
     {
     case PROCESS_PRIOCLASS_IDLE: return IDLE_PRIORITY_CLASS;
     case PROCESS_PRIOCLASS_BELOW_NORMAL: return BELOW_NORMAL_PRIORITY_CLASS;
@@ -942,7 +1146,9 @@ BOOL WINAPI /* DECLSPEC_HOTPATCH */ GetProcessMitigationPolicy( HANDLE process, 
  */
 BOOL WINAPI DECLSPEC_HOTPATCH GetProcessPriorityBoost( HANDLE process, PBOOL disable )
 {
-    return set_ntstatus( NtQueryInformationProcess( process, ProcessPriorityBoost, disable, sizeof(*disable), NULL ));
+    FIXME( "(%p,%p): semi-stub\n", process, disable );
+    *disable = FALSE;  /* report that no boost is present */
+    return TRUE;
 }
 
 
@@ -1090,7 +1296,7 @@ BOOL WINAPI GetProcessInformation( HANDLE process, PROCESS_INFORMATION_CLASS inf
                 return FALSE;
             }
 
-            status = NtQuerySystemInformationEx( SystemSupportedProcessorArchitectures2, &process, sizeof(process),
+            status = NtQuerySystemInformationEx( SystemSupportedProcessorArchitectures, &process, sizeof(process),
                     machines, sizeof(machines), NULL );
             if (status) return set_ntstatus( status );
 
@@ -1133,7 +1339,27 @@ HANDLE WINAPI DECLSPEC_HOTPATCH OpenProcess( DWORD access, BOOL inherit, DWORD i
 
     if (GetVersion() & 0x80000000) access = PROCESS_ALL_ACCESS;
 
-    InitializeObjectAttributes( &attr, NULL, inherit ? OBJ_INHERIT : 0, 0, NULL );
+    attr.Length = sizeof(OBJECT_ATTRIBUTES);
+    attr.RootDirectory = 0;
+    attr.Attributes = inherit ? OBJ_INHERIT : 0;
+    attr.ObjectName = NULL;
+    attr.SecurityDescriptor = NULL;
+    attr.SecurityQualityOfService = NULL;
+
+    /* PROTON HACK:
+     * On Windows, the Steam client puts its process ID into the registry
+     * at:
+     *
+     *   [HKCU\Software\Valve\Steam\ActiveProcess]
+     *   PID=dword:00000008
+     *
+     * Games get that pid from the registry and then query it with
+     * OpenProcess to ensure Steam is running. Since we aren't running the
+     * Windows Steam in Wine, instead we hack this magic number into the
+     * registry and then substitute the game's process itself in its place
+     * so it can query a valid process.
+     */
+    if (id == 0xfffe) id = GetCurrentProcessId();
 
     cid.UniqueProcess = ULongToHandle(id);
     cid.UniqueThread  = 0;
@@ -1286,7 +1512,8 @@ BOOL WINAPI /* DECLSPEC_HOTPATCH */ SetProcessMitigationPolicy( PROCESS_MITIGATI
  */
 BOOL WINAPI /* DECLSPEC_HOTPATCH */ SetProcessPriorityBoost( HANDLE process, BOOL disable )
 {
-    return set_ntstatus( NtSetInformationProcess( process, ProcessPriorityBoost, &disable, sizeof(disable) ));
+    FIXME( "(%p,%d): stub\n", process, disable );
+    return TRUE;
 }
 
 
@@ -1315,7 +1542,7 @@ BOOL WINAPI DECLSPEC_HOTPATCH SetProcessWorkingSetSizeEx( HANDLE process, SIZE_T
 /******************************************************************************
  *           TerminateProcess   (kernelbase.@)
  */
-BOOL WINAPI DECLSPEC_HOTPATCH TerminateProcess( HANDLE handle, UINT exit_code )
+BOOL WINAPI DECLSPEC_HOTPATCH TerminateProcess( HANDLE handle, DWORD exit_code )
 {
     if (!handle)
     {
@@ -1565,6 +1792,59 @@ LPSTR WINAPI DECLSPEC_HOTPATCH GetEnvironmentStringsA(void)
     return ret;
 }
 
+static void hack_shrink_environment( WCHAR *env, SIZE_T len )
+{
+    static int enabled = -1;
+    static const char *skip[] =
+    {
+        "SteamGenericControllers=",
+        "STEAM_RUNTIME_LIBRARY_PATH=",
+        "SDL_GAMECONTROLLER_IGNORE_DEVICES=",
+        "SDL_GAMECONTROLLERCONFIG=",
+        "LD_LIBRARY_PATH=",
+        "ORIG_LD_LIBRARY_PATH=",
+        "LS_COLORS=",
+        "BASH_FUNC_",
+        "XDG_DATA_DIRS=",
+    };
+    SIZE_T l;
+    unsigned int i, j;
+
+    if (enabled == -1)
+    {
+        WCHAR str[40];
+
+        *str = 0;
+        if (GetEnvironmentVariableW( L"WINE_SHRINK_ENV", str, sizeof(str)) )
+            enabled = *str != '0';
+        else if (GetEnvironmentVariableW( L"SteamGameId", str, sizeof(str)) )
+            enabled = !wcscmp( str, L"431590" );
+        else
+            enabled = 0;
+
+        if (enabled)
+            ERR( "HACK: shrinking environment size.\n" );
+    }
+
+    if (!enabled) return;
+
+    while (*env)
+    {
+        for (i = 0; i < ARRAY_SIZE(skip); ++i)
+        {
+            j = 0;
+            while (skip[i][j] && skip[i][j] == env[j])
+                ++j;
+            if (!skip[i][j]) break;
+        }
+        l = lstrlenW( env );
+        len -= (l + 1) * sizeof(WCHAR);
+        if (i == ARRAY_SIZE(skip))
+            env += l + 1;
+        else
+            memmove( env, env + l + 1, len );
+    }
+}
 
 /***********************************************************************
  *           GetEnvironmentStringsW   (kernelbase.@)
@@ -1577,7 +1857,10 @@ LPWSTR WINAPI DECLSPEC_HOTPATCH GetEnvironmentStringsW(void)
     RtlAcquirePebLock();
     len = get_env_length( NtCurrentTeb()->Peb->ProcessParameters->Environment ) * sizeof(WCHAR);
     if ((ret = HeapAlloc( GetProcessHeap(), 0, len )))
+    {
         memcpy( ret, NtCurrentTeb()->Peb->ProcessParameters->Environment, len );
+        hack_shrink_environment( ret, len );
+    }
     RtlReleasePebLock();
     return ret;
 }
@@ -1839,9 +2122,6 @@ static inline DWORD validate_proc_thread_attribute( DWORD_PTR attr, SIZE_T size 
         break;
     case PROC_THREAD_ATTRIBUTE_MACHINE_TYPE:
         if (size != sizeof(USHORT)) return ERROR_BAD_LENGTH;
-        break;
-    case PROC_THREAD_ATTRIBUTE_GROUP_AFFINITY:
-        if (size != sizeof(GROUP_AFFINITY)) return ERROR_BAD_LENGTH;
         break;
     default:
         FIXME( "Unhandled attribute %Iu\n", attr & PROC_THREAD_ATTRIBUTE_NUMBER );

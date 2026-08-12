@@ -1,5 +1,5 @@
 MODULE    = xtajit64.dll
-IMPORTS   = ntdll
+IMPORTS   = ntdll winecrt0
 EXTRADEFS = -D_CRTIMP=
 
 EXTRADLLFLAGS = -nodefaultlibs

@@ -682,8 +682,8 @@
 @ cdecl -arch=win64 ?__ExceptionPtrDestroy@@YAXPEAX@Z(ptr) msvcr120.?__ExceptionPtrDestroy@@YAXPEAX@Z
 @ cdecl -arch=win32 ?__ExceptionPtrRethrow@@YAXPBX@Z(ptr) msvcr120.?__ExceptionPtrRethrow@@YAXPBX@Z
 @ cdecl -arch=win64 ?__ExceptionPtrRethrow@@YAXPEBX@Z(ptr) msvcr120.?__ExceptionPtrRethrow@@YAXPEBX@Z
-@ cdecl -arch=win32 ?__ExceptionPtrSwap@@YAXPAX0@Z(ptr ptr) msvcr120.?__ExceptionPtrSwap@@YAXPAX0@Z
-@ cdecl -arch=win64 ?__ExceptionPtrSwap@@YAXPEAX0@Z(ptr ptr) msvcr120.?__ExceptionPtrSwap@@YAXPEAX0@Z
+@ stub -arch=win32 ?__ExceptionPtrSwap@@YAXPAX0@Z
+@ stub -arch=win64 ?__ExceptionPtrSwap@@YAXPEAX0@Z
 @ cdecl -arch=win32 ?__ExceptionPtrToBool@@YA_NPBX@Z(ptr) msvcr120.?__ExceptionPtrToBool@@YA_NPBX@Z
 @ cdecl -arch=win64 ?__ExceptionPtrToBool@@YA_NPEBX@Z(ptr) msvcr120.?__ExceptionPtrToBool@@YA_NPEBX@Z
 @ cdecl __uncaught_exception() msvcr120.__uncaught_exception
@@ -820,12 +820,12 @@
 @ cdecl -arch=i386 _CIsqrt() msvcr120._CIsqrt
 @ cdecl -arch=i386 _CItan() msvcr120._CItan
 @ cdecl -arch=i386 _CItanh() msvcr120._CItanh
-@ cdecl -norelay _Cbuild(double double) msvcr120._Cbuild
+@ cdecl _Cbuild(ptr double double) msvcr120._Cbuild
 @ cdecl _CreateFrameInfo(ptr ptr) msvcr120._CreateFrameInfo
 @ stdcall _CxxThrowException(ptr ptr) msvcr120._CxxThrowException
 @ cdecl -arch=i386 -norelay _EH_prolog() msvcr120._EH_prolog
 @ stub -arch=arm _FPE_Raise
-@ cdecl -norelay _FCbuild(float float) msvcr120._FCbuild
+@ stub _FCbuild
 @ cdecl _FindAndUnlinkFrame(ptr) msvcr120._FindAndUnlinkFrame
 @ stub -arch=win64 _GetImageBase
 @ stub -arch=win64 _GetThrowImageBase
@@ -1545,7 +1545,7 @@
 @ cdecl _vswprintf_p(ptr long wstr ptr) msvcr120._vswprintf_p
 @ cdecl _vswprintf_p_l(ptr long wstr ptr ptr) msvcr120._vswprintf_p_l
 @ cdecl _vswprintf_s_l(ptr long wstr ptr ptr) msvcr120._vswprintf_s_l
-@ cdecl _vwprintf_l(wstr ptr ptr) msvcr120._vwprintf_l
+@ stub _vwprintf_l
 @ stub _vwprintf_p
 @ stub _vwprintf_p_l
 @ stub _vwprintf_s_l
@@ -1586,7 +1586,7 @@
 @ cdecl _wcstof_l(wstr ptr ptr) msvcr120._wcstof_l
 @ cdecl -ret64 _wcstoi64(wstr ptr long) msvcr120._wcstoi64
 @ cdecl -ret64 _wcstoi64_l(wstr ptr long ptr) msvcr120._wcstoi64_l
-@ cdecl -ret64 _wcstoimax_l(wstr ptr long ptr) msvcr120._wcstoimax_l
+@ stub _wcstoimax_l
 @ cdecl _wcstol_l(wstr ptr long ptr) msvcr120._wcstol_l
 @ cdecl _wcstold_l(wstr ptr ptr) msvcr120._wcstold_l
 @ cdecl -ret64 _wcstoll_l(wstr ptr long ptr) msvcr120._wcstoll_l
@@ -1596,7 +1596,7 @@
 @ cdecl -ret64 _wcstoui64_l(wstr ptr long ptr) msvcr120._wcstoui64_l
 @ cdecl _wcstoul_l(wstr ptr long ptr) msvcr120._wcstoul_l
 @ cdecl -ret64 _wcstoull_l(wstr ptr long ptr) msvcr120._wcstoull_l
-@ cdecl -ret64 _wcstoumax_l(wstr ptr long ptr) msvcr120._wcstoumax_l
+@ stub _wcstoumax_l
 @ cdecl _wcsupr(wstr) msvcr120._wcsupr
 @ cdecl _wcsupr_l(wstr ptr) msvcr120._wcsupr_l
 @ cdecl _wcsupr_s(wstr long) msvcr120._wcsupr_s
@@ -1633,7 +1633,7 @@
 @ varargs _wopen(wstr long) msvcr120._wopen
 @ cdecl _wperror(wstr) msvcr120._wperror
 @ extern _wpgmptr msvcr120._wpgmptr
-@ varargs _wprintf_l(wstr ptr) msvcr120._wprintf_l
+@ stub _wprintf_l
 @ stub _wprintf_p
 @ stub _wprintf_p_l
 @ stub _wprintf_s_l
@@ -1714,8 +1714,8 @@
 @ stub cacoshl
 @ stub cacosl
 @ cdecl calloc(long long) msvcr120.calloc
-@ cdecl carg(int128) msvcr120.carg
-@ cdecl cargf(int64) msvcr120.cargf
+@ stub carg
+@ stub cargf
 @ stub cargl
 @ stub casin
 @ stub casinf
@@ -1740,11 +1740,11 @@
 @ stub ccosl
 @ cdecl ceil(double) msvcr120.ceil
 @ cdecl -arch=!i386 ceilf(float) msvcr120.ceilf
-@ cdecl -norelay cexp(int128) msvcr120.cexp
+@ stub cexp
 @ stub cexpf
 @ stub cexpl
-@ cdecl cimag(int128) msvcr120.cimag
-@ cdecl cimagf(int64) msvcr120.cimagf
+@ stub cimag
+@ stub cimagf
 @ stub cimagl
 @ cdecl clearerr(ptr) msvcr120.clearerr
 @ cdecl clearerr_s(ptr) msvcr120.clearerr_s
@@ -1772,7 +1772,7 @@
 @ stub cprojf
 @ stub cprojl
 @ cdecl creal(int128) msvcr120.creal
-@ cdecl crealf(int64) msvcr120.crealf
+@ stub crealf
 @ stub creall
 @ stub csin
 @ stub csinf
@@ -1877,7 +1877,7 @@
 @ cdecl ilogbf(float) msvcr120.ilogbf
 @ cdecl ilogbl(double) msvcr120.ilogbl
 @ cdecl -ret64 imaxabs(int64) msvcr120.imaxabs
-@ cdecl -norelay imaxdiv(int64 int64) msvcr120.imaxdiv
+@ stub imaxdiv
 @ cdecl isalnum(long) msvcr120.isalnum
 @ cdecl isalpha(long) msvcr120.isalpha
 @ cdecl isblank(long) msvcr120.isblank
@@ -2135,7 +2135,7 @@
 @ cdecl wcsstr(wstr wstr) msvcr120.wcsstr
 @ cdecl wcstod(wstr ptr) msvcr120.wcstod
 @ cdecl wcstof(ptr ptr) msvcr120.wcstof
-@ cdecl -ret64 wcstoimax(wstr ptr long) msvcr120.wcstoimax
+@ stub wcstoimax
 @ cdecl wcstok(wstr wstr) msvcr120.wcstok
 @ cdecl wcstok_s(ptr wstr ptr) msvcr120.wcstok_s
 @ cdecl wcstol(wstr ptr long) msvcr120.wcstol
@@ -2145,7 +2145,7 @@
 @ cdecl wcstombs_s(ptr ptr long wstr long) msvcr120.wcstombs_s
 @ cdecl wcstoul(wstr ptr long) msvcr120.wcstoul
 @ cdecl -ret64 wcstoull(wstr ptr long) msvcr120.wcstoull
-@ cdecl -ret64 wcstoumax(wstr ptr long) msvcr120.wcstoumax
+@ stub wcstoumax
 @ cdecl wcsxfrm(ptr wstr long) msvcr120.wcsxfrm
 @ cdecl wctob(long) msvcr120.wctob
 @ cdecl wctomb(ptr long) msvcr120.wctomb

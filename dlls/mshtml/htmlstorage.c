@@ -1273,8 +1273,36 @@ static HRESULT HTMLStorage_get_prop_desc(DispatchEx *dispex, DISPID id, struct p
     desc->name = This->props[id - MSHTML_DISPID_CUSTOM_MIN];
     desc->id = id;
     desc->flags = PROPF_WRITABLE | PROPF_CONFIGURABLE | PROPF_ENUMERABLE;
-    desc->iid = 0;
+    desc->prototype_id = 0;
     return S_OK;
+}
+
+static HRESULT HTMLStorage_override(DispatchEx *dispex, const WCHAR *name, VARIANT *get_value)
+{
+    HTMLStorage *This = impl_from_DispatchEx(dispex);
+    BSTR bstrName;
+    HRESULT hres;
+
+    if(!(bstrName = SysAllocString(name)))
+        return E_OUTOFMEMORY;
+
+    if(get_value) {
+        hres = HTMLStorage_getItem(&This->IHTMLStorage_iface, bstrName, get_value);
+        if(SUCCEEDED(hres))
+            hres = (V_VT(get_value) != VT_NULL) ? S_OK : S_FALSE;
+    }else {
+        hres = HTMLStorage_removeItem(&This->IHTMLStorage_iface, bstrName);
+        if(SUCCEEDED(hres))
+            hres = S_OK;
+    }
+
+    SysFreeString(bstrName);
+    return hres;
+}
+
+static HRESULT HTMLStorage_fill_props(DispatchEx *dispex)
+{
+    return S_FALSE;
 }
 
 static const dispex_static_data_vtbl_t Storage_dispex_vtbl = {
@@ -1287,6 +1315,8 @@ static const dispex_static_data_vtbl_t Storage_dispex_vtbl = {
     .delete           = HTMLStorage_delete,
     .next_dispid      = HTMLStorage_next_dispid,
     .get_prop_desc    = HTMLStorage_get_prop_desc,
+    .override         = HTMLStorage_override,
+    .fill_props       = HTMLStorage_fill_props,
 };
 
 static const tid_t HTMLStorage_iface_tids[] = {
@@ -1294,11 +1324,11 @@ static const tid_t HTMLStorage_iface_tids[] = {
     0
 };
 dispex_static_data_t Storage_dispex = {
-    .id         = OBJID_Storage,
+    .id         = PROT_Storage,
     .vtbl       = &Storage_dispex_vtbl,
     .disp_tid   = IHTMLStorage_tid,
     .iface_tids = HTMLStorage_iface_tids,
-    .js_flags   = HOSTOBJ_VOLATILE_FILL | HOSTOBJ_VOLATILE_PROPS,
+    .js_flags   = HOSTOBJ_VOLATILE_PROPS
 };
 
 static HRESULT build_session_origin(IUri *uri, BSTR hostname, BSTR *ret)

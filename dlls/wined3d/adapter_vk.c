@@ -44,6 +44,56 @@ static const struct wined3d_state_entry_template misc_state_template_vk[] =
     {STATE_DEPTH_BOUNDS,                                  {STATE_DEPTH_BOUNDS,                                  state_nop}},
     {STATE_RASTERIZER,                                    {STATE_RASTERIZER,                                    state_nop}},
     {STATE_SCISSORRECT,                                   {STATE_SCISSORRECT,                                   state_nop}},
+
+    {STATE_TEXTURESTAGE(0, WINED3D_TSS_BUMPENV_MAT00),    {STATE_TEXTURESTAGE(0, WINED3D_TSS_BUMPENV_MAT00),    state_nop}},
+    {STATE_TEXTURESTAGE(0, WINED3D_TSS_BUMPENV_MAT01),    {STATE_TEXTURESTAGE(0, WINED3D_TSS_BUMPENV_MAT00)}},
+    {STATE_TEXTURESTAGE(0, WINED3D_TSS_BUMPENV_MAT10),    {STATE_TEXTURESTAGE(0, WINED3D_TSS_BUMPENV_MAT00)}},
+    {STATE_TEXTURESTAGE(0, WINED3D_TSS_BUMPENV_MAT11),    {STATE_TEXTURESTAGE(0, WINED3D_TSS_BUMPENV_MAT00)}},
+    {STATE_TEXTURESTAGE(1, WINED3D_TSS_BUMPENV_MAT00),    {STATE_TEXTURESTAGE(1, WINED3D_TSS_BUMPENV_MAT00),    state_nop}},
+    {STATE_TEXTURESTAGE(1, WINED3D_TSS_BUMPENV_MAT01),    {STATE_TEXTURESTAGE(1, WINED3D_TSS_BUMPENV_MAT00)}},
+    {STATE_TEXTURESTAGE(1, WINED3D_TSS_BUMPENV_MAT10),    {STATE_TEXTURESTAGE(1, WINED3D_TSS_BUMPENV_MAT00)}},
+    {STATE_TEXTURESTAGE(1, WINED3D_TSS_BUMPENV_MAT11),    {STATE_TEXTURESTAGE(1, WINED3D_TSS_BUMPENV_MAT00)}},
+    {STATE_TEXTURESTAGE(2, WINED3D_TSS_BUMPENV_MAT00),    {STATE_TEXTURESTAGE(2, WINED3D_TSS_BUMPENV_MAT00),    state_nop}},
+    {STATE_TEXTURESTAGE(2, WINED3D_TSS_BUMPENV_MAT01),    {STATE_TEXTURESTAGE(2, WINED3D_TSS_BUMPENV_MAT00)}},
+    {STATE_TEXTURESTAGE(2, WINED3D_TSS_BUMPENV_MAT10),    {STATE_TEXTURESTAGE(2, WINED3D_TSS_BUMPENV_MAT00)}},
+    {STATE_TEXTURESTAGE(2, WINED3D_TSS_BUMPENV_MAT11),    {STATE_TEXTURESTAGE(2, WINED3D_TSS_BUMPENV_MAT00)}},
+    {STATE_TEXTURESTAGE(3, WINED3D_TSS_BUMPENV_MAT00),    {STATE_TEXTURESTAGE(3, WINED3D_TSS_BUMPENV_MAT00),    state_nop}},
+    {STATE_TEXTURESTAGE(3, WINED3D_TSS_BUMPENV_MAT01),    {STATE_TEXTURESTAGE(3, WINED3D_TSS_BUMPENV_MAT00)}},
+    {STATE_TEXTURESTAGE(3, WINED3D_TSS_BUMPENV_MAT10),    {STATE_TEXTURESTAGE(3, WINED3D_TSS_BUMPENV_MAT00)}},
+    {STATE_TEXTURESTAGE(3, WINED3D_TSS_BUMPENV_MAT11),    {STATE_TEXTURESTAGE(3, WINED3D_TSS_BUMPENV_MAT00)}},
+    {STATE_TEXTURESTAGE(4, WINED3D_TSS_BUMPENV_MAT00),    {STATE_TEXTURESTAGE(4, WINED3D_TSS_BUMPENV_MAT00),    state_nop}},
+    {STATE_TEXTURESTAGE(4, WINED3D_TSS_BUMPENV_MAT01),    {STATE_TEXTURESTAGE(4, WINED3D_TSS_BUMPENV_MAT00)}},
+    {STATE_TEXTURESTAGE(4, WINED3D_TSS_BUMPENV_MAT10),    {STATE_TEXTURESTAGE(4, WINED3D_TSS_BUMPENV_MAT00)}},
+    {STATE_TEXTURESTAGE(4, WINED3D_TSS_BUMPENV_MAT11),    {STATE_TEXTURESTAGE(4, WINED3D_TSS_BUMPENV_MAT00)}},
+    {STATE_TEXTURESTAGE(5, WINED3D_TSS_BUMPENV_MAT00),    {STATE_TEXTURESTAGE(5, WINED3D_TSS_BUMPENV_MAT00),    state_nop}},
+    {STATE_TEXTURESTAGE(5, WINED3D_TSS_BUMPENV_MAT01),    {STATE_TEXTURESTAGE(5, WINED3D_TSS_BUMPENV_MAT00)}},
+    {STATE_TEXTURESTAGE(5, WINED3D_TSS_BUMPENV_MAT10),    {STATE_TEXTURESTAGE(5, WINED3D_TSS_BUMPENV_MAT00)}},
+    {STATE_TEXTURESTAGE(5, WINED3D_TSS_BUMPENV_MAT11),    {STATE_TEXTURESTAGE(5, WINED3D_TSS_BUMPENV_MAT00)}},
+    {STATE_TEXTURESTAGE(6, WINED3D_TSS_BUMPENV_MAT00),    {STATE_TEXTURESTAGE(6, WINED3D_TSS_BUMPENV_MAT00),    state_nop}},
+    {STATE_TEXTURESTAGE(6, WINED3D_TSS_BUMPENV_MAT01),    {STATE_TEXTURESTAGE(6, WINED3D_TSS_BUMPENV_MAT00)}},
+    {STATE_TEXTURESTAGE(6, WINED3D_TSS_BUMPENV_MAT10),    {STATE_TEXTURESTAGE(6, WINED3D_TSS_BUMPENV_MAT00)}},
+    {STATE_TEXTURESTAGE(6, WINED3D_TSS_BUMPENV_MAT11),    {STATE_TEXTURESTAGE(6, WINED3D_TSS_BUMPENV_MAT00)}},
+    {STATE_TEXTURESTAGE(7, WINED3D_TSS_BUMPENV_MAT00),    {STATE_TEXTURESTAGE(7, WINED3D_TSS_BUMPENV_MAT00),    state_nop}},
+    {STATE_TEXTURESTAGE(7, WINED3D_TSS_BUMPENV_MAT01),    {STATE_TEXTURESTAGE(7, WINED3D_TSS_BUMPENV_MAT00)}},
+    {STATE_TEXTURESTAGE(7, WINED3D_TSS_BUMPENV_MAT10),    {STATE_TEXTURESTAGE(7, WINED3D_TSS_BUMPENV_MAT00)}},
+    {STATE_TEXTURESTAGE(7, WINED3D_TSS_BUMPENV_MAT11),    {STATE_TEXTURESTAGE(7, WINED3D_TSS_BUMPENV_MAT00)}},
+    {STATE_TEXTURESTAGE(0, WINED3D_TSS_BUMPENV_LSCALE),   {STATE_TEXTURESTAGE(0, WINED3D_TSS_BUMPENV_LSCALE),   state_nop}},
+    {STATE_TEXTURESTAGE(0, WINED3D_TSS_BUMPENV_LOFFSET),  {STATE_TEXTURESTAGE(0, WINED3D_TSS_BUMPENV_LSCALE)}},
+    {STATE_TEXTURESTAGE(1, WINED3D_TSS_BUMPENV_LSCALE),   {STATE_TEXTURESTAGE(1, WINED3D_TSS_BUMPENV_LSCALE),   state_nop}},
+    {STATE_TEXTURESTAGE(1, WINED3D_TSS_BUMPENV_LOFFSET),  {STATE_TEXTURESTAGE(1, WINED3D_TSS_BUMPENV_LSCALE)}},
+    {STATE_TEXTURESTAGE(2, WINED3D_TSS_BUMPENV_LSCALE),   {STATE_TEXTURESTAGE(2, WINED3D_TSS_BUMPENV_LSCALE),   state_nop}},
+    {STATE_TEXTURESTAGE(2, WINED3D_TSS_BUMPENV_LOFFSET),  {STATE_TEXTURESTAGE(2, WINED3D_TSS_BUMPENV_LSCALE)}},
+    {STATE_TEXTURESTAGE(3, WINED3D_TSS_BUMPENV_LSCALE),   {STATE_TEXTURESTAGE(3, WINED3D_TSS_BUMPENV_LSCALE),   state_nop}},
+    {STATE_TEXTURESTAGE(3, WINED3D_TSS_BUMPENV_LOFFSET),  {STATE_TEXTURESTAGE(3, WINED3D_TSS_BUMPENV_LSCALE)}},
+    {STATE_TEXTURESTAGE(4, WINED3D_TSS_BUMPENV_LSCALE),   {STATE_TEXTURESTAGE(4, WINED3D_TSS_BUMPENV_LSCALE),   state_nop}},
+    {STATE_TEXTURESTAGE(4, WINED3D_TSS_BUMPENV_LOFFSET),  {STATE_TEXTURESTAGE(4, WINED3D_TSS_BUMPENV_LSCALE)}},
+    {STATE_TEXTURESTAGE(5, WINED3D_TSS_BUMPENV_LSCALE),   {STATE_TEXTURESTAGE(5, WINED3D_TSS_BUMPENV_LSCALE),   state_nop}},
+    {STATE_TEXTURESTAGE(5, WINED3D_TSS_BUMPENV_LOFFSET),  {STATE_TEXTURESTAGE(5, WINED3D_TSS_BUMPENV_LSCALE)}},
+    {STATE_TEXTURESTAGE(6, WINED3D_TSS_BUMPENV_LSCALE),   {STATE_TEXTURESTAGE(6, WINED3D_TSS_BUMPENV_LSCALE),   state_nop}},
+    {STATE_TEXTURESTAGE(6, WINED3D_TSS_BUMPENV_LOFFSET),  {STATE_TEXTURESTAGE(6, WINED3D_TSS_BUMPENV_LSCALE)}},
+    {STATE_TEXTURESTAGE(7, WINED3D_TSS_BUMPENV_LSCALE),   {STATE_TEXTURESTAGE(7, WINED3D_TSS_BUMPENV_LSCALE),   state_nop}},
+    {STATE_TEXTURESTAGE(7, WINED3D_TSS_BUMPENV_LOFFSET),  {STATE_TEXTURESTAGE(7, WINED3D_TSS_BUMPENV_LSCALE)}},
+
     {STATE_VIEWPORT,                                      {STATE_VIEWPORT,                                      state_nop}},
     {STATE_INDEXBUFFER,                                   {STATE_INDEXBUFFER,                                   state_nop}},
     {STATE_RENDER(WINED3D_RS_LINEPATTERN),                {STATE_RENDER(WINED3D_RS_LINEPATTERN),                state_nop}},
@@ -58,6 +108,11 @@ static const struct wined3d_state_entry_template misc_state_template_vk[] =
     {STATE_SHADER(WINED3D_SHADER_TYPE_COMPUTE),           {STATE_SHADER(WINED3D_SHADER_TYPE_COMPUTE),           state_nop}},
     {0}, /* Terminate */
 };
+
+static inline const struct wined3d_adapter_vk *wined3d_adapter_vk_const(const struct wined3d_adapter *adapter)
+{
+    return CONTAINING_RECORD(adapter, struct wined3d_adapter_vk, a);
+}
 
 static const char *debug_vk_version(uint32_t version)
 {
@@ -132,7 +187,7 @@ static void adapter_vk_destroy(struct wined3d_adapter *adapter)
 }
 
 static HRESULT wined3d_select_vulkan_queue_family(const struct wined3d_adapter_vk *adapter_vk,
-        VkQueueFlags flags, struct wined3d_queue_vk *queue)
+        uint32_t *queue_family_index, uint32_t *timestamp_bits)
 {
     VkPhysicalDevice physical_device = adapter_vk->physical_device;
     const struct wined3d_vk_info *vk_info = &adapter_vk->vk_info;
@@ -148,17 +203,17 @@ static HRESULT wined3d_select_vulkan_queue_family(const struct wined3d_adapter_v
 
     for (i = 0; i < count; ++i)
     {
-        if ((queue_properties[i].queueFlags & flags) == flags)
+        if (queue_properties[i].queueFlags & VK_QUEUE_GRAPHICS_BIT)
         {
-            queue->vk_queue_family_index = i;
-            queue->timestamp_bits = queue_properties[i].timestampValidBits;
+            *queue_family_index = i;
+            *timestamp_bits = queue_properties[i].timestampValidBits;
             free(queue_properties);
             return WINED3D_OK;
         }
     }
     free(queue_properties);
 
-    WARN("Failed to find queue supporting %#x.\n", flags);
+    WARN("Failed to find graphics queue.\n");
     return E_FAIL;
 }
 
@@ -356,52 +411,39 @@ static HRESULT adapter_vk_create_device(struct wined3d *wined3d, const struct wi
     const struct wined3d_vk_info *vk_info = &adapter_vk->vk_info;
     struct wined3d_physical_device_info physical_device_info;
     static const float priorities[] = {1.0f};
-    VkDeviceQueueCreateInfo queue_info[2];
     struct wined3d_device_vk *device_vk;
     VkDevice vk_device = VK_NULL_HANDLE;
+    VkDeviceQueueCreateInfo queue_info;
     VkPhysicalDevice physical_device;
     VkDeviceCreateInfo device_info;
-    HRESULT hr, decode_hr;
+    uint32_t queue_family_index;
+    uint32_t timestamp_bits;
     VkResult vr;
+    HRESULT hr;
 
     if (!(device_vk = calloc(1, sizeof(*device_vk))))
         return E_OUTOFMEMORY;
 
-    if (FAILED(hr = wined3d_select_vulkan_queue_family(adapter_vk,
-            VK_QUEUE_GRAPHICS_BIT, &device_vk->graphics_queue)))
+    if (FAILED(hr = wined3d_select_vulkan_queue_family(adapter_vk, &queue_family_index, &timestamp_bits)))
         goto fail;
-
-    decode_hr = wined3d_select_vulkan_queue_family(adapter_vk,
-            VK_QUEUE_VIDEO_DECODE_BIT_KHR, &device_vk->decode_queue);
 
     physical_device = adapter_vk->physical_device;
 
     get_physical_device_info(adapter_vk, &physical_device_info);
     wined3d_disable_vulkan_features(&physical_device_info);
 
-    queue_info[0].sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
-    queue_info[0].pNext = NULL;
-    queue_info[0].flags = 0;
-    queue_info[0].queueFamilyIndex = device_vk->graphics_queue.vk_queue_family_index;
-    queue_info[0].queueCount = ARRAY_SIZE(priorities);
-    queue_info[0].pQueuePriorities = priorities;
-    device_info.queueCreateInfoCount = 1;
-
-    if (decode_hr == S_OK)
-    {
-        queue_info[1].sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
-        queue_info[1].pNext = NULL;
-        queue_info[1].flags = 0;
-        queue_info[1].queueFamilyIndex = device_vk->decode_queue.vk_queue_family_index;
-        queue_info[1].queueCount = ARRAY_SIZE(priorities);
-        queue_info[1].pQueuePriorities = priorities;
-        ++device_info.queueCreateInfoCount;
-    }
+    queue_info.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
+    queue_info.pNext = NULL;
+    queue_info.flags = 0;
+    queue_info.queueFamilyIndex = queue_family_index;
+    queue_info.queueCount = ARRAY_SIZE(priorities);
+    queue_info.pQueuePriorities = priorities;
 
     device_info.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
     device_info.pNext = physical_device_info.features2.pNext;
     device_info.flags = 0;
-    device_info.pQueueCreateInfos = queue_info;
+    device_info.queueCreateInfoCount = 1;
+    device_info.pQueueCreateInfos = &queue_info;
     device_info.enabledLayerCount = 0;
     device_info.ppEnabledLayerNames = NULL;
     device_info.enabledExtensionCount = adapter_vk->device_extension_count;
@@ -417,11 +459,9 @@ static HRESULT adapter_vk_create_device(struct wined3d *wined3d, const struct wi
     }
 
     device_vk->vk_device = vk_device;
-    VK_CALL(vkGetDeviceQueue(vk_device, device_vk->graphics_queue.vk_queue_family_index,
-            0, &device_vk->graphics_queue.vk_queue));
-    if (decode_hr == S_OK)
-        VK_CALL(vkGetDeviceQueue(vk_device, device_vk->decode_queue.vk_queue_family_index,
-                0, &device_vk->decode_queue.vk_queue));
+    VK_CALL(vkGetDeviceQueue(vk_device, queue_family_index, 0, &device_vk->vk_queue));
+    device_vk->vk_queue_family_index = queue_family_index;
+    device_vk->timestamp_bits = timestamp_bits;
 
     device_vk->vk_info = *vk_info;
 #define VK_DEVICE_PFN(name) \
@@ -469,13 +509,6 @@ static void adapter_vk_destroy_device(struct wined3d_device *device)
 {
     struct wined3d_device_vk *device_vk = wined3d_device_vk(device);
     const struct wined3d_vk_info *vk_info = &device_vk->vk_info;
-    struct wined3d *wined3d = device->wined3d;
-
-    /* We need the adapter (which holds the reference to the Vulkan library)
-     * to stick around until we are done making Vulkan calls.
-     * wined3d_device_cleanup() might drop the last reference,
-     * so grab another one here. */
-    wined3d_incref(wined3d);
 
     wined3d_device_cleanup(&device_vk->d);
     wined3d_allocator_cleanup(&device_vk->allocator);
@@ -483,7 +516,6 @@ static void adapter_vk_destroy_device(struct wined3d_device *device)
     wined3d_lock_cleanup(&device_vk->allocator_cs);
 
     VK_CALL(vkDestroyDevice(device_vk->vk_device, NULL));
-    wined3d_decref(wined3d);
     free(device_vk);
 }
 
@@ -1617,32 +1649,6 @@ static void adapter_vk_destroy_unordered_access_view(struct wined3d_unordered_ac
             &uav_vk->counter_bo, &uav_vk->vk_counter_view, &view_vk->command_buffer_id, uav_vk);
 }
 
-static HRESULT adapter_vk_create_video_decoder_output_view(const struct wined3d_view_desc *desc,
-        struct wined3d_texture *texture, void *parent, const struct wined3d_parent_ops *parent_ops,
-        struct wined3d_decoder_output_view **view)
-{
-    struct wined3d_decoder_output_view_vk *view_vk;
-    HRESULT hr;
-
-    TRACE("desc %s, texture %p, parent %p, parent_ops %p, view %p.\n",
-            wined3d_debug_view_desc(desc, &texture->resource), texture, parent, parent_ops, view);
-
-    if (!(view_vk = calloc(1, sizeof(*view_vk))))
-        return E_OUTOFMEMORY;
-
-    if (FAILED(hr = wined3d_decoder_output_view_vk_init(view_vk, desc, texture, parent, parent_ops)))
-    {
-        WARN("Failed to initialise view, hr %#lx.\n", hr);
-        free(view_vk);
-        return hr;
-    }
-
-    TRACE("Created video decoder output view %p.\n", view_vk);
-    *view = &view_vk->v;
-
-    return hr;
-}
-
 static HRESULT adapter_vk_create_sampler(struct wined3d_device *device, const struct wined3d_sampler_desc *desc,
         void *parent, const struct wined3d_parent_ops *parent_ops, struct wined3d_sampler **sampler)
 {
@@ -1889,8 +1895,6 @@ static const struct wined3d_adapter_ops wined3d_adapter_vk_ops =
     .adapter_destroy_shader_resource_view = adapter_vk_destroy_shader_resource_view,
     .adapter_create_unordered_access_view = adapter_vk_create_unordered_access_view,
     .adapter_destroy_unordered_access_view = adapter_vk_destroy_unordered_access_view,
-    .adapter_create_video_decoder_output_view = adapter_vk_create_video_decoder_output_view,
-    .adapter_destroy_video_decoder_output_view = wined3d_decoder_output_view_cleanup,
     .adapter_create_sampler = adapter_vk_create_sampler,
     .adapter_destroy_sampler = adapter_vk_destroy_sampler,
     .adapter_create_query = adapter_vk_create_query,
@@ -2122,7 +2126,7 @@ static VkPhysicalDevice get_vulkan_physical_device(struct wined3d_vk_info *vk_in
     if (count > 1)
     {
         /* TODO: Create wined3d_adapter for each device. */
-        WARN("Multiple physical devices available.\n");
+        FIXME("Multiple physical devices available.\n");
         count = 1;
     }
 
@@ -2340,8 +2344,6 @@ static void wined3d_adapter_vk_init_d3d_info(struct wined3d_adapter_vk *adapter_
     d3d_info->shader_output_interpolation = !!(shader_caps.wined3d_caps & WINED3D_SHADER_CAP_OUTPUT_INTERPOLATION);
     d3d_info->viewport_array_index_any_shader = false; /* VK_EXT_shader_viewport_index_layer */
     d3d_info->stencil_export = vk_info->supported[WINED3D_VK_EXT_SHADER_STENCIL_EXPORT];
-    d3d_info->simple_instancing = true;
-    d3d_info->min_max_filtering = !!vk_info->supported[WINED3D_VK_EXT_SAMPLER_FILTER_MINMAX];
     d3d_info->unconditional_npot = true;
     d3d_info->draw_base_vertex_offset = true;
     d3d_info->vertex_bgra = true;
@@ -2370,7 +2372,6 @@ static void wined3d_adapter_vk_init_d3d_info(struct wined3d_adapter_vk *adapter_
     d3d_info->multisample_draw_location = WINED3D_LOCATION_TEXTURE_RGB;
 
     vk_info->multiple_viewports = device_info.features2.features.multiViewport;
-    vk_info->uav_read_without_format = device_info.features2.features.shaderStorageImageReadWithoutFormat;
     vk_info->dynamic_state2 = device_info.dynamic_state2_features.extendedDynamicState2;
     vk_info->dynamic_patch_vertex_count = device_info.dynamic_state2_features.extendedDynamicState2PatchControlPoints;
 
@@ -2383,7 +2384,6 @@ static void wined3d_adapter_vk_init_d3d_info(struct wined3d_adapter_vk *adapter_
             && dynamic_state3->extendedDynamicState3ColorWriteMask;
     /* Rasterizer state needs EDS2, for rasterizer discard, and EDS1, for cull mode and front face. */
     vk_info->dynamic_rasterizer_state = dynamic_state3->extendedDynamicState3DepthClampEnable
-            && dynamic_state3->extendedDynamicState3PolygonMode
             && vk_info->dynamic_state2
             && adapter_vk->vk_info.supported[WINED3D_VK_EXT_EXTENDED_DYNAMIC_STATE];
 }
@@ -2411,21 +2411,14 @@ static bool wined3d_adapter_vk_init_device_extensions(struct wined3d_adapter_vk 
         {VK_EXT_EXTENDED_DYNAMIC_STATE_2_EXTENSION_NAME,    VK_API_VERSION_1_3},
         {VK_EXT_EXTENDED_DYNAMIC_STATE_3_EXTENSION_NAME,    ~0u},
         {VK_EXT_HOST_QUERY_RESET_EXTENSION_NAME,            VK_API_VERSION_1_2},
-        {VK_EXT_SAMPLER_FILTER_MINMAX_EXTENSION_NAME,       VK_API_VERSION_1_2},
         {VK_EXT_SHADER_STENCIL_EXPORT_EXTENSION_NAME,       ~0u},
         {VK_EXT_TRANSFORM_FEEDBACK_EXTENSION_NAME,          ~0u},
         {VK_EXT_VERTEX_ATTRIBUTE_DIVISOR_EXTENSION_NAME,    ~0u},
         {VK_KHR_MAINTENANCE1_EXTENSION_NAME,                VK_API_VERSION_1_1, true},
         {VK_KHR_MAINTENANCE2_EXTENSION_NAME,                VK_API_VERSION_1_1},
         {VK_KHR_SAMPLER_MIRROR_CLAMP_TO_EDGE_EXTENSION_NAME,VK_API_VERSION_1_2},
-        {VK_KHR_SAMPLER_YCBCR_CONVERSION_EXTENSION_NAME,    VK_API_VERSION_1_1},
         {VK_KHR_SHADER_DRAW_PARAMETERS_EXTENSION_NAME,      VK_API_VERSION_1_1},
         {VK_KHR_SWAPCHAIN_EXTENSION_NAME,                   ~0u,                true},
-        /* KHR_synchronization2 is required for KHR_video_queue. */
-        {VK_KHR_SYNCHRONIZATION_2_EXTENSION_NAME,           ~0u},
-        {VK_KHR_VIDEO_DECODE_H264_EXTENSION_NAME,           ~0u},
-        {VK_KHR_VIDEO_DECODE_QUEUE_EXTENSION_NAME,          ~0u},
-        {VK_KHR_VIDEO_QUEUE_EXTENSION_NAME,                 ~0u},
     };
 
     static const struct
@@ -2439,16 +2432,12 @@ static bool wined3d_adapter_vk_init_device_extensions(struct wined3d_adapter_vk 
         {VK_EXT_EXTENDED_DYNAMIC_STATE_2_EXTENSION_NAME,     WINED3D_VK_EXT_EXTENDED_DYNAMIC_STATE2},
         {VK_EXT_EXTENDED_DYNAMIC_STATE_3_EXTENSION_NAME,     WINED3D_VK_EXT_EXTENDED_DYNAMIC_STATE3},
         {VK_EXT_HOST_QUERY_RESET_EXTENSION_NAME,             WINED3D_VK_EXT_HOST_QUERY_RESET},
-        {VK_EXT_SAMPLER_FILTER_MINMAX_EXTENSION_NAME,        WINED3D_VK_EXT_SAMPLER_FILTER_MINMAX},
         {VK_EXT_SHADER_STENCIL_EXPORT_EXTENSION_NAME,        WINED3D_VK_EXT_SHADER_STENCIL_EXPORT},
         {VK_EXT_TRANSFORM_FEEDBACK_EXTENSION_NAME,           WINED3D_VK_EXT_TRANSFORM_FEEDBACK},
         {VK_EXT_VERTEX_ATTRIBUTE_DIVISOR_EXTENSION_NAME,     WINED3D_VK_EXT_VERTEX_ATTRIBUTE_DIVISOR},
         {VK_KHR_MAINTENANCE2_EXTENSION_NAME,                 WINED3D_VK_KHR_MAINTENANCE2},
         {VK_KHR_SAMPLER_MIRROR_CLAMP_TO_EDGE_EXTENSION_NAME, WINED3D_VK_KHR_SAMPLER_MIRROR_CLAMP_TO_EDGE},
-        {VK_KHR_SAMPLER_YCBCR_CONVERSION_EXTENSION_NAME,     WINED3D_VK_KHR_SAMPLER_YCBCR_CONVERSION},
         {VK_KHR_SHADER_DRAW_PARAMETERS_EXTENSION_NAME,       WINED3D_VK_KHR_SHADER_DRAW_PARAMETERS},
-        {VK_KHR_VIDEO_DECODE_H264_EXTENSION_NAME,            WINED3D_VK_KHR_VIDEO_DECODE_H264},
-        {VK_KHR_VIDEO_QUEUE_EXTENSION_NAME,                  WINED3D_VK_KHR_VIDEO_QUEUE},
     };
 
     if ((vr = VK_CALL(vkEnumerateDeviceExtensionProperties(physical_device, NULL, &count, NULL))) < 0)
@@ -2538,7 +2527,6 @@ static BOOL wined3d_adapter_vk_init(struct wined3d_adapter_vk *adapter_vk,
         unsigned int ordinal, unsigned int wined3d_creation_flags)
 {
     struct wined3d_vk_info *vk_info = &adapter_vk->vk_info;
-    VkPhysicalDeviceSamplerFilterMinmaxProperties *minmax;
     struct wined3d_adapter *adapter = &adapter_vk->a;
     VkPhysicalDeviceIDProperties id_properties;
     VkPhysicalDeviceProperties2 properties2;
@@ -2564,16 +2552,6 @@ static BOOL wined3d_adapter_vk_init(struct wined3d_adapter_vk *adapter_vk,
     properties2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2;
     properties2.pNext = &id_properties;
 
-    minmax = &(VkPhysicalDeviceSamplerFilterMinmaxProperties)
-    {
-        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SAMPLER_FILTER_MINMAX_PROPERTIES,
-        .pNext = properties2.pNext,
-    };
-    if (vk_info->supported[WINED3D_VK_EXT_SAMPLER_FILTER_MINMAX])
-        properties2.pNext = minmax;
-    else
-        minmax = NULL;
-
     if (vk_info->vk_ops.vkGetPhysicalDeviceProperties2)
         VK_CALL(vkGetPhysicalDeviceProperties2(adapter_vk->physical_device, &properties2));
     else
@@ -2587,18 +2565,6 @@ static BOOL wined3d_adapter_vk_init(struct wined3d_adapter_vk *adapter_vk,
     else if (ordinal == 0 && wined3d_get_primary_adapter_luid(&primary_luid))
         luid = &primary_luid;
 
-    if (minmax)
-    {
-        TRACE("  VkPhysicalDeviceSamplerFilterMinmaxProperties:\n");
-        TRACE("    filterMinmaxSingleComponentFormats: %#x.\n", minmax->filterMinmaxSingleComponentFormats);
-        TRACE("    filterMinmaxImageComponentMapping: %#x.\n", minmax->filterMinmaxImageComponentMapping);
-        if (!minmax->filterMinmaxSingleComponentFormats || !minmax->filterMinmaxImageComponentMapping)
-        {
-            WARN("Sampler min/max reduction filtering is only partially supported; disabling.");
-            vk_info->supported[WINED3D_VK_EXT_SAMPLER_FILTER_MINMAX] = false;
-        }
-    }
-
     if (!wined3d_adapter_init(adapter, ordinal, luid, &wined3d_adapter_vk_ops))
     {
         free(adapter_vk->device_extensions);
@@ -2609,7 +2575,6 @@ static BOOL wined3d_adapter_vk_init(struct wined3d_adapter_vk *adapter_vk,
     adapter->fragment_pipe = wined3d_spirv_fragment_pipe_init_vk();
     adapter->misc_state_template = misc_state_template_vk;
     adapter->shader_backend = wined3d_spirv_shader_backend_init_vk();
-    adapter->decoder_ops = &wined3d_decoder_vk_ops;
 
     wined3d_adapter_vk_init_d3d_info(adapter_vk, wined3d_creation_flags);
 

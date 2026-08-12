@@ -1021,13 +1021,13 @@ typedef struct {
 } custom_category;
 static custom_category iostream_category;
 
-DEFINE_RTTI_DATA(error_category, 0, ".?AVerror_category@std@@")
-DEFINE_RTTI_DATA(generic_category, 0, ".?AV_Generic_error_category@std@@", error_category_rtti_base_descriptor)
+DEFINE_RTTI_DATA0(error_category, 0, ".?AVerror_category@std@@")
+DEFINE_RTTI_DATA1(generic_category, 0, &error_category_rtti_base_descriptor, ".?AV_Generic_error_category@std@@")
 #if _MSVCP_VER == 100
-DEFINE_RTTI_DATA(iostream_category, 0, ".?AV_Iostream_error_category@std@@", error_category_rtti_base_descriptor)
+DEFINE_RTTI_DATA1(iostream_category, 0, &error_category_rtti_base_descriptor, ".?AV_Iostream_error_category@std@@")
 #else
-DEFINE_RTTI_DATA(iostream_category, 0, ".?AV_Iostream_error_category@std@@",
-        generic_category_rtti_base_descriptor, error_category_rtti_base_descriptor)
+DEFINE_RTTI_DATA2(iostream_category, 0, &generic_category_rtti_base_descriptor,
+        &error_category_rtti_base_descriptor, ".?AV_Iostream_error_category@std@@")
 #endif
 
 extern const vtable_ptr iostream_category_vtable;
@@ -1118,7 +1118,7 @@ const error_category* __cdecl std_iostream_category(void)
 
 #if _MSVCP_VER == 100 || _MSVCP_VER >= 140
 static custom_category system_category;
-DEFINE_RTTI_DATA(system_category, 0, ".?AV_System_error_category@std@@", error_category_rtti_base_descriptor)
+DEFINE_RTTI_DATA1(system_category, 0, &error_category_rtti_base_descriptor, ".?AV_System_error_category@std@@")
 
 extern const vtable_ptr system_category_vtable;
 
@@ -1370,7 +1370,7 @@ typedef struct
     bool launched;
 } _Pad;
 
-DEFINE_RTTI_DATA(_Pad, 0, ".?AV_Pad@std@@")
+DEFINE_RTTI_DATA0(_Pad, 0, ".?AV_Pad@std@@")
 
 /* ??_7_Pad@std@@6B@ */
 extern const vtable_ptr _Pad_vtable;
@@ -1792,16 +1792,18 @@ __ASM_BLOCK_END
 
 void init_misc(void *base)
 {
+#ifdef RTTI_USE_RVA
 #if _MSVCP_VER >= 100
-    INIT_RTTI(error_category, base);
-    INIT_RTTI(generic_category, base);
-    INIT_RTTI(iostream_category, base);
+    init_error_category_rtti(base);
+    init_generic_category_rtti(base);
+    init_iostream_category_rtti(base);
 #endif
 #if _MSVCP_VER == 100 || _MSVCP_VER >= 140
-    INIT_RTTI(system_category, base);
+    init_system_category_rtti(base);
 #endif
 #if _MSVCP_VER >= 110
-    INIT_RTTI(_Pad, base);
+    init__Pad_rtti(base);
+#endif
 #endif
 
 #if _MSVCP_VER >= 100

@@ -77,27 +77,48 @@ struct xml_encoding_data
     UINT cp;
 };
 
+static const WCHAR iso_8859_1W[] = {'i','s','o','-','8','8','5','9','-','1',0};
+static const WCHAR iso_8859_2W[] = {'i','s','o','-','8','8','5','9','-','2',0};
+static const WCHAR iso_8859_3W[] = {'i','s','o','-','8','8','5','9','-','3',0};
+static const WCHAR iso_8859_4W[] = {'i','s','o','-','8','8','5','9','-','4',0};
+static const WCHAR iso_8859_5W[] = {'i','s','o','-','8','8','5','9','-','5',0};
+static const WCHAR iso_8859_7W[] = {'i','s','o','-','8','8','5','9','-','7',0};
+static const WCHAR iso_8859_9W[] = {'i','s','o','-','8','8','5','9','-','9',0};
+static const WCHAR iso_8859_13W[] = {'i','s','o','-','8','8','5','9','-','1','3',0};
+static const WCHAR iso_8859_15W[] = {'i','s','o','-','8','8','5','9','-','1','5',0};
+static const WCHAR utf16W[] = {'U','T','F','-','1','6',0};
+static const WCHAR utf8W[] = {'U','T','F','-','8',0};
+static const WCHAR windows_1250W[] = {'w','i','n','d','o','w','s','-','1','2','5','0',0};
+static const WCHAR windows_1251W[] = {'w','i','n','d','o','w','s','-','1','2','5','1',0};
+static const WCHAR windows_1252W[] = {'w','i','n','d','o','w','s','-','1','2','5','2',0};
+static const WCHAR windows_1253W[] = {'w','i','n','d','o','w','s','-','1','2','5','3',0};
+static const WCHAR windows_1254W[] = {'w','i','n','d','o','w','s','-','1','2','5','4',0};
+static const WCHAR windows_1255W[] = {'w','i','n','d','o','w','s','-','1','2','5','5',0};
+static const WCHAR windows_1256W[] = {'w','i','n','d','o','w','s','-','1','2','5','6',0};
+static const WCHAR windows_1257W[] = {'w','i','n','d','o','w','s','-','1','2','5','7',0};
+static const WCHAR windows_1258W[] = {'w','i','n','d','o','w','s','-','1','2','5','8',0};
+
 static const struct xml_encoding_data xml_encoding_map[] = {
-    { L"iso-8859-1",   XmlEncoding_ISO_8859_1,  28591 },
-    { L"iso-8859-13",  XmlEncoding_ISO_8859_13, 28603 },
-    { L"iso-8859-15",  XmlEncoding_ISO_8859_15, 28605 },
-    { L"iso-8859-2",   XmlEncoding_ISO_8859_2,  28592 },
-    { L"iso-8859-3",   XmlEncoding_ISO_8859_3,  28593 },
-    { L"iso-8859-4",   XmlEncoding_ISO_8859_4,  28594 },
-    { L"iso-8859-5",   XmlEncoding_ISO_8859_5,  28595 },
-    { L"iso-8859-7",   XmlEncoding_ISO_8859_7,  28597 },
-    { L"iso-8859-9",   XmlEncoding_ISO_8859_9,  28599 },
-    { L"UTF-16",       XmlEncoding_UTF16,          ~0 },
-    { L"UTF-8",        XmlEncoding_UTF8,      CP_UTF8 },
-    { L"windows-1250", XmlEncoding_windows_1250, 1250 },
-    { L"windows-1251", XmlEncoding_windows_1251, 1251 },
-    { L"windows-1252", XmlEncoding_windows_1252, 1252 },
-    { L"windows-1253", XmlEncoding_windows_1253, 1253 },
-    { L"windows-1254", XmlEncoding_windows_1254, 1254 },
-    { L"windows-1255", XmlEncoding_windows_1255, 1255 },
-    { L"windows-1256", XmlEncoding_windows_1256, 1256 },
-    { L"windows-1257", XmlEncoding_windows_1257, 1257 },
-    { L"windows-1258", XmlEncoding_windows_1258, 1258 }
+    { iso_8859_1W,  XmlEncoding_ISO_8859_1,  28591 },
+    { iso_8859_13W, XmlEncoding_ISO_8859_13, 28603 },
+    { iso_8859_15W, XmlEncoding_ISO_8859_15, 28605 },
+    { iso_8859_2W,  XmlEncoding_ISO_8859_2,  28592 },
+    { iso_8859_3W,  XmlEncoding_ISO_8859_3,  28593 },
+    { iso_8859_4W,  XmlEncoding_ISO_8859_4,  28594 },
+    { iso_8859_5W,  XmlEncoding_ISO_8859_5,  28595 },
+    { iso_8859_7W,  XmlEncoding_ISO_8859_7,  28597 },
+    { iso_8859_9W,  XmlEncoding_ISO_8859_9,  28599 },
+    { utf16W,       XmlEncoding_UTF16,          ~0 },
+    { utf8W,        XmlEncoding_UTF8,      CP_UTF8 },
+    { windows_1250W,XmlEncoding_windows_1250, 1250 },
+    { windows_1251W,XmlEncoding_windows_1251, 1251 },
+    { windows_1252W,XmlEncoding_windows_1252, 1252 },
+    { windows_1253W,XmlEncoding_windows_1253, 1253 },
+    { windows_1254W,XmlEncoding_windows_1254, 1254 },
+    { windows_1255W,XmlEncoding_windows_1255, 1255 },
+    { windows_1256W,XmlEncoding_windows_1256, 1256 },
+    { windows_1257W,XmlEncoding_windows_1257, 1257 },
+    { windows_1258W,XmlEncoding_windows_1258, 1258 }
 };
 
 typedef enum
@@ -279,17 +300,6 @@ static HRESULT get_code_page(xml_encoding encoding, UINT *cp)
     return S_OK;
 }
 
-UINT get_codepage_for_encoding(const WCHAR *encoding)
-{
-    for (int i = 0; i < ARRAYSIZE(xml_encoding_map); ++i)
-    {
-        if (!wcsicmp(encoding, xml_encoding_map[i].encoding))
-            return xml_encoding_map[i].cp;
-    }
-
-    return 0;
-}
-
 static HRESULT init_output_buffer(xml_encoding encoding, output_buffer *buffer)
 {
     HRESULT hr;
@@ -329,7 +339,7 @@ static HRESULT write_output_buffer(mxwriter *writer, const WCHAR *data, int len)
     ULONG written;
     int src_len;
 
-    if (!len)
+    if (!len || !*data)
         return S_OK;
 
     src_len = len == -1 ? lstrlenW(data) : len;
@@ -488,92 +498,76 @@ static void close_output_buffer(mxwriter *writer)
     list_init(&writer->buffer.blocks);
 }
 
-/*
-   Special characters are escaped:
-
+/* Escapes special characters like:
    '<' -> "&lt;"
    '&' -> "&amp;"
    '"' -> "&quot;"
    '>' -> "&gt;"
 
-   Newlines always produce CRLF.
-
+   On call 'len' contains a length of 'str' in chars or -1 if it's null terminated.
+   After a call it's updated with actual new length if it wasn't -1 initially.
 */
-
-static void write_crlf(mxwriter *writer, escape_mode mode)
+static WCHAR *get_escaped_string(const WCHAR *str, escape_mode mode, int *len)
 {
-    bool use_charref_lf = writer->class_version >= MSXML4 && mode == EscapeValue;
+    static const WCHAR ltW[]    = {'&','l','t',';'};
+    static const WCHAR ampW[]   = {'&','a','m','p',';'};
+    static const WCHAR equotW[] = {'&','q','u','o','t',';'};
+    static const WCHAR gtW[]    = {'&','g','t',';'};
 
-    if (use_charref_lf)
-        write_output_buffer(writer, L"&#xA;", 5);
-    else
-        write_output_buffer(writer, L"\r\n", 2);
-}
+    const int default_alloc = 100;
+    const int grow_thresh = 10;
+    int p = *len, conv_len;
+    WCHAR *ptr, *ret;
 
-static void write_escaped_string(mxwriter *writer, const WCHAR *str, int len, escape_mode mode)
-{
-    const WCHAR *p = str;
+    /* default buffer size to something if length is unknown */
+    conv_len = max(2**len, default_alloc);
+    ptr = ret = malloc(conv_len * sizeof(WCHAR));
 
-    while (len-- > 0)
+    while (p)
     {
-        if (*p == '<')
-            write_output_buffer(writer, L"&lt;", 4);
-        else if (*p == '&')
-            write_output_buffer(writer, L"&amp;", 5);
-        else if (*p == '>')
-            write_output_buffer(writer, L"&gt;", 4);
-        else if (*p == '"' && mode == EscapeValue)
-            write_output_buffer(writer, L"&quot;", 6);
-        else if (*p == '\n')
-            write_crlf(writer, mode);
-        else if (*p == '\r')
+        if (ptr - ret > conv_len - grow_thresh)
         {
-            if (len > 0 && p[1] == '\n')
-            {
-                write_crlf(writer, mode);
-
-                ++p;
-                --len;
-            }
-            else
-            {
-                write_crlf(writer, mode);
-            }
+            int written = ptr - ret;
+            conv_len *= 2;
+            ptr = ret = realloc(ret, conv_len * sizeof(WCHAR));
+            ptr += written;
         }
-        else
-            write_output_buffer(writer, p, 1);
 
-        ++p;
-    }
-}
-
-static void write_string_with_crlf(mxwriter *writer, const WCHAR *str, int len)
-{
-    const WCHAR *p = str;
-
-    while (len-- > 0)
-    {
-        if (*p == '\n')
-            write_crlf(writer, EscapeText);
-        else if (*p == '\r')
+        switch (*str)
         {
-            if (len > 0 && p[1] == '\n')
+        case '<':
+            memcpy(ptr, ltW, sizeof(ltW));
+            ptr += ARRAY_SIZE(ltW);
+            break;
+        case '&':
+            memcpy(ptr, ampW, sizeof(ampW));
+            ptr += ARRAY_SIZE(ampW);
+            break;
+        case '>':
+            memcpy(ptr, gtW, sizeof(gtW));
+            ptr += ARRAY_SIZE(gtW);
+            break;
+        case '"':
+            if (mode == EscapeValue)
             {
-                write_crlf(writer, EscapeText);
-
-                ++p;
-                --len;
+                memcpy(ptr, equotW, sizeof(equotW));
+                ptr += ARRAY_SIZE(equotW);
+                break;
             }
-            else
-            {
-                write_crlf(writer, EscapeText);
-            }
+            /* fallthrough for text mode */
+        default:
+            *ptr++ = *str;
+            break;
         }
-        else
-            write_output_buffer(writer, p, 1);
 
-        ++p;
+        str++;
+        p--;
     }
+
+    *len = ptr-ret;
+    *++ptr = 0;
+
+    return ret;
 }
 
 static void write_prolog_buffer(mxwriter *writer)
@@ -594,7 +588,7 @@ static void write_prolog_buffer(mxwriter *writer)
     if (writer->dest)
         write_output_buffer(writer, writer->encoding, -1);
     else
-        write_output_buffer(writer, L"UTF-16", ARRAY_SIZE(L"UTF-16") - 1);
+        write_output_buffer(writer, utf16W, ARRAY_SIZE(utf16W) - 1);
     write_output_buffer(writer, quotW, 1);
 
     /* standalone */
@@ -1201,11 +1195,13 @@ static ULONG WINAPI SAXContentHandler_Release(ISAXContentHandler *iface)
     return IMXWriter_Release(&This->IMXWriter_iface);
 }
 
-static HRESULT WINAPI SAXContentHandler_putDocumentLocator(ISAXContentHandler *iface, ISAXLocator *locator)
+static HRESULT WINAPI SAXContentHandler_putDocumentLocator(
+    ISAXContentHandler *iface,
+    ISAXLocator *locator)
 {
-    TRACE("%p, %p.\n", iface, locator);
-
-    return S_OK;
+    mxwriter *This = impl_from_ISAXContentHandler( iface );
+    FIXME("(%p)->(%p)\n", This, locator);
+    return E_NOTIMPL;
 }
 
 static HRESULT WINAPI SAXContentHandler_startDocument(ISAXContentHandler *iface)
@@ -1281,12 +1277,14 @@ static void mxwriter_write_attribute(mxwriter *writer, const WCHAR *qname, int q
     write_output_buffer(writer, qname, qname_len);
     write_output_buffer(writer, eqW, 1);
 
-    write_output_buffer(writer, L"\"", 1);
     if (escape)
-        write_escaped_string(writer, value, value_len, EscapeValue);
+    {
+        WCHAR *escaped = get_escaped_string(value, EscapeValue, &value_len);
+        write_output_buffer_quoted(writer, escaped, value_len);
+        free(escaped);
+    }
     else
-        write_string_with_crlf(writer, value, value_len);
-    write_output_buffer(writer, L"\"", 1);
+        write_output_buffer_quoted(writer, value, value_len);
 }
 
 static void mxwriter_write_starttag(mxwriter *writer, const WCHAR *qname, int len)
@@ -1394,26 +1392,36 @@ static HRESULT WINAPI SAXContentHandler_endElement(
     return S_OK;
 }
 
-static HRESULT WINAPI SAXContentHandler_characters(ISAXContentHandler *iface, const WCHAR *chars, int nchars)
+static HRESULT WINAPI SAXContentHandler_characters(
+    ISAXContentHandler *iface,
+    const WCHAR *chars,
+    int nchars)
 {
-    mxwriter *writer = impl_from_ISAXContentHandler(iface);
+    mxwriter *This = impl_from_ISAXContentHandler( iface );
 
-    TRACE("%p, %s, %d.\n", iface, debugstr_wn(chars, nchars), nchars);
+    TRACE("(%p)->(%s:%d)\n", This, debugstr_wn(chars, nchars), nchars);
 
     if (!chars) return E_INVALIDARG;
 
-    close_element_starttag(writer);
-    set_element_name(writer, NULL, 0);
+    close_element_starttag(This);
+    set_element_name(This, NULL, 0);
 
-    if (!writer->cdata)
-        writer->text = TRUE;
+    if (!This->cdata)
+        This->text = TRUE;
 
     if (nchars)
     {
-        if (writer->cdata || writer->props[MXWriter_DisableEscaping] == VARIANT_TRUE)
-            write_output_buffer(writer, chars, nchars);
+        if (This->cdata || This->props[MXWriter_DisableEscaping] == VARIANT_TRUE)
+            write_output_buffer(This, chars, nchars);
         else
-            write_escaped_string(writer, chars, nchars, EscapeText);
+        {
+            int len = nchars;
+            WCHAR *escaped;
+
+            escaped = get_escaped_string(chars, EscapeText, &len);
+            write_output_buffer(This, escaped, len);
+            free(escaped);
+        }
     }
 
     return S_OK;
@@ -2098,8 +2106,8 @@ static HRESULT WINAPI VBSAXContentHandler_Invoke(IVBSAXContentHandler *iface, DI
 
 static HRESULT WINAPI VBSAXContentHandler_putref_documentLocator(IVBSAXContentHandler *iface, IVBSAXLocator *locator)
 {
-    TRACE("%p, %p.\n", iface, locator);
-
+    mxwriter *This = impl_from_IVBSAXContentHandler( iface );
+    TRACE("(%p)->(%p)\n", This, locator);
     return S_OK;
 }
 
@@ -2581,6 +2589,7 @@ static dispex_static_data_t mxwriter_dispex = {
 
 HRESULT MXWriter_create(MSXML_VERSION version, void **ppObj)
 {
+    static const WCHAR version10W[] = {'1','.','0',0};
     mxwriter *This;
     HRESULT hr;
 
@@ -2610,8 +2619,8 @@ HRESULT MXWriter_create(MSXML_VERSION version, void **ppObj)
     This->props[MXWriter_OmitXmlDecl] = VARIANT_FALSE;
     This->props[MXWriter_Standalone] = VARIANT_FALSE;
     This->prop_changed = FALSE;
-    This->encoding = SysAllocString(L"UTF-16");
-    This->version  = SysAllocString(L"1.0");
+    This->encoding = SysAllocString(utf16W);
+    This->version  = SysAllocString(version10W);
     This->xml_enc  = XmlEncoding_UTF16;
 
     This->element = NULL;

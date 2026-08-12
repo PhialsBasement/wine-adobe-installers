@@ -172,10 +172,9 @@ static void test_get_set(void)
     ok(*buffer=='\0', "GetPath returned '%s'\n", buffer);
 
     /* Win98 returns S_FALSE, but WinXP returns S_OK */
-    str="c:\\nonexistent\\file\\";
-    r = IShellLinkA_SetPath(sl, str);
-    ok(r==S_OK, "SetPath failed (0x%08lx)\n", r);
     str="c:\\nonexistent\\file";
+    r = IShellLinkA_SetPath(sl, str);
+    ok(r==S_FALSE || r==S_OK, "SetPath failed (0x%08lx)\n", r);
 
     strcpy(buffer,"garbage");
     r = IShellLinkA_GetPath(sl, buffer, sizeof(buffer), NULL, SLGP_RAWPATH);
@@ -864,9 +863,17 @@ static void test_load_save(void)
 
 static void test_datalink(void)
 {
-    static const WCHAR lnk[] =
-      L"::{9db1186e-40df-11d1-aa8c-00c04fb67863}:26,!!gxsf(Ng]qF`H{LsACCESSFiles>plT]jI{jf(=1&L[-81-]::";
-    static const WCHAR comp[] = L"26,!!gxsf(Ng]qF`H{LsACCESSFiles>plT]jI{jf(=1&L[-81-]";
+    static const WCHAR lnk[] = {
+      ':',':','{','9','d','b','1','1','8','6','e','-','4','0','d','f','-','1',
+      '1','d','1','-','a','a','8','c','-','0','0','c','0','4','f','b','6','7',
+      '8','6','3','}',':','2','6',',','!','!','g','x','s','f','(','N','g',']',
+      'q','F','`','H','{','L','s','A','C','C','E','S','S','F','i','l','e','s',
+      '>','p','l','T',']','j','I','{','j','f','(','=','1','&','L','[','-','8',
+      '1','-',']',':',':',0 };
+    static const WCHAR comp[] = {
+      '2','6',',','!','!','g','x','s','f','(','N','g',']','q','F','`','H','{',
+      'L','s','A','C','C','E','S','S','F','i','l','e','s','>','p','l','T',']',
+      'j','I','{','j','f','(','=','1','&','L','[','-','8','1','-',']',0 };
     IShellLinkDataList *dl = NULL;
     IShellLinkW *sl = NULL;
     HRESULT r;
@@ -1056,17 +1063,11 @@ static void test_SHGetStockIconInfo(void)
     {
         memset(buffer, '#', sizeof(buffer));
         sii->cbSize = sizeof(SHSTOCKICONINFO);
-        hr = pSHGetStockIconInfo(i, SHGSI_ICONLOCATION | SHGSI_ICON, sii);
+        hr = pSHGetStockIconInfo(i, SHGSI_ICONLOCATION, sii);
 
         ok(hr == S_OK,
             "%3d: got 0x%lx, iSysImageIndex: 0x%x, iIcon: 0x%x (expected S_OK)\n",
             i, hr, sii->iSysImageIndex, sii->iIcon);
-
-    todo_wine_if(sii->hIcon == 0) {
-        ok(sii->hIcon != 0,
-            "%3d: got %p, should be non-zero handle\n",
-            i, sii->hIcon);
-    }
 
         if ((hr == S_OK) && (winetest_debug > 1))
             trace("%3d: got iSysImageIndex %3d, iIcon %3d and %s\n", i, sii->iSysImageIndex,
@@ -1122,6 +1123,9 @@ static void test_SHGetStockIconInfo(void)
 
 static void test_SHExtractIcons(void)
 {
+    static const WCHAR notepadW[] = {'n','o','t','e','p','a','d','.','e','x','e',0};
+    static const WCHAR shell32W[] = {'s','h','e','l','l','3','2','.','d','l','l',0};
+    static const WCHAR emptyW[] = {0};
     UINT ret, ret2;
     HICON icons[256];
     UINT ids[256], i;
@@ -1132,44 +1136,44 @@ static void test_SHExtractIcons(void)
         return;
     }
 
-    ret = pSHExtractIconsW(L"", 0, 16, 16, icons, ids, 1, 0);
+    ret = pSHExtractIconsW(emptyW, 0, 16, 16, icons, ids, 1, 0);
     ok(ret == ~0u, "got %u\n", ret);
 
-    ret = pSHExtractIconsW(L"notepad.exe", 0, 16, 16, NULL, NULL, 1, 0);
+    ret = pSHExtractIconsW(notepadW, 0, 16, 16, NULL, NULL, 1, 0);
     ok(ret == 1 || ret == 4 /* win11 */, "got %u\n", ret);
 
     icons[0] = (HICON)0xdeadbeef;
-    ret = pSHExtractIconsW(L"notepad.exe", 0, 16, 16, icons, NULL, 1, 0);
+    ret = pSHExtractIconsW(notepadW, 0, 16, 16, icons, NULL, 1, 0);
     ok(ret == 1, "got %u\n", ret);
     ok(icons[0] != (HICON)0xdeadbeef, "icon not set\n");
     DestroyIcon(icons[0]);
 
     icons[0] = (HICON)0xdeadbeef;
     ids[0] = 0xdeadbeef;
-    ret = pSHExtractIconsW(L"notepad.exe", 0, 16, 16, icons, ids, 1, 0);
+    ret = pSHExtractIconsW(notepadW, 0, 16, 16, icons, ids, 1, 0);
     ok(ret == 1, "got %u\n", ret);
     ok(icons[0] != (HICON)0xdeadbeef, "icon not set\n");
     ok(ids[0] != 0xdeadbeef, "id not set\n");
     DestroyIcon(icons[0]);
 
-    ret = pSHExtractIconsW(L"shell32.dll", 0, 16, 16, NULL, NULL, 0, 0);
-    ret2 = pSHExtractIconsW(L"shell32.dll", 4, MAKELONG(32,16), MAKELONG(32,16), NULL, NULL, 256, 0);
+    ret = pSHExtractIconsW(shell32W, 0, 16, 16, NULL, NULL, 0, 0);
+    ret2 = pSHExtractIconsW(shell32W, 4, MAKELONG(32,16), MAKELONG(32,16), NULL, NULL, 256, 0);
     ok(ret && ret == ret2,
        "icon count should be independent of requested icon sizes and base icon index\n");
 
-    ret = pSHExtractIconsW(L"shell32.dll", 0, 16, 16, icons, ids, 0, 0);
+    ret = pSHExtractIconsW(shell32W, 0, 16, 16, icons, ids, 0, 0);
     ok(ret == ~0u || !ret /* < vista */, "got %u\n", ret);
 
-    ret = pSHExtractIconsW(L"shell32.dll", 0, 16, 16, icons, ids, 3, 0);
+    ret = pSHExtractIconsW(shell32W, 0, 16, 16, icons, ids, 3, 0);
     ok(ret == 3, "got %u\n", ret);
     for (i = 0; i < ret; i++) DestroyIcon(icons[i]);
 
     /* count must be a multiple of two when getting two sizes */
-    ret = pSHExtractIconsW(L"shell32.dll", 0, MAKELONG(16,32), MAKELONG(16,32), icons, ids, 3, 0);
+    ret = pSHExtractIconsW(shell32W, 0, MAKELONG(16,32), MAKELONG(16,32), icons, ids, 3, 0);
     ok(!ret /* vista */ || ret == 4, "got %u\n", ret);
     for (i = 0; i < ret; i++) DestroyIcon(icons[i]);
 
-    ret = pSHExtractIconsW(L"shell32.dll", 0, MAKELONG(16,32), MAKELONG(16,32), icons, ids, 4, 0);
+    ret = pSHExtractIconsW(shell32W, 0, MAKELONG(16,32), MAKELONG(16,32), icons, ids, 4, 0);
     ok(ret == 4, "got %u\n", ret);
     for (i = 0; i < ret; i++) DestroyIcon(icons[i]);
 }
@@ -1211,6 +1215,9 @@ static void test_propertystore(void)
 
 static void test_ExtractIcon(void)
 {
+    static const WCHAR nameW[] = {'\\','e','x','t','r','a','c','t','i','c','o','n','_','t','e','s','t','.','t','x','t',0};
+    static const WCHAR shell32W[] = {'s','h','e','l','l','3','2','.','d','l','l',0};
+    static const WCHAR emptyW[] = {0};
     WCHAR pathW[MAX_PATH];
     HICON hicon, hicon2;
     char path[MAX_PATH];
@@ -1271,11 +1278,11 @@ if (0)
     hicon = ExtractIconW(GetModuleHandleA("shell32.dll"), NULL, 0);
     ok(hicon == NULL, "Got icon %p\n", hicon);
 }
-    hicon2 = ExtractIconW(GetModuleHandleA("shell32.dll"), L"shell32.dll", -1);
+    hicon2 = ExtractIconW(GetModuleHandleA("shell32.dll"), shell32W, -1);
     ok(hicon2 != NULL, "Got icon %p\n", hicon2);
 
     /* existing index */
-    hicon = ExtractIconW(NULL, L"shell32.dll", 0);
+    hicon = ExtractIconW(NULL, shell32W, 0);
     ok(hicon != NULL && HandleToLong(hicon) != -1, "Got icon %p\n", hicon);
     GetIconInfo(hicon, &info);
     GetObjectW(info.hbmColor, sizeof(bm), &bm);
@@ -1284,16 +1291,16 @@ if (0)
     DestroyIcon(hicon);
 
     /* returns number of resources */
-    hicon = ExtractIconW(NULL, L"shell32.dll", -1);
+    hicon = ExtractIconW(NULL, shell32W, -1);
     ok(HandleToLong(hicon) > 1 && hicon == hicon2, "Got icon %p\n", hicon);
 
     /* invalid index, valid dll name */
-    hicon = ExtractIconW(NULL, L"shell32.dll", 3000);
+    hicon = ExtractIconW(NULL, shell32W, 3000);
     ok(hicon == NULL, "Got icon %p\n", hicon);
 
     /* Create a temporary non-executable file */
     GetTempPathW(ARRAY_SIZE(pathW), pathW);
-    lstrcatW(pathW, L"\\extracticon_test.txt");
+    lstrcatW(pathW, nameW);
     file = CreateFileW(pathW, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
     ok(file != INVALID_HANDLE_VALUE, "Failed to create a test file\n");
     CloseHandle(file);
@@ -1311,10 +1318,10 @@ if (0)
     ok(r, "failed to delete file %s (%ld)\n", path, GetLastError());
 
     /* Empty file path */
-    hicon = ExtractIconW(NULL, L"", -1);
+    hicon = ExtractIconW(NULL, emptyW, -1);
     ok(hicon == NULL, "Got icon %p\n", hicon);
 
-    hicon = ExtractIconW(NULL, L"", 0);
+    hicon = ExtractIconW(NULL, emptyW, 0);
     ok(hicon == NULL, "Got icon %p\n", hicon);
 }
 

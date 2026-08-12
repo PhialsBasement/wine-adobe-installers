@@ -1,5 +1,5 @@
 /*
- * Copyright 2025 Connor McAdams for CodeWeavers
+ * Copyright 2024 Connor McAdams for CodeWeavers
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -31,3 +31,4 @@ BOOL WINAPI D3DX11CheckVersion(UINT d3d_sdk_ver, UINT d3dx_sdk_ver)
 
     return d3d_sdk_ver == D3D11_SDK_VERSION && d3dx_sdk_ver == D3DX11_SDK_VERSION;
 }
+

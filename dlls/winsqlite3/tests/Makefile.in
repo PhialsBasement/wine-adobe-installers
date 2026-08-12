@@ -1,4 +1,0 @@
-TESTDLL = winsqlite3.dll
-
-SOURCES = \
-	winsqlite3.c

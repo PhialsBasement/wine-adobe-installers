@@ -90,7 +90,9 @@ static BOOL ReadChmSystem(CHMInfo *chm)
         WORD len;
     } entry;
 
-    hres = IStorage_OpenStream(chm->pStorage, L"#SYSTEM", NULL, STGM_READ, 0, &stream);
+    static const WCHAR wszSYSTEM[] = {'#','S','Y','S','T','E','M',0};
+
+    hres = IStorage_OpenStream(chm->pStorage, wszSYSTEM, NULL, STGM_READ, 0, &stream);
     if(FAILED(hres)) {
         WARN("Could not open #SYSTEM stream: %08lx\n", hres);
         return FALSE;
@@ -188,7 +190,9 @@ LPWSTR FindContextAlias(CHMInfo *chm, DWORD index)
     LPCSTR ret = NULL;
     HRESULT hres;
 
-    hres = IStorage_OpenStream(chm->pStorage, L"#IVB", NULL, STGM_READ, 0, &ivb_stream);
+    static const WCHAR wszIVB[] = {'#','I','V','B',0};
+
+    hres = IStorage_OpenStream(chm->pStorage, wszIVB, NULL, STGM_READ, 0, &ivb_stream);
     if(FAILED(hres)) {
         WARN("Could not open #IVB stream: %08lx\n", hres);
         return NULL;
@@ -357,6 +361,11 @@ BOOL LoadWinTypeFromCHM(HHInfo *info)
     DWORD cbRead;
     BOOL ret = FALSE;
 
+    static const WCHAR empty[] = {0};
+    static const WCHAR toc_extW[] = {'h','h','c',0};
+    static const WCHAR index_extW[] = {'h','h','k',0};
+    static const WCHAR windowsW[] = {'#','W','I','N','D','O','W','S',0};
+
     /* HH_WINTYPE as stored on disk.  It's identical to HH_WINTYPE except that the pointer fields
        have been changed to DWORDs, so that the layout on 64-bit remains unchanged. */
     struct file_wintype
@@ -403,7 +412,7 @@ BOOL LoadWinTypeFromCHM(HHInfo *info)
     wintype.cbStruct = sizeof(wintype);
     wintype.fUniCodeStrings = TRUE;
 
-    hr = IStorage_OpenStream(pStorage, L"#WINDOWS", NULL, STGM_READ, 0, &pStream);
+    hr = IStorage_OpenStream(pStorage, windowsW, NULL, STGM_READ, 0, &pStream);
     if (SUCCEEDED(hr))
     {
         /* jump past the #WINDOWS header */
@@ -448,9 +457,10 @@ BOOL LoadWinTypeFromCHM(HHInfo *info)
     else
     {
         /* no defined window types so use (hopefully) sane defaults */
-        wintype.pszType    = wcsdup(info->pCHMInfo->defWindow ? info->pCHMInfo->defWindow : L"defaultwin");
-        wintype.pszToc     = wcsdup(info->pCHMInfo->defToc ? info->pCHMInfo->defToc : L"");
-        wintype.pszIndex   = wcsdup(L"");
+        static const WCHAR defaultwinW[] = {'d','e','f','a','u','l','t','w','i','n','\0'};
+        wintype.pszType    = wcsdup(info->pCHMInfo->defWindow ? info->pCHMInfo->defWindow : defaultwinW);
+        wintype.pszToc     = wcsdup(info->pCHMInfo->defToc ? info->pCHMInfo->defToc : empty);
+        wintype.pszIndex   = wcsdup(empty);
         wintype.fsValidMembers = 0;
         wintype.fsWinProperties = HHWIN_PROP_TRI_PANE;
         wintype.dwStyles = WS_POPUP;
@@ -462,13 +472,13 @@ BOOL LoadWinTypeFromCHM(HHInfo *info)
     /* merge the new data with any pre-existing HH_WINTYPE structure */
     MergeChmProperties(&wintype, info, FALSE);
     if (!info->WinType.pszCaption)
-        info->WinType.pszCaption = info->stringsW.pszCaption = wcsdup(info->pCHMInfo->defTitle ? info->pCHMInfo->defTitle : L"");
+        info->WinType.pszCaption = info->stringsW.pszCaption = wcsdup(info->pCHMInfo->defTitle ? info->pCHMInfo->defTitle : empty);
     if (!info->WinType.pszFile)
-        info->WinType.pszFile    = info->stringsW.pszFile    = wcsdup(info->pCHMInfo->defTopic ? info->pCHMInfo->defTopic : L"");
+        info->WinType.pszFile    = info->stringsW.pszFile    = wcsdup(info->pCHMInfo->defTopic ? info->pCHMInfo->defTopic : empty);
     if (!info->WinType.pszToc)
-        info->WinType.pszToc     = info->stringsW.pszToc     = FindHTMLHelpSetting(info, L"hhc");
+        info->WinType.pszToc     = info->stringsW.pszToc     = FindHTMLHelpSetting(info, toc_extW);
     if (!info->WinType.pszIndex)
-        info->WinType.pszIndex   = info->stringsW.pszIndex   = FindHTMLHelpSetting(info, L"hhk");
+        info->WinType.pszIndex   = info->stringsW.pszIndex   = FindHTMLHelpSetting(info, index_extW);
 
     wintype_free(&wintype);
     ret = TRUE;
@@ -499,10 +509,11 @@ LPCWSTR skip_schema(LPCWSTR url)
 void SetChmPath(ChmPath *file, LPCWSTR base_file, LPCWSTR path)
 {
     LPCWSTR ptr;
+    static const WCHAR separatorW[] = {':',':',0};
 
     path = skip_schema(path);
 
-    ptr = wcsstr(path, L"::");
+    ptr = wcsstr(path, separatorW);
     if(ptr) {
         WCHAR chm_file[MAX_PATH];
         WCHAR rel_path[MAX_PATH];
@@ -623,6 +634,8 @@ CHMInfo *OpenCHM(LPCWSTR szFile)
     HRESULT hres;
     CHMInfo *ret;
 
+    static const WCHAR wszSTRINGS[] = {'#','S','T','R','I','N','G','S',0};
+
     if (!(ret = calloc(1, sizeof(CHMInfo))))
         return NULL;
     ret->codePage = CP_ACP;
@@ -645,7 +658,7 @@ CHMInfo *OpenCHM(LPCWSTR szFile)
         WARN("Could not open storage: %08lx\n", hres);
         return CloseCHM(ret);
     }
-    hres = IStorage_OpenStream(ret->pStorage, L"#STRINGS", NULL, STGM_READ, 0,
+    hres = IStorage_OpenStream(ret->pStorage, wszSTRINGS, NULL, STGM_READ, 0,
             &ret->strings_stream);
     if(FAILED(hres)) {
         WARN("Could not open #STRINGS stream: %08lx\n", hres);

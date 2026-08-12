@@ -31,6 +31,8 @@
 
 #include "wine/test.h"
 
+DEFINE_GUID(CLSID_Pathname,0x080d0d78,0xf421,0x11d0,0xa3,0x6e,0x00,0xc0,0x4f,0xb9,0x50,0xdc);
+
 static void test_ADsBuildVarArrayStr(void)
 {
     const WCHAR *props[] = { L"prop1", L"prop2" };
@@ -79,53 +81,6 @@ static void test_ADsBuildVarArrayStr(void)
     ok(!lstrcmpW(V_BSTR(&data[1]), L"prop2"), "got %s\n", wine_dbgstr_w(V_BSTR(&data[1])));
     hr = SafeArrayUnaccessData(V_ARRAY(&var));
     ok(hr == S_OK, "got %#lx\n", hr);
-    VariantClear(&var);
-}
-
-static void test_ADsBuildVarArrayInt(void)
-{
-    const DWORD props[] = { 1, 2, 3, 4 };
-    HRESULT hr;
-    VARIANT var, item;
-    LONG start, end, idx;
-
-    hr = ADsBuildVarArrayInt(NULL, 0, NULL);
-    ok(hr == E_ADS_BAD_PARAMETER || hr == E_FAIL /* XP */, "got %#lx\n", hr);
-
-    hr = ADsBuildVarArrayInt(NULL, 0, &var);
-    ok(hr == S_OK, "got %#lx\n", hr);
-    ok(V_VT(&var) == (VT_ARRAY | VT_VARIANT), "got %d\n", V_VT(&var));
-    start = 0xdeadbeef;
-    hr = SafeArrayGetLBound(V_ARRAY(&var), 1, &start);
-    ok(hr == S_OK, "got %#lx\n", hr);
-    ok(start == 0, "got %ld\n", start);
-    end = 0xdeadbeef;
-    hr = SafeArrayGetUBound(V_ARRAY(&var), 1, &end);
-    ok(hr == S_OK, "got %#lx\n", hr);
-    ok(end == -1, "got %ld\n", end);
-    VariantClear(&var);
-
-    hr = ADsBuildVarArrayInt((LPDWORD)props, ARRAY_SIZE(props), &var);
-    ok(hr == S_OK, "got %#lx\n", hr);
-    ok(V_VT(&var) == (VT_ARRAY | VT_VARIANT), "got %d\n", V_VT(&var));
-    start = 0xdeadbeef;
-    hr = SafeArrayGetLBound(V_ARRAY(&var), 1, &start);
-    ok(hr == S_OK, "got %#lx\n", hr);
-    ok(start == 0, "got %ld\n", start);
-    end = 0xdeadbeef;
-    hr = SafeArrayGetUBound(V_ARRAY(&var), 1, &end);
-    ok(hr == S_OK, "got %#lx\n", hr);
-    ok(end == 3, "got %ld\n", end);
-
-    for (idx = 0; idx < ARRAY_SIZE(props); idx++)
-    {
-        hr = SafeArrayGetElement(V_ARRAY(&var), &idx, &item);
-        ok(hr == S_OK, "got %#lx\n", hr);
-        ok(V_VT(&item) == VT_I4, "got %d\n", V_VT(&item));
-        ok(V_UI4(&item) == props[idx], "got %lu\n", V_UI4(&item));
-        VariantClear(&item);
-    }
-
     VariantClear(&var);
 }
 
@@ -212,7 +167,6 @@ START_TEST(activeds)
 
     test_Pathname();
     test_ADsBuildVarArrayStr();
-    test_ADsBuildVarArrayInt();
 
     CoUninitialize();
 }

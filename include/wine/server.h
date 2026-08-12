@@ -26,6 +26,7 @@
 #include <winbase.h>
 #include <winternl.h>
 #include <wine/server_protocol.h>
+#include <wine/debug.h>
 
 /* client communication functions */
 
@@ -47,9 +48,9 @@ struct __server_request_info
     unsigned int          data_count; /* count of request data pointers */
     void                 *reply_data; /* reply data pointer */
     struct __server_iovec data[__SERVER_MAX_DATA];  /* request variable size data */
+    const char *name;
 };
 
-NTSYSAPI void CDECL wine_server_send_fd( int fd );
 NTSYSAPI unsigned int CDECL wine_server_call( void *req_ptr );
 NTSYSAPI NTSTATUS CDECL wine_server_fd_to_handle( int fd, unsigned int access, unsigned int attributes, HANDLE *handle );
 NTSYSAPI NTSTATUS CDECL wine_server_handle_to_fd( HANDLE handle, unsigned int access, int *unix_fd, unsigned int *options );
@@ -154,6 +155,7 @@ static inline struct rectangle wine_server_rectangle( RECT rect )
         struct type##_request * const req = &__req.u.req.type##_request; \
         const struct type##_reply * const reply = &__req.u.reply.type##_reply; \
         memset( &__req.u.req, 0, sizeof(__req.u.req) ); \
+        __req.name = #type; \
         __req.u.req.request_header.req = REQ_##type; \
         __req.data_count = 0; \
         (void)reply; \

@@ -367,7 +367,7 @@ void __thiscall _Concurrent_queue_base_v4_dummy(_Concurrent_queue_base_v4 *this)
     ERR("unexpected call\n");
 }
 
-DEFINE_RTTI_DATA(_Concurrent_queue_base_v4, 0, ".?AV_Concurrent_queue_base_v4@details@Concurrency@@")
+DEFINE_RTTI_DATA0(_Concurrent_queue_base_v4, 0, ".?AV_Concurrent_queue_base_v4@details@Concurrency@@")
 
 static LONG _Runtime_object_id;
 
@@ -408,11 +408,11 @@ int __thiscall _Runtime_object__GetId(_Runtime_object *this)
     return this->id;
 }
 
-DEFINE_RTTI_DATA(_Runtime_object, 0, ".?AV_Runtime_object@details@Concurrency@@")
+DEFINE_RTTI_DATA0(_Runtime_object, 0, ".?AV_Runtime_object@details@Concurrency@@")
 
 typedef struct __Concurrent_vector_base_v4
 {
-    void* (__cdecl __WINE_ALLOC_SIZE(2) *allocator)(struct __Concurrent_vector_base_v4 *, size_t);
+    void* (__cdecl *allocator)(struct __Concurrent_vector_base_v4 *, size_t);
     void *storage[3];
     size_t first_block;
     size_t early_size;
@@ -541,7 +541,7 @@ size_t __thiscall _Concurrent_vector_base_v4__Internal_capacity(
     last_block = (this->segment == this->storage ? STORAGE_SIZE : SEGMENT_SIZE);
     for(i = 0; i < last_block; i++)
     {
-        if(!this->segment[i] || this->segment[i] == SEGMENT_ALLOC_MARKER)
+        if(!this->segment[i])
             return !i ? 0 : 1 << i;
     }
     return 1 << i;
@@ -1117,8 +1117,10 @@ __ASM_BLOCK_END
 
 void init_concurrency_details(void *base)
 {
-    INIT_RTTI(_Concurrent_queue_base_v4, base);
-    INIT_RTTI(_Runtime_object, base);
+#ifdef RTTI_USE_RVA
+    init__Concurrent_queue_base_v4_rtti(base);
+    init__Runtime_object_rtti(base);
+#endif
 }
 #endif
 

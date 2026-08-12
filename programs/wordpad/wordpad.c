@@ -765,7 +765,7 @@ static void preview_exit(HWND hMainWnd)
     HWND hEditorWnd = GetDlgItem(hMainWnd, IDC_EDITOR);
 
     set_bar_states();
-    ShowWindow(hEditorWnd, SW_SHOW);
+    ShowWindow(hEditorWnd, TRUE);
 
     close_preview(hMainWnd);
 
@@ -2249,7 +2249,7 @@ static LRESULT OnCommand( HWND hWnd, WPARAM wParam, LPARAM lParam)
             barState[index] = 1 << BANDID_STATUSBAR;
             set_bar_states();
             barState[index] = tmp;
-            ShowWindow(hEditorWnd, SW_HIDE);
+            ShowWindow(hEditorWnd, FALSE);
 
             init_preview(hWnd, wszFileName);
 

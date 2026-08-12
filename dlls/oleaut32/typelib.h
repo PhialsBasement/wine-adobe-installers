@@ -300,7 +300,7 @@ typedef struct {
  *
  */
 
-#pragma pack(push,1)
+#include "pshpack1.h"
 
 typedef struct {
 /*00*/	DWORD SLTG_magic;	/* 0x47544c53  == "SLTG" */
@@ -382,18 +382,18 @@ typedef struct {
 /* we then get 0x40 bytes worth of 0xffff or small numbers followed by
    nrOfFileBlks - 2 of these */
 typedef struct {
+	WORD small_no;
 	SLTG_Name index_name; /* This refers to a name in the directory */
 	SLTG_Name other_name; /* Another one of these weird names */
 	WORD res1a;	      /* 0xffff */
 	WORD name_offs;	      /* offset to name in name table */
-	WORD hlpstr_len;      /* if this is non-zero we get this many
+	WORD more_bytes;      /* if this is non-zero we get this many
 				 bytes before the next element, which seem
 				 to reference the docstring of the type ? */
 	WORD res20;	      /* 0xffff */
 	DWORD helpcontext;
 	WORD res26;	      /* 0xffff */
         GUID uuid;
-        WORD typekind;
 } SLTG_OtherTypeInfo;
 
 /* Next we get WORD 0x0003 followed by a DWORD which if we add to
@@ -589,7 +589,7 @@ WORD offset from start of block to SAFEARRAY
 WORD typeofarray
 */
 
-#pragma pack(pop)
+#include "poppack.h"
 
 /* The OLE Automation ProxyStub Interface Class (aka Typelib Marshaler) */
 DEFINE_OLEGUID( CLSID_PSDispatch,    0x00020420, 0x0000, 0x0000 );

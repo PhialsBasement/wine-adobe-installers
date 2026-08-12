@@ -822,13 +822,13 @@ extern void         module_reset_debug_info(struct module* module);
 extern BOOL         module_remove(struct process* pcs,
                                   struct module* module);
 extern void         module_set_module(struct module* module, const WCHAR* name);
-extern const WCHAR *get_wine_loader_name(struct process *pcs);
+extern WCHAR*       get_wine_loader_name(struct process *pcs) __WINE_DEALLOC(HeapFree, 3) __WINE_MALLOC;
 extern BOOL         module_is_wine_host(const WCHAR* module_name, const WCHAR* ext);
 extern BOOL         module_refresh_list(struct process *pcs);
 
 /* msc.c */
-extern BOOL         pdb_load_debug_info(struct module *module, const SYMSRV_INDEX_INFOW *info, BOOL unmatched);
-extern BOOL         pe_load_debug_directory(struct module* module,
+extern BOOL         pe_load_debug_directory(const struct process* pcs,
+                                            struct module* module,
                                             const BYTE* mapping,
                                             const IMAGE_SECTION_HEADER* sectp, DWORD nsect,
                                             const IMAGE_DEBUG_DIRECTORY* dbg, int nDbg);
@@ -839,8 +839,8 @@ extern DWORD        dbg_get_file_indexinfo(void* image, DWORD size, SYMSRV_INDEX
 extern BOOL         old_pdb_virtual_unwind(struct cpu_stack_walk *csw, DWORD_PTR ip, union ctx *context);
 
 /* path.c */
-extern BOOL         path_find_symbol_file(const struct module *module,
-                                          const WCHAR *full_path, BOOL is_pdb, const GUID* guid, DWORD dw1, DWORD dw2,
+extern BOOL         path_find_symbol_file(const struct process *pcs, const struct module *module,
+                                          PCSTR full_path, BOOL is_pdb, const GUID* guid, DWORD dw1, DWORD dw2,
                                           SYMSRV_INDEX_INFOW *info, BOOL *unmatched);
 extern WCHAR *get_dos_file_name(const WCHAR *filename) __WINE_DEALLOC(HeapFree, 3) __WINE_MALLOC;
 extern BOOL         search_dll_path(const struct process* process, const WCHAR *name, WORD machine,
@@ -850,7 +850,7 @@ extern const WCHAR* file_name(const WCHAR* str);
 extern const char* file_nameA(const char* str);
 
 /* pdb.c */
-extern BOOL         pdb_init_modfmt(const struct msc_debug_info *msc_dbg,
+extern BOOL         pdb_init_modfmt(const struct process *pcs, const struct msc_debug_info *msc_dbg,
                                     const WCHAR *filename, BOOL *has_linenumber_info);
 extern BOOL         pdb_virtual_unwind(struct cpu_stack_walk *csw, DWORD_PTR ip, union ctx *context);
 struct _PDB_FPO_DATA;
@@ -858,7 +858,6 @@ extern BOOL         pdb_fpo_unwind_parse_cmd_string(struct cpu_stack_walk* csw, 
                                                     const char* cmd, WOW64_CONTEXT *context);
 
 /* pe_module.c */
-extern unsigned     pe_clone_sections_table(struct module *module, IMAGE_SECTION_HEADER **sections);
 extern BOOL         pe_load_nt_header(HANDLE hProc, DWORD64 base, IMAGE_NT_HEADERS* nth, BOOL* is_builtin);
 extern struct module*
                     pe_load_native_module(struct process* pcs, const WCHAR* name,
@@ -866,7 +865,8 @@ extern struct module*
 extern struct module*
                     pe_load_builtin_module(struct process* pcs, const WCHAR* name,
                                            DWORD64 base, DWORD64 size);
-extern BOOL         pe_load_debug_info(struct module* module);
+extern BOOL         pe_load_debug_info(const struct process* pcs,
+                                       struct module* module);
 extern const char*  pe_map_directory(struct module* module, int dirno, DWORD* size);
 extern BOOL         pe_unmap_directory(struct module* module, int dirno, const char*);
 extern DWORD        pe_get_file_indexinfo(void* image, DWORD size, SYMSRV_INDEX_INFOW* info);
@@ -913,13 +913,14 @@ extern int __cdecl  symt_cmp_addr(const void* p1, const void* p2);
 extern void         copy_symbolW(SYMBOL_INFOW* siw, const SYMBOL_INFO* si);
 extern void         symbol_setname(SYMBOL_INFO* si, const char* name);
 extern BOOL         symt_match_stringAW(const char *string, const WCHAR *re, BOOL _case);
-extern symref_t     symt_find_nearest(struct module* module, DWORD_PTR addr);
+extern struct symt_ht*
+                    symt_find_nearest(struct module* module, DWORD_PTR addr);
 extern struct symt_ht*
                     symt_find_symbol_at(struct module* module, DWORD_PTR addr);
 extern struct symt_module*
                     symt_new_module(struct module* module);
 extern struct symt_compiland*
-                    symt_new_compiland(struct module* module, symref_t parent, const char *filename);
+                    symt_new_compiland(struct module* module, const char *filename);
 extern struct symt_public*
                     symt_new_public(struct module* module,
                                     struct symt_compiland* parent,
@@ -935,7 +936,7 @@ extern struct symt_data*
                                              symref_t type);
 extern struct symt_function*
                     symt_new_function(struct module* module,
-                                      symref_t compiland,
+                                      struct symt_compiland* parent,
                                       const char* name,
                                       ULONG_PTR addr, ULONG_PTR size,
                                       symref_t type, DWORD_PTR user);

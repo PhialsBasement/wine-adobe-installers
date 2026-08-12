@@ -47,6 +47,15 @@ struct HTMLStyleSheetsCollection {
     nsIDOMStyleSheetList *nslist;
 };
 
+typedef struct {
+    IEnumVARIANT IEnumVARIANT_iface;
+
+    LONG ref;
+
+    ULONG iter;
+    HTMLStyleSheetsCollection *col;
+} HTMLStyleSheetsCollectionEnum;
+
 struct HTMLStyleSheetRulesCollection {
     DispatchEx dispex;
     IHTMLStyleSheetRulesCollection IHTMLStyleSheetRulesCollection_iface;
@@ -146,7 +155,7 @@ static void HTMLStyleSheetRule_destructor(DispatchEx *dispex)
 }
 
 dispex_static_data_t CSSRule_dispex = {
-    .id = OBJID_CSSRule,
+    .id = PROT_CSSRule,
 };
 
 static const dispex_static_data_vtbl_t CSSStyleRule_dispex_vtbl = {
@@ -161,8 +170,8 @@ static const tid_t CSSStyleRule_iface_tids[] = {
     0
 };
 dispex_static_data_t CSSStyleRule_dispex = {
-    .id           = OBJID_CSSStyleRule,
-    .prototype_id = OBJID_CSSRule,
+    .id           = PROT_CSSStyleRule,
+    .prototype_id = PROT_CSSRule,
     .vtbl         = &CSSStyleRule_dispex_vtbl,
     .disp_tid     = DispHTMLStyleSheetRule_tid,
     .iface_tids   = CSSStyleRule_iface_tids,
@@ -364,7 +373,7 @@ static const tid_t MSCSSRuleList_iface_tids[] = {
     0
 };
 dispex_static_data_t MSCSSRuleList_dispex = {
-    .id         = OBJID_MSCSSRuleList,
+    .id         = PROT_MSCSSRuleList,
     .vtbl       = &MSCSSRuleList_dispex_vtbl,
     .disp_tid   = DispHTMLStyleSheetRulesCollection_tid,
     .iface_tids = MSCSSRuleList_iface_tids,
@@ -391,7 +400,129 @@ static HRESULT create_style_sheet_rules_collection(nsIDOMCSSRuleList *nslist, Di
     return S_OK;
 }
 
-static HRESULT HTMLStyleSheetsCollection_collection_item(DispatchEx*,ULONG,IDispatch**);
+static inline HTMLStyleSheetsCollectionEnum *HTMLStyleSheetsCollectionEnum_from_IEnumVARIANT(IEnumVARIANT *iface)
+{
+    return CONTAINING_RECORD(iface, HTMLStyleSheetsCollectionEnum, IEnumVARIANT_iface);
+}
+
+static HRESULT WINAPI HTMLStyleSheetsCollectionEnum_QueryInterface(IEnumVARIANT *iface, REFIID riid, void **ppv)
+{
+    HTMLStyleSheetsCollectionEnum *This = HTMLStyleSheetsCollectionEnum_from_IEnumVARIANT(iface);
+
+    TRACE("(%p)->(%s %p)\n", This, debugstr_mshtml_guid(riid), ppv);
+
+    if(IsEqualGUID(riid, &IID_IUnknown)) {
+        *ppv = &This->IEnumVARIANT_iface;
+    }else if(IsEqualGUID(riid, &IID_IEnumVARIANT)) {
+        *ppv = &This->IEnumVARIANT_iface;
+    }else {
+        FIXME("(%p)->(%s %p)\n", This, debugstr_mshtml_guid(riid), ppv);
+        *ppv = NULL;
+        return E_NOINTERFACE;
+    }
+
+    IUnknown_AddRef((IUnknown*)*ppv);
+    return S_OK;
+}
+
+static ULONG WINAPI HTMLStyleSheetsCollectionEnum_AddRef(IEnumVARIANT *iface)
+{
+    HTMLStyleSheetsCollectionEnum *This = HTMLStyleSheetsCollectionEnum_from_IEnumVARIANT(iface);
+    LONG ref = InterlockedIncrement(&This->ref);
+
+    TRACE("(%p) ref=%ld\n", This, ref);
+
+    return ref;
+}
+
+static ULONG WINAPI HTMLStyleSheetsCollectionEnum_Release(IEnumVARIANT *iface)
+{
+    HTMLStyleSheetsCollectionEnum *This = HTMLStyleSheetsCollectionEnum_from_IEnumVARIANT(iface);
+    LONG ref = InterlockedDecrement(&This->ref);
+
+    TRACE("(%p) ref=%ld\n", This, ref);
+
+    if(!ref) {
+        IHTMLStyleSheetsCollection_Release(&This->col->IHTMLStyleSheetsCollection_iface);
+        free(This);
+    }
+
+    return ref;
+}
+
+static HRESULT WINAPI HTMLStyleSheetsCollectionEnum_Next(IEnumVARIANT *iface, ULONG celt, VARIANT *rgVar, ULONG *pCeltFetched)
+{
+    HTMLStyleSheetsCollectionEnum *This = HTMLStyleSheetsCollectionEnum_from_IEnumVARIANT(iface);
+    VARIANT index;
+    HRESULT hres;
+    ULONG num, i;
+    UINT32 len;
+
+    TRACE("(%p)->(%lu %p %p)\n", This, celt, rgVar, pCeltFetched);
+
+    nsIDOMStyleSheetList_GetLength(This->col->nslist, &len);
+    num = min(len - This->iter, celt);
+    V_VT(&index) = VT_I4;
+
+    for(i = 0; i < num; i++) {
+        V_I4(&index) = This->iter + i;
+        hres = IHTMLStyleSheetsCollection_item(&This->col->IHTMLStyleSheetsCollection_iface, &index, &rgVar[i]);
+        if(FAILED(hres)) {
+            while(i--)
+                VariantClear(&rgVar[i]);
+            return hres;
+        }
+    }
+
+    This->iter += num;
+    if(pCeltFetched)
+        *pCeltFetched = num;
+    return num == celt ? S_OK : S_FALSE;
+}
+
+static HRESULT WINAPI HTMLStyleSheetsCollectionEnum_Skip(IEnumVARIANT *iface, ULONG celt)
+{
+    HTMLStyleSheetsCollectionEnum *This = HTMLStyleSheetsCollectionEnum_from_IEnumVARIANT(iface);
+    UINT32 len;
+
+    TRACE("(%p)->(%lu)\n", This, celt);
+
+    nsIDOMStyleSheetList_GetLength(This->col->nslist, &len);
+    if(This->iter + celt > len) {
+        This->iter = len;
+        return S_FALSE;
+    }
+
+    This->iter += celt;
+    return S_OK;
+}
+
+static HRESULT WINAPI HTMLStyleSheetsCollectionEnum_Reset(IEnumVARIANT *iface)
+{
+    HTMLStyleSheetsCollectionEnum *This = HTMLStyleSheetsCollectionEnum_from_IEnumVARIANT(iface);
+
+    TRACE("(%p)->()\n", This);
+
+    This->iter = 0;
+    return S_OK;
+}
+
+static HRESULT WINAPI HTMLStyleSheetsCollectionEnum_Clone(IEnumVARIANT *iface, IEnumVARIANT **ppEnum)
+{
+    HTMLStyleSheetsCollectionEnum *This = HTMLStyleSheetsCollectionEnum_from_IEnumVARIANT(iface);
+    FIXME("(%p)->(%p)\n", This, ppEnum);
+    return E_NOTIMPL;
+}
+
+static const IEnumVARIANTVtbl HTMLStyleSheetsCollectionEnumVtbl = {
+    HTMLStyleSheetsCollectionEnum_QueryInterface,
+    HTMLStyleSheetsCollectionEnum_AddRef,
+    HTMLStyleSheetsCollectionEnum_Release,
+    HTMLStyleSheetsCollectionEnum_Next,
+    HTMLStyleSheetsCollectionEnum_Skip,
+    HTMLStyleSheetsCollectionEnum_Reset,
+    HTMLStyleSheetsCollectionEnum_Clone
+};
 
 static inline HTMLStyleSheetsCollection *impl_from_IHTMLStyleSheetsCollection(IHTMLStyleSheetsCollection *iface)
 {
@@ -420,10 +551,23 @@ static HRESULT WINAPI HTMLStyleSheetsCollection_get__newEnum(IHTMLStyleSheetsCol
         IUnknown **p)
 {
     HTMLStyleSheetsCollection *This = impl_from_IHTMLStyleSheetsCollection(iface);
+    HTMLStyleSheetsCollectionEnum *ret;
 
     TRACE("(%p)->(%p)\n", This, p);
 
-    return create_enum_variant(&This->dispex, p);
+    ret = malloc(sizeof(*ret));
+    if(!ret)
+        return E_OUTOFMEMORY;
+
+    ret->IEnumVARIANT_iface.lpVtbl = &HTMLStyleSheetsCollectionEnumVtbl;
+    ret->ref = 1;
+    ret->iter = 0;
+
+    HTMLStyleSheetsCollection_AddRef(&This->IHTMLStyleSheetsCollection_iface);
+    ret->col = This;
+
+    *p = (IUnknown*)&ret->IEnumVARIANT_iface;
+    return S_OK;
 }
 
 static HRESULT WINAPI HTMLStyleSheetsCollection_item(IHTMLStyleSheetsCollection *iface,
@@ -435,16 +579,30 @@ static HRESULT WINAPI HTMLStyleSheetsCollection_item(IHTMLStyleSheetsCollection 
 
     switch(V_VT(pvarIndex)) {
     case VT_I4: {
+        nsIDOMStyleSheet *nsstylesheet;
+        IHTMLStyleSheet *stylesheet;
+        nsresult nsres;
         HRESULT hres;
 
         TRACE("index=%ld\n", V_I4(pvarIndex));
 
-        V_VT(pvarResult) = VT_EMPTY;
-        hres = HTMLStyleSheetsCollection_collection_item(&This->dispex, V_I4(pvarIndex), &V_DISPATCH(pvarResult));
-        if(SUCCEEDED(hres))
-            V_VT(pvarResult) = VT_DISPATCH;
-        return hres;
+        nsres = nsIDOMStyleSheetList_Item(This->nslist, V_I4(pvarIndex), &nsstylesheet);
+        if(NS_FAILED(nsres) || !nsstylesheet) {
+            WARN("Item failed: %08lx\n", nsres);
+            V_VT(pvarResult) = VT_EMPTY;
+            return E_INVALIDARG;
+        }
+
+        hres = create_style_sheet(nsstylesheet, &This->dispex, &stylesheet);
+        nsIDOMStyleSheet_Release(nsstylesheet);
+        if(FAILED(hres))
+            return hres;
+
+        V_VT(pvarResult) = VT_DISPATCH;
+        V_DISPATCH(pvarResult) = (IDispatch*)stylesheet;
+        return S_OK;
     }
+
     case VT_BSTR:
         FIXME("id=%s not implemented\n", debugstr_w(V_BSTR(pvarResult)));
         return E_NOTIMPL;
@@ -533,18 +691,27 @@ static HRESULT HTMLStyleSheetsCollection_invoke(DispatchEx *dispex, DISPID id, L
 
     switch(flags) {
     case DISPATCH_PROPERTYGET: {
+        nsIDOMStyleSheet *nsstylesheet;
+        IHTMLStyleSheet *stylesheet;
+        nsresult nsres;
         HRESULT hres;
 
-        hres = HTMLStyleSheetsCollection_collection_item(&This->dispex, id - MSHTML_DISPID_CUSTOM_MIN, &V_DISPATCH(res));
-        if(FAILED(hres)) {
-            if(hres == E_INVALIDARG) {
-                V_VT(res) = VT_EMPTY;
-                return S_OK;
-            }
+        nsres = nsIDOMStyleSheetList_Item(This->nslist, id - MSHTML_DISPID_CUSTOM_MIN, &nsstylesheet);
+        if(NS_FAILED(nsres))
             return DISP_E_MEMBERNOTFOUND;
+        if(!nsstylesheet) {
+            V_VT(res) = VT_EMPTY;
+            return S_OK;
         }
+
+        hres = create_style_sheet(nsstylesheet, &This->dispex, &stylesheet);
+        nsIDOMStyleSheet_Release(nsstylesheet);
+        if(FAILED(hres))
+            return hres;
+
         V_VT(res) = VT_DISPATCH;
-        return hres;
+        V_DISPATCH(res) = (IDispatch*)stylesheet;
+        break;
     }
 
     default:
@@ -555,35 +722,6 @@ static HRESULT HTMLStyleSheetsCollection_invoke(DispatchEx *dispex, DISPID id, L
     return S_OK;
 }
 
-static ULONG HTMLStyleSheetsCollection_collection_len(DispatchEx *dispex)
-{
-    HTMLStyleSheetsCollection *This = HTMLStyleSheetsCollection_from_DispatchEx(dispex);
-    nsresult nsres;
-    UINT32 len;
-
-    nsres = nsIDOMStyleSheetList_GetLength(This->nslist, &len);
-    assert(nsres == NS_OK);
-    return len;
-}
-
-static HRESULT HTMLStyleSheetsCollection_collection_item(DispatchEx *dispex, ULONG index, IDispatch **p)
-{
-    HTMLStyleSheetsCollection *This = HTMLStyleSheetsCollection_from_DispatchEx(dispex);
-    nsIDOMStyleSheet *nsstylesheet;
-    nsresult nsres;
-    HRESULT hres;
-
-    nsres = nsIDOMStyleSheetList_Item(This->nslist, index, &nsstylesheet);
-    if(NS_FAILED(nsres))
-        return map_nsresult(nsres);
-    if(!nsstylesheet)
-        return E_INVALIDARG;
-
-    hres = create_style_sheet(nsstylesheet, &This->dispex, (IHTMLStyleSheet**)p);
-    nsIDOMStyleSheet_Release(nsstylesheet);
-    return hres;
-}
-
 static const dispex_static_data_vtbl_t StyleSheetList_dispex_vtbl = {
     .query_interface  = HTMLStyleSheetsCollection_query_interface,
     .destructor       = HTMLStyleSheetsCollection_destructor,
@@ -591,16 +729,14 @@ static const dispex_static_data_vtbl_t StyleSheetList_dispex_vtbl = {
     .unlink           = HTMLStyleSheetsCollection_unlink,
     .get_dispid       = HTMLStyleSheetsCollection_get_dispid,
     .get_prop_desc    = dispex_index_prop_desc,
-    .invoke           = HTMLStyleSheetsCollection_invoke,
-    .collection_len   = HTMLStyleSheetsCollection_collection_len,
-    .collection_item  = HTMLStyleSheetsCollection_collection_item,
+    .invoke           = HTMLStyleSheetsCollection_invoke
 };
 static const tid_t StyleSheetList_iface_tids[] = {
     IHTMLStyleSheetsCollection_tid,
     0
 };
 dispex_static_data_t StyleSheetList_dispex = {
-    .id         = OBJID_StyleSheetList,
+    .id         = PROT_StyleSheetList,
     .vtbl       = &StyleSheetList_dispex_vtbl,
     .disp_tid   = DispHTMLStyleSheetsCollection_tid,
     .iface_tids = StyleSheetList_iface_tids,
@@ -816,17 +952,48 @@ static HRESULT WINAPI HTMLStyleSheet_put_cssText(IHTMLStyleSheet *iface, BSTR v)
     }while(NS_SUCCEEDED(nsres));
 
     if(v && *v) {
+        UINT32 i, depth, idx;
         nsAString nsstr;
-        UINT32 idx;
+        WCHAR *ws;
 
-        /* FIXME: This won't work for multiple rules in the string. */
-        nsAString_InitDepend(&nsstr, v);
-        nsres = nsIDOMCSSStyleSheet_InsertRule(This->nsstylesheet, &nsstr, 0, &idx);
-        nsAString_Finish(&nsstr);
-        if(NS_FAILED(nsres)) {
-            FIXME("InsertRule failed for string %s. Probably multiple rules passed.\n", debugstr_w(v));
-            return E_FAIL;
+        depth = 0;
+        ws = malloc(sizeof(*ws) * (lstrlenW(v) + 1));
+        do
+        {
+            for (i = 0; v[i]; ++i)
+            {
+                ws[i] = v[i];
+                if (ws[i] == '{')
+                    ++depth;
+                else if (ws[i] == '}' && !--depth)
+                    break;
+            }
+            if (ws[i])
+                ws[++i] = 0;
+
+            v += i;
+
+            for (i = 0; ws[i]; ++i)
+                if (!iswspace(ws[i]))
+                    break;
+
+            if (!ws[i])
+            {
+                TRACE("Skipping empty part.\n");
+                continue;
+            }
+
+            nsAString_InitDepend(&nsstr, ws);
+            nsres = nsIDOMCSSStyleSheet_InsertRule(This->nsstylesheet, &nsstr, 0, &idx);
+            nsAString_Finish(&nsstr);
+
+            if(NS_FAILED(nsres))
+                FIXME("InsertRule failed for string %s.\n", debugstr_w(ws));
+            else
+                TRACE("Added rule %s.\n", debugstr_w(ws));
         }
+        while (*v);
+        free(ws);
     }
 
     return S_OK;
@@ -1092,7 +1259,7 @@ static void HTMLStyleSheet_init_dispex_info(dispex_data_t *info, compat_mode_t m
 }
 
 dispex_static_data_t StyleSheet_dispex = {
-    .id           = OBJID_StyleSheet,
+    .id           = PROT_StyleSheet,
     .init_info    = StyleSheet_init_dispex_info,
 };
 
@@ -1108,8 +1275,8 @@ static const tid_t CSSStyleSheet_iface_tids[] = {
     0
 };
 dispex_static_data_t CSSStyleSheet_dispex = {
-    .id           = OBJID_CSSStyleSheet,
-    .prototype_id = OBJID_StyleSheet,
+    .id           = PROT_CSSStyleSheet,
+    .prototype_id = PROT_StyleSheet,
     .vtbl         = &CSSStyleSheet_dispex_vtbl,
     .disp_tid     = DispHTMLStyleSheet_tid,
     .iface_tids   = CSSStyleSheet_iface_tids,

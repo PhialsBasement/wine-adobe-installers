@@ -122,11 +122,12 @@ static int FormatInt(LONGLONG qdwValue, LPWSTR pszBuf, int cchBuf)
  */
 static int FormatDouble(double value, int decimals, LPWSTR pszBuf, int cchBuf)
 {
+  static const WCHAR flfmt[] = {'%','f',0};
   WCHAR buf[64];
   NUMBERFMTW fmt;
   WCHAR decimal[8], thousand[8];
-
-  swprintf(buf, 64, L"%f", value);
+  
+  swprintf(buf, 64, flfmt, value);
 
   FillNumberFmt(&fmt, decimal, ARRAY_SIZE(decimal), thousand, ARRAY_SIZE(thousand));
   fmt.NumDigits = decimals;
@@ -230,8 +231,8 @@ HRESULT WINAPI StrRetToBufA (LPSTRRET src, const ITEMIDLIST *pidl, LPSTR dest, U
 	    break;
 
 	  default:
-	    WARN("unknown type!\n");
-	    return E_FAIL;
+	    FIXME("unknown type!\n");
+	    return E_NOTIMPL;
 	}
 	return S_OK;
 }
@@ -289,8 +290,8 @@ HRESULT WINAPI StrRetToBufW (LPSTRRET src, const ITEMIDLIST *pidl, LPWSTR dest, 
         break;
 
     default:
-        WARN("unknown type!\n");
-        return E_FAIL;
+        FIXME("unknown type!\n");
+        return E_NOTIMPL;
     }
 
     return S_OK;
@@ -463,6 +464,7 @@ LPSTR WINAPI StrFormatKBSizeA(LONGLONG llBytes, LPSTR lpszDest, UINT cchMax)
  */
 LPWSTR WINAPI StrFormatKBSizeW(LONGLONG llBytes, LPWSTR lpszDest, UINT cchMax)
 {
+  static const WCHAR kb[] = {' ','K','B',0};
   LONGLONG llKB = (llBytes + 1023) >> 10;
   int len;
 
@@ -474,7 +476,7 @@ LPWSTR WINAPI StrFormatKBSizeW(LONGLONG llBytes, LPWSTR lpszDest, UINT cchMax)
   len = lstrlenW(lpszDest);
   if (cchMax - len < 4)
       return NULL;
-  lstrcatW(lpszDest, L" KB");
+  lstrcatW(lpszDest, kb);
   return lpszDest;
 }
 
@@ -886,7 +888,7 @@ HRESULT WINAPI StrFormatByteSizeEx(LONGLONG llBytes, SFBS_FLAGS flags, LPWSTR lp
     { 1000*PB, 1073741824.0, 1.00, 0, 'P' }, /* 1000 PB */
     { 0, 10995116277.76, 100.00, 2, 'E' } /* EB's, catch all */
   };
-  WCHAR wszAdd[] = L" ?B";
+  WCHAR wszAdd[] = {' ','?','B',0};
   double dBytes;
   UINT i = 0;
 

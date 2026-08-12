@@ -50,7 +50,7 @@ besturingssystemen nodig:
 - FreeBSD 12.4 of nieuwer
 - Solaris x86 9 of nieuwer
 - NetBSD-current
-- macOS 10.12 of nieuwer
+- Mac OS X 10.12 of nieuwer
 
 Omdat Wine threadondersteuning op kernelniveau vereist, worden alleen de
 bovenstaande besturingssystemen ondersteund. Andere besturingssystemen

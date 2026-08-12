@@ -167,128 +167,12 @@ static const WSAPROTOCOL_INFOW supported_protocols[] =
         .dwMessageSize = UINT_MAX,
         .szProtocol = L"SPX II",
     },
-    {
-        .dwServiceFlags1 = XP1_IFS_HANDLES | XP1_GRACEFUL_CLOSE | XP1_GUARANTEED_ORDER |
-                           XP1_GUARANTEED_DELIVERY,
-        .dwProviderFlags = PFL_MATCHES_PROTOCOL_ZERO,
-        .ProviderId = {0x9fc48064, 0x7298, 0x43e4, {0xb7, 0xbd, 0x18, 0x1f, 0x20, 0x89, 0x79, 0x2a}},
-        .dwCatalogEntryId = 1040,
-        .ProtocolChain.ChainLen = 1,
-        .iVersion = 2,
-        .iAddressFamily = AF_BTH,
-        .iMinSockAddr = sizeof(SOCKADDR_BTH),
-        .iMaxSockAddr = sizeof(SOCKADDR_BTH),
-        .iSocketType = SOCK_STREAM,
-        .iProtocol = BTHPROTO_RFCOMM,
-        .szProtocol = L"MSAFD RfComm [Bluetooth]",
-    },
 };
 
 DECLARE_CRITICAL_SECTION(cs_socket_list);
 
 static SOCKET *socket_list;
 static unsigned int socket_list_size;
-
-static inline const char *debugstr_sockdomain(int domain)
-{
-    const char *stropt = NULL;
-
-#define DEBUG_SOCKDOM(x) case (x): stropt = #x; break
-
-    switch(domain)
-    {
-        DEBUG_SOCKDOM(AF_12844);
-        DEBUG_SOCKDOM(AF_APPLETALK);
-        DEBUG_SOCKDOM(AF_ATM);
-        DEBUG_SOCKDOM(AF_BAN);
-        DEBUG_SOCKDOM(AF_BTH);
-        DEBUG_SOCKDOM(AF_CCITT);
-        DEBUG_SOCKDOM(AF_CHAOS);
-        DEBUG_SOCKDOM(AF_CLUSTER);
-        DEBUG_SOCKDOM(AF_DATAKIT);
-        DEBUG_SOCKDOM(AF_DECnet);
-        DEBUG_SOCKDOM(AF_DLI);
-        DEBUG_SOCKDOM(AF_ECMA);
-        DEBUG_SOCKDOM(AF_FIREFOX);
-        DEBUG_SOCKDOM(AF_HYLINK);
-        DEBUG_SOCKDOM(AF_HYPERV);
-        DEBUG_SOCKDOM(AF_ICLFXBM);
-        DEBUG_SOCKDOM(AF_IMPLINK);
-        DEBUG_SOCKDOM(AF_INET);
-        DEBUG_SOCKDOM(AF_INET6);
-        DEBUG_SOCKDOM(AF_IPX);
-        DEBUG_SOCKDOM(AF_IRDA);
-        DEBUG_SOCKDOM(AF_ISO);
-        DEBUG_SOCKDOM(AF_LAT);
-        DEBUG_SOCKDOM(AF_LINK);
-        DEBUG_SOCKDOM(AF_MAX);
-        DEBUG_SOCKDOM(AF_NETBIOS);
-        DEBUG_SOCKDOM(AF_NETDES);
-        /* duplicated cases */
-        /* DEBUG_SOCKDOM(AF_NS);*/
-        /* DEBUG_SOCKDOM(AF_OSI); */
-        DEBUG_SOCKDOM(AF_PUP);
-        DEBUG_SOCKDOM(AF_SNA);
-        DEBUG_SOCKDOM(AF_TCNMESSAGE);
-        DEBUG_SOCKDOM(AF_TCNPROCESS);
-        DEBUG_SOCKDOM(AF_UNIX);
-        DEBUG_SOCKDOM(AF_UNKNOWN1);
-        DEBUG_SOCKDOM(AF_UNSPEC);
-        DEBUG_SOCKDOM(AF_VOICEVIEW);
-        default: stropt = wine_dbg_sprintf("0x%x", domain);
-    }
-
-#undef DEBUG_SOCKDOM
-
-    return stropt;
-}
-
-static inline const char *debugstr_socktype(int type)
-{
-    const char *stropt = NULL;
-
-#define DEBUG_SOCKTYPE(x) case (x): stropt = #x; break
-
-    switch(type)
-    {
-        DEBUG_SOCKTYPE(SOCK_DGRAM);
-        DEBUG_SOCKTYPE(SOCK_RAW);
-        DEBUG_SOCKTYPE(SOCK_RDM);
-        DEBUG_SOCKTYPE(SOCK_SEQPACKET);
-        DEBUG_SOCKTYPE(SOCK_STREAM);
-        default: stropt = wine_dbg_sprintf("0x%x", type);
-    }
-
-#undef DEBUG_SOCKTYPE
-
-    return stropt;
-}
-
-static inline const char *debugstr_sockprotocol(int protocol)
-{
-    const char *stropt = NULL;
-
-#define DEBUG_SOCKPROTO(x) case (x): stropt = #x; break
-
-    switch(protocol)
-    {
-        DEBUG_SOCKPROTO(IPPROTO_GGP);
-        DEBUG_SOCKPROTO(IPPROTO_ICMP);
-        DEBUG_SOCKPROTO(IPPROTO_IDP);
-        DEBUG_SOCKPROTO(IPPROTO_IGMP);
-        DEBUG_SOCKPROTO(IPPROTO_IP);
-        DEBUG_SOCKPROTO(IPPROTO_MAX);
-        DEBUG_SOCKPROTO(IPPROTO_ND);
-        DEBUG_SOCKPROTO(IPPROTO_RAW);
-        DEBUG_SOCKPROTO(IPPROTO_TCP);
-        DEBUG_SOCKPROTO(IPPROTO_UDP);
-        default: stropt = wine_dbg_sprintf("0x%x", protocol);
-    }
-
-#undef DEBUG_SOCKPROTO
-
-    return stropt;
-}
 
 const char *debugstr_sockaddr( const struct sockaddr *a )
 {
@@ -341,17 +225,6 @@ const char *debugstr_sockaddr( const struct sockaddr *a )
         return wine_dbg_sprintf("{ family AF_IRDA, addr %08lx, name %s }",
                                 addr,
                                 ((const SOCKADDR_IRDA *)a)->irdaServiceName);
-    }
-    case AF_BTH:
-    {
-        const SOCKADDR_BTH *addr = (SOCKADDR_BTH *)a;
-        BLUETOOTH_ADDRESS bth_addr = {0};
-
-        bth_addr.ullLong = addr->btAddr;
-        return wine_dbg_sprintf( "{ family AF_BTH, addr %02X:%02X:%02X:%02X:%02X:%02X, serviceClassId %s, port %ld }",
-                                 bth_addr.rgBytes[5], bth_addr.rgBytes[4], bth_addr.rgBytes[3], bth_addr.rgBytes[2],
-                                 bth_addr.rgBytes[1], bth_addr.rgBytes[0], wine_dbgstr_guid( &addr->serviceClassId ),
-                                 addr->port );
     }
     default:
         return wine_dbg_sprintf("{ family %d }", a->sa_family);
@@ -562,25 +435,6 @@ static BOOL socket_list_remove( SOCKET socket )
     LeaveCriticalSection(&cs_socket_list);
     return FALSE;
 }
-
-
-static BOOL is_valid_socket( SOCKET socket )
-{
-    NTSTATUS status = STATUS_SUCCESS;
-    IO_STATUS_BLOCK io;
-
-    if (socket_list_find( socket ))
-        return TRUE;
-
-    /* Some functions allow socket handles output with DuplicateHandle(), which
-     * will not be in the socket list. We can't necessarily just delegate to
-     * ntdll to check the handle type, because sometimes we need to check the
-     * handle validity *before* checking e.g. pointer validity.
-     * Instead try to perform an ioctl to see if it's truly a socket. */
-    return NtDeviceIoControlFile( (HANDLE)socket, NULL, NULL, NULL, &io, IOCTL_AFD_WINE_COMPLETE_ASYNC,
-                                  &status, sizeof(status), NULL, 0 ) == STATUS_SUCCESS;
-}
-
 
 static INT WINAPI WSA_DefaultBlockingHook( FARPROC x );
 
@@ -886,8 +740,8 @@ static BOOL ws_protocol_info(SOCKET s, int unicode, WSAPROTOCOL_INFOW *buffer, i
             return TRUE;
         }
     }
-    FIXME( "Could not fill protocol information for family %s, type %s, protocol %s.\n",
-            debugstr_sockdomain(params.family), debugstr_socktype(params.type), debugstr_sockprotocol(params.protocol) );
+    FIXME( "Could not fill protocol information for family %d, type %d, protocol %d.\n",
+            params.family, params.type, params.protocol );
     return TRUE;
 }
 
@@ -1146,7 +1000,7 @@ static int WS2_sendto( SOCKET s, WSABUF *buffers, DWORD buffer_count, DWORD *ret
            "addr_len %d, overlapped %p, completion %p\n",
            s, buffers, buffer_count, flags, addr, addr_len, overlapped, completion );
 
-    if (!is_valid_socket( s ))
+    if (!socket_list_find( s ))
     {
         SetLastError( WSAENOTSOCK );
         return -1;
@@ -1252,7 +1106,7 @@ int WINAPI bind( SOCKET s, const struct sockaddr *addr, int len )
     HANDLE sync_event;
     NTSTATUS status;
 
-    TRACE( "socket %#Ix, addr %s, len %d\n", s, debugstr_sockaddr(addr), len );
+    TRACE( "socket %#Ix, addr %s\n", s, debugstr_sockaddr(addr) );
 
     if (!addr)
     {
@@ -1293,13 +1147,7 @@ int WINAPI bind( SOCKET s, const struct sockaddr *addr, int len )
                 return -1;
             }
             break;
-        case AF_BTH:
-            if (len < sizeof(SOCKADDR_BTH))
-            {
-                SetLastError( WSAEFAULT );
-                return -1;
-            }
-            break;
+
         default:
             FIXME( "unknown protocol %u\n", addr->sa_family );
             SetLastError( WSAEAFNOSUPPORT );
@@ -1353,7 +1201,7 @@ int WINAPI closesocket( SOCKET s )
         return -1;
     }
 
-    if (!socket_list_remove( s ) && !is_valid_socket( s ))
+    if (!socket_list_remove( s ))
     {
         SetLastError( WSAENOTSOCK );
         return -1;
@@ -3022,7 +2870,6 @@ int WINAPI select( int count, fd_set *read_ptr, fd_set *write_ptr,
 
     status = NtDeviceIoControlFile( (HANDLE)poll_socket, sync_event, NULL, NULL, &io,
                                     IOCTL_AFD_POLL, params, params_size, params, params_size );
-    if (status == STATUS_NOT_SUPPORTED) status = STATUS_INVALID_HANDLE;
     if (status == STATUS_PENDING)
     {
         if (wait_event_alertable( sync_event ) == WAIT_FAILED)
@@ -3803,7 +3650,7 @@ int WINAPI shutdown( SOCKET s, int how )
  */
 SOCKET WINAPI socket( int af, int type, int protocol )
 {
-    TRACE("af=%s type=%s protocol=%s\n", debugstr_sockdomain(af), debugstr_socktype(type), debugstr_sockprotocol(protocol));
+    TRACE("af=%d type=%d protocol=%d\n", af, type, protocol);
 
     return WSASocketW( af, type, protocol, NULL, 0,
                        get_per_thread_data()->opentype ? 0 : WSA_FLAG_OVERLAPPED );
@@ -4053,8 +3900,8 @@ SOCKET WINAPI WSASocketW(int af, int type, int protocol,
       g, dwFlags except WSA_FLAG_OVERLAPPED) are ignored.
    */
 
-    TRACE( "family %s, type %s, protocol %s, info %p, group %u, flags %#lx\n",
-           debugstr_sockdomain(af), debugstr_socktype(type), debugstr_sockprotocol(protocol), lpProtocolInfo, g, flags );
+    TRACE( "family %d, type %d, protocol %d, info %p, group %u, flags %#lx\n",
+           af, type, protocol, lpProtocolInfo, g, flags );
 
     if (!num_startup)
     {

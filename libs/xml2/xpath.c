@@ -228,7 +228,6 @@ xmlXPathIsInf(double val) {
 
 static xmlNs xmlXPathXMLNamespaceStruct = {
     NULL,
-    NULL,
     XML_NAMESPACE_DECL,
     XML_XML_NAMESPACE,
     BAD_CAST "xml",
@@ -2645,9 +2644,7 @@ xmlXPathFormatNumber(double number, char buffer[], int buffersize)
 	    /* Finally copy result back to caller */
 	    size = strlen(work) + 1;
 	    if (size > buffersize) {
-#if 0  /* avoid compiler warning */
 		work[buffersize - 1] = 0;
-#endif
 		size = buffersize;
 	    }
 	    memmove(buffer, work, size);
@@ -10715,9 +10712,8 @@ xmlXPathCompLocationPath(xmlXPathParserContextPtr ctxt) {
 	    } else if (CUR == '/') {
 		NEXT;
 		SKIP_BLANKS;
-		if ((CUR != 0) &&
-		    ((IS_ASCII_LETTER(CUR)) || (CUR >= 0x80) ||
-                     (CUR == '_') || (CUR == '.') ||
+		if ((CUR != 0 ) &&
+		    ((IS_ASCII_LETTER(CUR)) || (CUR == '_') || (CUR == '.') ||
 		     (CUR == '@') || (CUR == '*')))
 		    xmlXPathCompRelativeLocationPath(ctxt);
 	    }

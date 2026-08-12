@@ -6,11 +6,17 @@
 /* Define to the file extension for executables. */
 #undef EXEEXT
 
+/* Define to 1 if you have the <amdgpu_drm.h> header file. */
+#undef HAVE_AMDGPU_DRM_H
+
 /* Define to 1 if you have the <arpa/inet.h> header file. */
 #undef HAVE_ARPA_INET_H
 
 /* Define to 1 if you have the <arpa/nameser.h> header file. */
 #undef HAVE_ARPA_NAMESER_H
+
+/* Define to 1 if you have the <asm/hwcap.h> header file. */
+#undef HAVE_ASM_HWCAP_H
 
 /* Define to 1 if you have the <asm/termbits.h> header file. */
 #undef HAVE_ASM_TERMBITS_H
@@ -20,12 +26,6 @@
 
 /* Define to 1 if you have the <asm/user.h> header file. */
 #undef HAVE_ASM_USER_H
-
-/* Define to 1 if you have the <bluetooth/bluetooth.h> header file. */
-#undef HAVE_BLUETOOTH_BLUETOOTH_H
-
-/* Define to 1 if you have the <bluetooth/rfcomm.h> header file. */
-#undef HAVE_BLUETOOTH_RFCOMM_H
 
 /* Define to 1 if you have the <capi20.h> header file. */
 #undef HAVE_CAPI20_H
@@ -48,23 +48,29 @@
 /* Define to 1 if you have the 'dlinfo' function. */
 #undef HAVE_DLINFO
 
+/* Define to 1 if you have the <EGL/egl.h> header file. */
+#undef HAVE_EGL_EGL_H
+
 /* Define to 1 if you have the <elf.h> header file. */
 #undef HAVE_ELF_H
 
 /* Define to 1 if you have the 'epoll_create' function. */
 #undef HAVE_EPOLL_CREATE
 
-/* Define to 1 if you have the 'epoll_pwait2' function. */
-#undef HAVE_EPOLL_PWAIT2
-
 /* Define to 1 if you have the FFmpeg libraries. */
 #undef HAVE_FFMPEG
+
+/* Define if FreeType 2 is installed */
+#undef HAVE_FREETYPE
 
 /* Define to 1 if you have the 'fstatfs' function. */
 #undef HAVE_FSTATFS
 
 /* Define to 1 if you have the <ft2build.h> header file. */
 #undef HAVE_FT2BUILD_H
+
+/* Define to 1 if the system has the type 'FT_TrueTypeEngineType'. */
+#undef HAVE_FT_TRUETYPEENGINETYPE
 
 /* Define to 1 if you have the 'futimens' function. */
 #undef HAVE_FUTIMENS
@@ -74,6 +80,9 @@
 
 /* Define to 1 if you have the 'futimesat' function. */
 #undef HAVE_FUTIMESAT
+
+/* Define to 1 if you have the <gcrypt.h> header file. */
+#undef HAVE_GCRYPT_H
 
 /* Define to 1 if you have the 'getaddrinfo' function. */
 #undef HAVE_GETADDRINFO
@@ -92,6 +101,9 @@
 
 /* Define to 1 if you have the <gettext-po.h> header file. */
 #undef HAVE_GETTEXT_PO_H
+
+/* Define to 1 if you have the <gmp.h> header file. */
+#undef HAVE_GMP_H
 
 /* Define to 1 if you have the 'gnutls_cipher_init' function. */
 #undef HAVE_GNUTLS_CIPHER_INIT
@@ -132,9 +144,6 @@
 /* Define to 1 if you have the 'gettextpo' library (-lgettextpo). */
 #undef HAVE_LIBGETTEXTPO
 
-/* Define to 1 if you have the 'hwloc' library (-lhwloc). */
-#undef HAVE_LIBHWLOC
-
 /* Define to 1 if you have the 'procstat' library (-lprocstat). */
 #undef HAVE_LIBPROCSTAT
 
@@ -143,6 +152,9 @@
 
 /* Define to 1 if you have the <libudev.h> header file. */
 #undef HAVE_LIBUDEV_H
+
+/* Define to 1 if you have the 'unwind' library (-lunwind). */
+#undef HAVE_LIBUNWIND
 
 /* Define if we have the wayland-egl development environment */
 #undef HAVE_LIBWAYLAND_EGL
@@ -165,8 +177,8 @@
 /* Define to 1 if you have the <linux/filter.h> header file. */
 #undef HAVE_LINUX_FILTER_H
 
-/* Define to 1 if you have the <linux/fs.h> header file. */
-#undef HAVE_LINUX_FS_H
+/* Define to 1 if you have the <linux/futex.h> header file. */
+#undef HAVE_LINUX_FUTEX_H
 
 /* Define if Linux-style gethostbyname_r and gethostbyaddr_r are available */
 #undef HAVE_LINUX_GETHOSTBYNAME_R_6
@@ -192,17 +204,14 @@
 /* Define to 1 if you have the <linux/major.h> header file. */
 #undef HAVE_LINUX_MAJOR_H
 
-/* Define to 1 if you have the <linux/memfd.h> header file. */
-#undef HAVE_LINUX_MEMFD_H
-
-/* Define to 1 if you have the <linux/ntsync.h> header file. */
-#undef HAVE_LINUX_NTSYNC_H
-
 /* Define to 1 if you have the <linux/param.h> header file. */
 #undef HAVE_LINUX_PARAM_H
 
 /* Define to 1 if you have the <linux/rtnetlink.h> header file. */
 #undef HAVE_LINUX_RTNETLINK_H
+
+/* Define to 1 if you have the <linux/seccomp.h> header file. */
+#undef HAVE_LINUX_SECCOMP_H
 
 /* Define to 1 if you have the <linux/serial.h> header file. */
 #undef HAVE_LINUX_SERIAL_H
@@ -212,9 +221,6 @@
 
 /* Define to 1 if you have the <linux/ucdrom.h> header file. */
 #undef HAVE_LINUX_UCDROM_H
-
-/* Define to 1 if you have the <linux/userfaultfd.h> header file. */
-#undef HAVE_LINUX_USERFAULTFD_H
 
 /* Define to 1 if you have the <linux/videodev2.h> header file. */
 #undef HAVE_LINUX_VIDEODEV2_H
@@ -236,9 +242,6 @@
 
 /* Define to 1 if you have the <mach-o/loader.h> header file. */
 #undef HAVE_MACH_O_LOADER_H
-
-/* Define to 1 if you have the 'memfd_create' function. */
-#undef HAVE_MEMFD_CREATE
 
 /* Define to 1 if you have the <mntent.h> header file. */
 #undef HAVE_MNTENT_H
@@ -336,14 +339,11 @@
 /* Define to 1 if you have the 'posix_fallocate' function. */
 #undef HAVE_POSIX_FALLOCATE
 
+/* Define to 1 if you have the 'ppoll' function. */
+#undef HAVE_PPOLL
+
 /* Define to 1 if you have the 'prctl' function. */
 #undef HAVE_PRCTL
-
-/* Define to 1 if you have the 'process_vm_readv' function. */
-#undef HAVE_PROCESS_VM_READV
-
-/* Define to 1 if you have the 'process_vm_writev' function. */
-#undef HAVE_PROCESS_VM_WRITEV
 
 /* Define to 1 if you have the 'pthread_getthreadid_np' function. */
 #undef HAVE_PTHREAD_GETTHREADID_NP
@@ -353,6 +353,9 @@
 
 /* Define to 1 if you have the <pwd.h> header file. */
 #undef HAVE_PWD_H
+
+/* Define to 1 if the system has the type 'request_sense'. */
+#undef HAVE_REQUEST_SENSE
 
 /* Define if you have the resolver library and header */
 #undef HAVE_RESOLV
@@ -375,6 +378,9 @@
 /* Define to 1 if you have the 'sched_yield' function. */
 #undef HAVE_SCHED_YIELD
 
+/* Define to 1 if 'cmd' is a member of 'scsireq_t'. */
+#undef HAVE_SCSIREQ_T_CMD
+
 /* Define to 1 if you have the <scsi/scsi.h> header file. */
 #undef HAVE_SCSI_SCSI_H
 
@@ -395,6 +401,9 @@
 
 /* Define to 1 if 'interface_id' is a member of 'sg_io_hdr_t'. */
 #undef HAVE_SG_IO_HDR_T_INTERFACE_ID
+
+/* Define to 1 if you have the `shm_open' function. */
+#undef HAVE_SHM_OPEN
 
 /* Define to 1 if 'si_fd' is a member of 'siginfo_t'. */
 #undef HAVE_SIGINFO_T_SI_FD
@@ -525,6 +534,9 @@
 /* Define to 1 if you have the <sys/epoll.h> header file. */
 #undef HAVE_SYS_EPOLL_H
 
+/* Define to 1 if you have the <sys/eventfd.h> header file. */
+#undef HAVE_SYS_EVENTFD_H
+
 /* Define to 1 if you have the <sys/event.h> header file. */
 #undef HAVE_SYS_EVENT_H
 
@@ -554,9 +566,6 @@
 
 /* Define to 1 if you have the <sys/param.h> header file. */
 #undef HAVE_SYS_PARAM_H
-
-/* Define to 1 if you have the <sys/personality.h> header file. */
-#undef HAVE_SYS_PERSONALITY_H
 
 /* Define to 1 if you have the <sys/prctl.h> header file. */
 #undef HAVE_SYS_PRCTL_H
@@ -663,6 +672,9 @@
 /* Define to 1 if you have the <valgrind/valgrind.h> header file. */
 #undef HAVE_VALGRIND_VALGRIND_H
 
+/* Define to 1 if you have the <vosk_api.h> header file. */
+#undef HAVE_VOSK_API_H
+
 /* Define to 1 if the Wine preloader is being used. */
 #undef HAVE_WINE_PRELOADER
 
@@ -684,6 +696,9 @@
 /* Define to 1 if you have the <X11/extensions/XInput2.h> header file. */
 #undef HAVE_X11_EXTENSIONS_XINPUT2_H
 
+/* Define to 1 if you have the <X11/extensions/XInput.h> header file. */
+#undef HAVE_X11_EXTENSIONS_XINPUT_H
+
 /* Define to 1 if you have the <X11/extensions/Xrandr.h> header file. */
 #undef HAVE_X11_EXTENSIONS_XRANDR_H
 
@@ -696,8 +711,17 @@
 /* Define to 1 if 'xcookie' is a member of 'XEvent'. */
 #undef HAVE_XEVENT_XCOOKIE
 
+/* Define to 1 if you have the <xf86drm.h> header file. */
+#undef HAVE_XF86DRM_H
+
 /* Define to 1 if 'callback' is a member of 'XICCallback'. */
 #undef HAVE_XICCALLBACK_CALLBACK
+
+/* Define to 1 if you have the <xkbcommon/xkbcommon.h> header file. */
+#undef HAVE_XKBCOMMON_XKBCOMMON_H
+
+/* Define to 1 if you have the <xkbcommon/xkbregistry.h> header file. */
+#undef HAVE_XKBCOMMON_XKBREGISTRY_H
 
 /* Define if Xrender has the XRenderCreateLinearGradient function */
 #undef HAVE_XRENDERCREATELINEARGRADIENT
@@ -747,6 +771,12 @@
 /* Define to the soname of the libdbus-1 library. */
 #undef SONAME_LIBDBUS_1
 
+/* Define to the soname of the libdrm library. */
+#undef SONAME_LIBDRM
+
+/* Define to the soname of the libdrm_amdgpu library. */
+#undef SONAME_LIBDRM_AMDGPU
+
 /* Define to the soname of the libEGL library. */
 #undef SONAME_LIBEGL
 
@@ -756,11 +786,17 @@
 /* Define to the soname of the libfreetype library. */
 #undef SONAME_LIBFREETYPE
 
+/* Define to the soname of the libgcrypt library. */
+#undef SONAME_LIBGCRYPT
+
 /* Define to the soname of the libGL library. */
 #undef SONAME_LIBGL
 
 /* Define to the soname of the libGLESv2 library. */
 #undef SONAME_LIBGLESV2
+
+/* Define to the soname of the libgmp library. */
+#undef SONAME_LIBGMP
 
 /* Define to the soname of the libgnutls library. */
 #undef SONAME_LIBGNUTLS
@@ -780,11 +816,17 @@
 /* Define to the soname of the libodbc library. */
 #undef SONAME_LIBODBC
 
+/* Define to the soname of the libOSMesa library. */
+#undef SONAME_LIBOSMESA
+
 /* Define to the soname of the libSDL2 library. */
 #undef SONAME_LIBSDL2
 
 /* Define to the soname of the libv4l2 library. */
 #undef SONAME_LIBV4L2
+
+/* Define to the soname of the libvosk library. */
+#undef SONAME_LIBVOSK
 
 /* Define to the soname of the libvulkan library. */
 #undef SONAME_LIBVULKAN
@@ -809,9 +851,6 @@
 
 /* Define to the soname of the libXinerama library. */
 #undef SONAME_LIBXINERAMA
-
-/* Define to the soname of the libxkbregistry library. */
-#undef SONAME_LIBXKBREGISTRY
 
 /* Define to the soname of the libXrandr library. */
 #undef SONAME_LIBXRANDR

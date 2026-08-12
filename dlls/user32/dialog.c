@@ -23,6 +23,7 @@
 #include <errno.h>
 
 #include "ntstatus.h"
+#define WIN32_NO_STATUS
 #include "user_private.h"
 #include "controls.h"
 #include "wine/debug.h"
@@ -598,7 +599,7 @@ static HWND DIALOG_CreateIndirect( HINSTANCE hInst, LPCVOID dlgTemplate,
         if (IsWindowEnabled( owner ))
         {
             disabled_owner = owner;
-            NtUserEnableWindow( disabled_owner, FALSE );
+            EnableWindow( disabled_owner, FALSE );
         }
     }
 
@@ -640,7 +641,7 @@ static HWND DIALOG_CreateIndirect( HINSTANCE hInst, LPCVOID dlgTemplate,
     {
         if (hUserFont) DeleteObject( hUserFont );
         if (hMenu) NtUserDestroyMenu( hMenu );
-        if (disabled_owner) NtUserEnableWindow( disabled_owner, TRUE );
+        if (disabled_owner) EnableWindow( disabled_owner, TRUE );
         return 0;
     }
 
@@ -655,7 +656,7 @@ static HWND DIALOG_CreateIndirect( HINSTANCE hInst, LPCVOID dlgTemplate,
     dlgInfo->yBaseUnit   = yBaseUnit;
     dlgInfo->flags       = flags;
 
-    if (template.helpId) NtUserSetWindowContextHelpId( hwnd, template.helpId );
+    if (template.helpId) SetWindowContextHelpId( hwnd, template.helpId );
 
     if (unicode) SetWindowLongPtrW( hwnd, DWLP_DLGPROC, (ULONG_PTR)dlgProc );
     else SetWindowLongPtrA( hwnd, DWLP_DLGPROC, (ULONG_PTR)dlgProc );
@@ -702,12 +703,11 @@ static HWND DIALOG_CreateIndirect( HINSTANCE hInst, LPCVOID dlgTemplate,
 
         if (template.style & WS_VISIBLE && !(GetWindowLongW( hwnd, GWL_STYLE ) & WS_VISIBLE))
         {
-            NtUserShowWindow( hwnd, SW_SHOWNORMAL ); /* SW_SHOW doesn't always work */
-            UpdateWindow( hwnd );
+           NtUserShowWindow( hwnd, SW_SHOWNORMAL );   /* SW_SHOW doesn't always work */
         }
         return hwnd;
     }
-    if (disabled_owner) NtUserEnableWindow( disabled_owner, TRUE );
+    if (disabled_owner) EnableWindow( disabled_owner, TRUE );
     if (IsWindow(hwnd)) NtUserDestroyWindow( hwnd );
     return 0;
 }
@@ -923,7 +923,7 @@ BOOL WINAPI EndDialog( HWND hwnd, INT_PTR retval )
 
     owner = (HWND)GetWindowLongPtrA( hwnd, GWLP_HWNDPARENT );
     if (owner)
-        NtUserEnableWindow( owner, TRUE );
+        EnableWindow( owner, TRUE );
 
     /* Windows sets the focus to the dialog itself in EndDialog */
 
@@ -940,7 +940,7 @@ BOOL WINAPI EndDialog( HWND hwnd, INT_PTR retval )
     {
         /* If this dialog was given an owner then set the focus to that owner. */
         if (owner)
-            NtUserSetForegroundWindow( owner );
+            SetForegroundWindow( owner );
         else
             NtUserActivateOtherWindow( hwnd );
     }
@@ -1157,8 +1157,8 @@ BOOL WINAPI IsDialogMessageW( HWND hwndDlg, LPMSG msg )
     if (NtUserCallMsgFilter( msg, MSGF_DIALOGBOX )) return TRUE;
 
     hwndDlg = WIN_GetFullHandle( hwndDlg );
+    if (is_desktop_window(hwndDlg)) return FALSE;
     if ((hwndDlg != msg->hwnd) && !IsChild( hwndDlg, msg->hwnd )) return FALSE;
-    if (!NtUserGetAncestor( hwndDlg, GA_PARENT )) return FALSE;
 
     hwndDlg = DIALOG_FindMsgDestination(hwndDlg);
 

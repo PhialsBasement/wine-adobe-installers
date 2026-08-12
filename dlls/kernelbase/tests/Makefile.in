@@ -6,5 +6,4 @@ SOURCES = \
 	path.c \
 	process.c \
 	rsrc.rc \
-	security.c \
 	sync.c

@@ -33,7 +33,6 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(clipboard);
 
-#define MAX_ATOM_LEN 255
 
 static CRITICAL_SECTION clipboard_cs;
 static CRITICAL_SECTION_DEBUG critsect_debug =
@@ -527,12 +526,7 @@ HANDLE render_synthesized_format( UINT format, UINT from )
  */
 UINT WINAPI RegisterClipboardFormatW( LPCWSTR name )
 {
-    UNICODE_STRING str;
-
-    TRACE( "%s\n", debugstr_w(name) );
-
-    RtlInitUnicodeString( &str, name );
-    return NtUserRegisterWindowMessage( &str );
+    return GlobalAddAtomW( name );
 }
 
 
@@ -541,15 +535,7 @@ UINT WINAPI RegisterClipboardFormatW( LPCWSTR name )
  */
 UINT WINAPI RegisterClipboardFormatA( LPCSTR name )
 {
-    WCHAR buf[MAX_ATOM_LEN + 1];
-    UNICODE_STRING str = {.Buffer = buf, .MaximumLength = sizeof(buf)};
-    STRING ansi;
-
-    TRACE( "%s\n", debugstr_a(name) );
-
-    RtlInitAnsiString( &ansi, name );
-    RtlAnsiStringToUnicodeString( &str, &ansi, FALSE );
-    return NtUserRegisterWindowMessage( &str );
+    return GlobalAddAtomA( name );
 }
 
 
@@ -558,29 +544,8 @@ UINT WINAPI RegisterClipboardFormatA( LPCSTR name )
  */
 INT WINAPI GetClipboardFormatNameA( UINT format, LPSTR buffer, INT maxlen )
 {
-    WCHAR tmpW[MAX_ATOM_LEN + 1];
-    UINT lenW, lenA = 0, len;
-
     if (format < MAXINTATOM || format > 0xffff) return 0;
-
-    if (maxlen <= 0) SetLastError( ERROR_MORE_DATA );
-    else if ((lenW = NtUserGetClipboardFormatName( format, tmpW, MAX_ATOM_LEN + 1 )))
-    {
-        char tmp[MAX_ATOM_LEN + 1];
-
-        lenA = WideCharToMultiByte( CP_ACP, 0, tmpW, lenW, tmp, MAX_ATOM_LEN + 1, NULL, NULL );
-        len = min( lenA, maxlen - 1 );
-        memcpy( buffer, tmp, len );
-        buffer[len] = '\0';
-
-        if (lenA >= maxlen)
-        {
-            lenA = 0;
-            SetLastError( ERROR_MORE_DATA );
-        }
-    }
-
-    return lenA;
+    return GlobalGetAtomNameA( format, buffer, maxlen );
 }
 
 
@@ -792,13 +757,9 @@ static HRESULT format_iterator_create( IDataObject *object, IEnumFORMATETC **out
 
 static HRESULT WINAPI format_iterator_Clone( IEnumFORMATETC *iface, IEnumFORMATETC **out )
 {
-    HRESULT hr;
     struct format_iterator *iterator = format_iterator_from_IEnumFORMATETC( iface );
     TRACE( "iterator %p, out %p\n", iterator, out );
-    hr = format_iterator_create( iterator->object, out );
-    if (SUCCEEDED(hr))
-        format_iterator_from_IEnumFORMATETC( *out )->entry = iterator->entry;
-    return hr;
+    return format_iterator_create( iterator->object, out );
 }
 
 static const IEnumFORMATETCVtbl format_iterator_vtbl =
@@ -1295,12 +1256,12 @@ DWORD drag_drop_drop( HWND hwnd )
             RECT rect;
 
             drop->pt = object->target_pos;
-            drop->fNC = !ScreenToClient( hwnd_drop, &drop->pt ) || !GetClientRect( hwnd_drop, &rect ) || !PtInRect( &rect, drop->pt );
-            TRACE( "Sending WM_DROPFILES: hwnd_drop %p, pt %s, fNC %u, files %p (%s)\n", hwnd_drop,
+            drop->fNC = !ScreenToClient( hwnd, &drop->pt ) || !GetClientRect( hwnd, &rect ) || !PtInRect( &rect, drop->pt );
+            TRACE( "Sending WM_DROPFILES: hwnd %p, pt %s, fNC %u, files %p (%s)\n", hwnd,
                    wine_dbgstr_point( &drop->pt), drop->fNC, files, debugstr_w(files) );
             GlobalUnlock( medium.hGlobal );
 
-            PostMessageW( hwnd_drop, WM_DROPFILES, (WPARAM)medium.hGlobal, 0 );
+            PostMessageW( hwnd, WM_DROPFILES, (WPARAM)medium.hGlobal, 0 );
             accept = 1;
             effect = DROPEFFECT_COPY;
         }

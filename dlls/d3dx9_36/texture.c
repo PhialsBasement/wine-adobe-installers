@@ -24,6 +24,12 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(d3dx);
 
+/* Returns TRUE if num is a power of 2, FALSE if not, or if 0 */
+static BOOL is_pow2(UINT num)
+{
+    return !(num & (num - 1));
+}
+
 static HRESULT get_surface(D3DRESOURCETYPE type, struct IDirect3DBaseTexture9 *tex,
         int face, UINT level, struct IDirect3DSurface9 **surf)
 {
@@ -180,7 +186,6 @@ static D3DFORMAT get_replacement_format(D3DFORMAT format)
         {D3DFMT_DXT3, D3DFMT_A8R8G8B8},
         {D3DFMT_DXT4, D3DFMT_A8R8G8B8},
         {D3DFMT_DXT5, D3DFMT_A8R8G8B8},
-        {D3DFMT_CxV8U8, D3DFMT_X8L8V8U8},
     };
     unsigned int i;
 
@@ -562,7 +567,7 @@ static D3DFORMAT get_alpha_replacement_format(D3DFORMAT format)
 
 static uint32_t d3dx9_get_mip_filter_value(uint32_t mip_filter, uint32_t *skip_levels)
 {
-    uint32_t filter = (mip_filter == D3DX_DEFAULT) ? D3DX_FILTER_BOX : mip_filter & ~D3DX9_FILTER_INVALID_BITS;
+    uint32_t filter = (mip_filter == D3DX_DEFAULT) ? D3DX_FILTER_BOX : mip_filter & ~D3DX_FILTER_INVALID_BITS;
 
     *skip_levels = mip_filter != D3DX_DEFAULT ? mip_filter >> D3DX_SKIP_DDS_MIP_LEVELS_SHIFT : 0;
     *skip_levels &= D3DX_SKIP_DDS_MIP_LEVELS_MASK;
@@ -607,11 +612,7 @@ HRESULT WINAPI D3DXCreateTextureFromFileInMemoryEx(struct IDirect3DDevice9 *devi
         return hr;
     }
 
-    if (!d3dximage_info_from_d3dx_image(&imginfo, &image))
-    {
-        hr = D3DXERR_INVALIDDATA;
-        goto err;
-    }
+    d3dximage_info_from_d3dx_image(&imginfo, &image);
 
     /* handle default values */
     if (!width || width == D3DX_DEFAULT_NONPOW2 || width == D3DX_FROM_FILE || width == D3DX_DEFAULT)
@@ -1141,11 +1142,7 @@ HRESULT WINAPI D3DXCreateVolumeTextureFromFileInMemoryEx(IDirect3DDevice9 *devic
         return hr;
     }
 
-    if (!d3dximage_info_from_d3dx_image(&image_info, &image))
-    {
-        hr = D3DXERR_INVALIDDATA;
-        goto err;
-    }
+    d3dximage_info_from_d3dx_image(&image_info, &image);
 
     /* Handle default values. */
     if (!width || width == D3DX_DEFAULT_NONPOW2 || width == D3DX_FROM_FILE || width == D3DX_DEFAULT)
@@ -1377,12 +1374,7 @@ HRESULT WINAPI D3DXCreateCubeTextureFromFileInMemoryEx(IDirect3DDevice9 *device,
         return hr;
     }
 
-    if (!d3dximage_info_from_d3dx_image(&img_info, &image))
-    {
-        hr = D3DXERR_INVALIDDATA;
-        goto err;
-    }
-
+    d3dximage_info_from_d3dx_image(&img_info, &image);
     if (img_info.ResourceType != D3DRTYPE_CUBETEXTURE)
     {
         hr = E_FAIL;
@@ -1865,10 +1857,10 @@ HRESULT WINAPI D3DXSaveTextureToFileInMemory(ID3DXBuffer **dst_buffer, D3DXIMAGE
         IDirect3DBaseTexture9 *src_texture, const PALETTEENTRY *src_palette)
 {
     const struct pixel_format_desc *fmt_desc = NULL;
-    unsigned int levels, file_size, i, j;
-    struct d3dx_image image;
+    struct d3dx_image image = { 0 };
+    ID3DXBuffer *buffer = NULL;
+    uint32_t mip_levels, i, j;
     D3DRESOURCETYPE type;
-    ID3DXBuffer *buffer;
     struct volume size;
     HRESULT hr;
 
@@ -1878,7 +1870,6 @@ HRESULT WINAPI D3DXSaveTextureToFileInMemory(ID3DXBuffer **dst_buffer, D3DXIMAGE
     if (!dst_buffer || !src_texture || file_format > D3DXIFF_PFM)
         return D3DERR_INVALIDCALL;
 
-    *dst_buffer = buffer = NULL;
     type = IDirect3DBaseTexture9_GetType(src_texture);
     if (type < D3DRTYPE_TEXTURE || type > D3DRTYPE_CUBETEXTURE)
         return D3DERR_INVALIDCALL;
@@ -1911,7 +1902,7 @@ HRESULT WINAPI D3DXSaveTextureToFileInMemory(ID3DXBuffer **dst_buffer, D3DXIMAGE
         return hr;
     }
 
-    levels = IDirect3DBaseTexture9_GetLevelCount(src_texture);
+    mip_levels = IDirect3DBaseTexture9_GetLevelCount(src_texture);
     switch (type)
     {
         case D3DRTYPE_TEXTURE:
@@ -1973,33 +1964,21 @@ HRESULT WINAPI D3DXSaveTextureToFileInMemory(ID3DXBuffer **dst_buffer, D3DXIMAGE
     if (is_index_format(fmt_desc) && !src_palette)
         return E_NOTIMPL;
 
-    file_size = d3dx_calculate_layer_pixels_size(fmt_desc->format, size.width, size.height, size.depth, levels);
-    if (type == D3DRTYPE_CUBETEXTURE)
-        file_size *= 6;
-    file_size += is_index_format(fmt_desc) ? sizeof(struct dds_header) + DDS_PALETTE_SIZE : sizeof(struct dds_header);
-
-    hr = D3DXCreateBuffer(file_size, &buffer);
-    if (FAILED(hr))
-        return hr;
-
-    hr = d3dx_init_dds_header((struct dds_header *)ID3DXBuffer_GetBufferPointer(buffer),
-            d3dx_resource_type_from_d3dresourcetype(type), fmt_desc->format, &size, levels);
+    hr = d3dx_create_dds_file_blob(fmt_desc->format, src_palette, d3dx_resource_type_from_d3dresourcetype(type),
+            &size, mip_levels, type == D3DRTYPE_CUBETEXTURE ? 6 : 1, FALSE, &buffer);
     if (FAILED(hr))
         goto exit;
-
-    if (is_index_format(fmt_desc))
-        memcpy((uint8_t *)ID3DXBuffer_GetBufferPointer(buffer) + sizeof(struct dds_header), src_palette,
-                DDS_PALETTE_SIZE);
 
     hr = d3dx_image_init(ID3DXBuffer_GetBufferPointer(buffer), ID3DXBuffer_GetBufferSize(buffer), &image, 0, 0);
     if (FAILED(hr))
         goto exit;
 
+    /* So now, things are setup to do inverse of CreateTexture. */
     if (type != D3DRTYPE_VOLUMETEXTURE)
     {
         for (j = 0; j < image.layer_count; ++j)
         {
-            for (i = 0; i < levels; ++i)
+            for (i = 0; i < mip_levels; ++i)
             {
                 IDirect3DSurface9 *src_surface, *tmp_surface;
                 struct d3dx_pixels src_pixels, dst_pixels;
@@ -2009,18 +1988,15 @@ HRESULT WINAPI D3DXSaveTextureToFileInMemory(ID3DXBuffer **dst_buffer, D3DXIMAGE
 
                 hr = d3dx_image_get_pixels(&image, j, i, &dst_pixels);
                 if (FAILED(hr))
-                    goto exit;
+                    break;
 
                 hr = get_surface(type, src_texture, j, i, &src_surface);
                 if (FAILED(hr))
-                    goto exit;
+                    break;
 
                 hr = lock_surface(src_surface, NULL, &src_locked_rect, &tmp_surface, FALSE);
                 if (FAILED(hr))
-                {
-                    IDirect3DSurface9_Release(src_surface);
-                    goto exit;
-                }
+                    break;
 
                 IDirect3DSurface9_GetDesc(src_surface, &src_surface_desc);
                 SetRect(&src_rect, 0, 0, src_surface_desc.Width, src_surface_desc.Height);
@@ -2032,13 +2008,13 @@ HRESULT WINAPI D3DXSaveTextureToFileInMemory(ID3DXBuffer **dst_buffer, D3DXIMAGE
                 {
                     unlock_surface(src_surface, NULL, tmp_surface, FALSE);
                     IDirect3DSurface9_Release(src_surface);
-                    goto exit;
+                    break;
                 }
 
                 hr = unlock_surface(src_surface, NULL, tmp_surface, FALSE);
                 IDirect3DSurface9_Release(src_surface);
                 if (FAILED(hr))
-                    goto exit;
+                    break;
             }
         }
     }
@@ -2046,7 +2022,7 @@ HRESULT WINAPI D3DXSaveTextureToFileInMemory(ID3DXBuffer **dst_buffer, D3DXIMAGE
     {
         IDirect3DVolumeTexture9 *volume_tex = (IDirect3DVolumeTexture9 *)src_texture;
 
-        for (i = 0; i < levels; ++i)
+        for (i = 0; i < mip_levels; ++i)
         {
             struct d3dx_pixels src_pixels, dst_pixels;
             D3DVOLUME_DESC src_volume_desc;
@@ -2055,11 +2031,11 @@ HRESULT WINAPI D3DXSaveTextureToFileInMemory(ID3DXBuffer **dst_buffer, D3DXIMAGE
 
             hr = d3dx_image_get_pixels(&image, 0, i, &dst_pixels);
             if (FAILED(hr))
-                goto exit;
+                break;
 
             hr = IDirect3DVolumeTexture9_LockBox(volume_tex, i, &src_locked_box, NULL, D3DLOCK_READONLY);
             if (FAILED(hr))
-                goto exit;
+                break;
 
             IDirect3DVolumeTexture9_GetLevelDesc(volume_tex, i, &src_volume_desc);
             SetRect(&src_rect, 0, 0, src_volume_desc.Width, src_volume_desc.Height);
@@ -2069,9 +2045,10 @@ HRESULT WINAPI D3DXSaveTextureToFileInMemory(ID3DXBuffer **dst_buffer, D3DXIMAGE
             hr = d3dx_load_pixels_from_pixels(&dst_pixels, fmt_desc, &src_pixels, fmt_desc, D3DX_FILTER_NONE, 0);
             IDirect3DVolumeTexture9_UnlockBox(volume_tex, i);
             if (FAILED(hr))
-                goto exit;
+                break;
         }
     }
+
     *dst_buffer = buffer;
 
 exit:

@@ -2,20 +2,16 @@ EXTRADEFS = -D_NTSYSTEM_ -D_ACRTIMP= -DWINBASEAPI=
 MODULE    = ntdll.dll
 UNIXLIB   = ntdll.so
 IMPORTLIB = ntdll
-IMPORTS   = $(TOMCRYPT_PE_LIBS) $(MUSL_PE_LIBS)
-EXTRAINCL = $(TOMCRYPT_PE_CFLAGS)
-UNIX_CFLAGS  = $(HWLOC_CFLAGS)
-UNIX_LIBS    = $(IOKIT_LIBS) $(COREFOUNDATION_LIBS) $(CORESERVICES_LIBS) $(RT_LIBS) $(PTHREAD_LIBS) $(I386_LIBS) $(PROCSTAT_LIBS) $(HWLOC_LIBS)
+IMPORTS   = $(MUSL_PE_LIBS) winecrt0
+UNIX_CFLAGS  = $(UNWIND_CFLAGS)
+UNIX_LIBS    = $(IOKIT_LIBS) $(COREFOUNDATION_LIBS) $(CORESERVICES_LIBS) $(RT_LIBS) $(PTHREAD_LIBS) $(UNWIND_LIBS) $(I386_LIBS) $(PROCSTAT_LIBS)
 
 EXTRADLLFLAGS = -nodefaultlibs
 i386_EXTRADLLFLAGS = -Wl,--image-base,0x7bc00000
 x86_64_EXTRADLLFLAGS = -Wl,--image-base,0x170000000
 
-VER_PRODUCTVERSION = 6,1,7601,24059
-
 SOURCES = \
 	actctx.c \
-	alpc.c \
 	atom.c \
 	crypt.c \
 	debugbuffer.c \
@@ -49,11 +45,12 @@ SOURCES = \
 	thread.c \
 	threadpool.c \
 	time.c \
-	unix/alpc.c \
 	unix/cdrom.c \
 	unix/debug.c \
 	unix/env.c \
+	unix/esync.c \
 	unix/file.c \
+	unix/fsync.c \
 	unix/loader.c \
 	unix/loadorder.c \
 	unix/process.c \
@@ -67,13 +64,13 @@ SOURCES = \
 	unix/signal_x86_64.c \
 	unix/socket.c \
 	unix/sync.c \
-	unix/syscall.c \
 	unix/system.c \
 	unix/tape.c \
 	unix/thread.c \
 	unix/virtual.c \
 	unwind.c \
 	version.c \
+	version.rc \
 	wcstring.c
 
 EXTRA_OBJS = unix/version.o

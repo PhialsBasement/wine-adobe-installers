@@ -18,9 +18,12 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
+#define WINE_NO_NAMELESS_EXTENSION
+
 #define EXTERN_GUID DEFINE_GUID
 
 #include "ntstatus.h"
+#define WIN32_NO_STATUS
 #include "initguid.h"
 #include "gst_private.h"
 #include "winternl.h"
@@ -92,7 +95,7 @@ static HRESULT video_format_from_media_type(IMFMediaType *media_type, MFVIDEOFOR
             memset(mpeg, 0, mpeg_size);
             mpeg->hdr = **format;
 
-            IMFMediaType_GetBlob(media_type, &MF_MT_MPEG_SEQUENCE_HEADER, mpeg->sequence_header, len, &mpeg->sequence_header_count);
+            IMFMediaType_GetBlob(media_type, &MF_MT_MPEG_SEQUENCE_HEADER, mpeg->sequence_header, len, NULL);
             IMFMediaType_GetUINT32(media_type, &MF_MT_MPEG_START_TIME_CODE, (UINT32 *)&mpeg->start_time_code);
             IMFMediaType_GetUINT32(media_type, &MF_MT_MPEG2_PROFILE, &mpeg->profile);
             IMFMediaType_GetUINT32(media_type, &MF_MT_MPEG2_LEVEL, &mpeg->level);
@@ -160,11 +163,12 @@ static HRESULT wg_media_type_to_mf(const struct wg_media_type *wg_media_type, IM
     return E_NOTIMPL;
 }
 
-wg_parser_t wg_parser_create(bool output_compressed)
+wg_parser_t wg_parser_create(bool output_compressed, bool use_opengl)
 {
     struct wg_parser_create_params params =
     {
         .output_compressed = output_compressed,
+        .use_opengl = use_opengl,
         .err_on = ERR_ON(quartz),
         .warn_on = WARN_ON(quartz),
     };
@@ -858,9 +862,12 @@ unsigned int wg_format_get_stride(const struct wg_format *format)
             return ALIGN(width * 2, 4);
 
         case WG_VIDEO_FORMAT_I420:
-        case WG_VIDEO_FORMAT_NV12:
         case WG_VIDEO_FORMAT_YV12:
             return ALIGN(width, 4); /* Y plane */
+
+        /* NV12 stride in Windows has alignment 2. GStreamer output is reformatted to 2 where necessary. */
+        case WG_VIDEO_FORMAT_NV12:
+            return ALIGN(width, 2); /* Y plane */
 
         case WG_VIDEO_FORMAT_UNKNOWN:
             FIXME("Cannot calculate stride for unknown video format.\n");
@@ -1102,8 +1109,8 @@ static const REGFILTER2 reg_decodebin_parser =
 {
     .dwVersion = 2,
     .dwMerit = MERIT_NORMAL - 1,
-    .cPins2 = 3,
-    .rgPins2 = reg_decodebin_parser_pins,
+    .u.s2.cPins2 = 3,
+    .u.s2.rgPins2 = reg_decodebin_parser_pins,
 };
 
 HRESULT WINAPI DllRegisterServer(void)

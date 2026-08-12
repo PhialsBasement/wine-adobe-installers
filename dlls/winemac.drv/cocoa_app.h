@@ -22,6 +22,43 @@
 
 #include "macdrv_cocoa.h"
 
+#if !defined(MAC_OS_X_VERSION_10_12) || MAC_OS_X_VERSION_MAX_ALLOWED < MAC_OS_X_VERSION_10_12
+/* For older SDKs, #define the new names of constants deprecated/renamed in macOS 10.12. */
+#define NSCompositingOperationSourceOver    NSCompositeSourceOver
+#define NSEventMaskAny                      NSAnyEventMask
+#define NSEventMaskLeftMouseDown            NSLeftMouseDownMask
+#define NSEventMaskOtherMouseDown           NSOtherMouseDownMask
+#define NSEventMaskRightMouseDown           NSRightMouseDownMask
+#define NSEventModifierFlagCommand          NSCommandKeyMask
+#define NSEventModifierFlagControl          NSControlKeyMask
+#define NSEventModifierFlagOption           NSAlternateKeyMask
+#define NSEventModifierFlagShift            NSShiftKeyMask
+#define NSEventTypeAppKitDefined            NSAppKitDefined
+#define NSEventTypeApplicationDefined       NSApplicationDefined
+#define NSEventTypeFlagsChanged             NSFlagsChanged
+#define NSEventTypeKeyDown                  NSKeyDown
+#define NSEventTypeKeyUp                    NSKeyUp
+#define NSEventTypeLeftMouseDown            NSLeftMouseDown
+#define NSEventTypeLeftMouseDragged         NSLeftMouseDragged
+#define NSEventTypeLeftMouseUp              NSLeftMouseUp
+#define NSEventTypeMouseMoved               NSMouseMoved
+#define NSEventTypeOtherMouseDown           NSOtherMouseDown
+#define NSEventTypeOtherMouseDragged        NSOtherMouseDragged
+#define NSEventTypeOtherMouseUp             NSOtherMouseUp
+#define NSEventTypeRightMouseDown           NSRightMouseDown
+#define NSEventTypeRightMouseUp             NSRightMouseUp
+#define NSEventTypeRightMouseDragged        NSRightMouseDragged
+#define NSEventTypeScrollWheel              NSScrollWheel
+#define NSWindowStyleMaskBorderless         NSBorderlessWindowMask
+#define NSWindowStyleMaskClosable           NSClosableWindowMask
+#define NSWindowStyleMaskFullScreen         NSFullScreenWindowMask
+#define NSWindowStyleMaskMiniaturizable     NSMiniaturizableWindowMask
+#define NSWindowStyleMaskResizable          NSResizableWindowMask
+#define NSWindowStyleMaskTitled             NSTitledWindowMask
+#define NSWindowStyleMaskUtilityWindow      NSUtilityWindowMask
+#define NSWindowStyleMaskNonactivatingPanel NSNonactivatingPanelMask
+#endif
+
 #define ERR(...) do { if (macdrv_err_on) LogError(__func__, __VA_ARGS__); } while (false)
 
 
@@ -91,6 +128,7 @@ enum {
     BOOL beenActive;
 
     NSMutableSet* windowsBeingDragged;
+    BOOL useDragNotifications;
 }
 
 @property (nonatomic) CGEventSourceKeyboardType keyboardType;
@@ -113,7 +151,7 @@ enum {
 
     - (void) windowGotFocus:(WineWindow*)window;
 
-    - (BOOL) waitUntilQueryDone:(bool*)done timeout:(NSDate*)timeout processEvents:(BOOL)processEvents;
+    - (BOOL) waitUntilQueryDone:(int*)done timeout:(NSDate*)timeout processEvents:(BOOL)processEvents;
 
     - (void) noteKey:(uint16_t)keyCode pressed:(BOOL)pressed;
 

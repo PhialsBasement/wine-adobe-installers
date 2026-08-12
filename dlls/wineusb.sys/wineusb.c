@@ -25,6 +25,7 @@
 #include <stdlib.h>
 
 #include "ntstatus.h"
+#define WIN32_NO_STATUS
 #include "windef.h"
 #include "winioctl.h"
 #include "winternl.h"
@@ -314,9 +315,6 @@ static NTSTATUS fdo_pnp(IRP *irp)
             return ret;
         }
 
-        case IRP_MN_QUERY_ID:
-            break;
-
         default:
             FIXME("Unhandled minor function %#x.\n", stack->MinorFunction);
     }
@@ -564,7 +562,6 @@ static NTSTATUS usb_submit_urb(struct usb_device *device, IRP *irp)
         case URB_FUNCTION_SELECT_CONFIGURATION:
         case URB_FUNCTION_VENDOR_DEVICE:
         case URB_FUNCTION_VENDOR_INTERFACE:
-        case URB_FUNCTION_VENDOR_ENDPOINT:
         {
             struct usb_submit_urb_params params =
             {
@@ -596,7 +593,6 @@ static NTSTATUS usb_submit_urb(struct usb_device *device, IRP *irp)
 
                 case URB_FUNCTION_VENDOR_DEVICE:
                 case URB_FUNCTION_VENDOR_INTERFACE:
-                case URB_FUNCTION_VENDOR_ENDPOINT:
                 {
                     struct _URB_CONTROL_VENDOR_OR_CLASS_REQUEST *req = &urb->UrbControlVendorClassRequest;
                     if (req->TransferBufferMDL)

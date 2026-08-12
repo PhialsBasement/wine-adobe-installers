@@ -3,14 +3,14 @@
 # This file is generated from Vulkan vk.xml file covered
 # by the following copyright and permission notice:
 #
-# Copyright 2015-2026 The Khronos Group Inc.
+# Copyright 2015-2025 The Khronos Group Inc.
 #
 # SPDX-License-Identifier: Apache-2.0 OR MIT
 #
 # and from Vulkan video.xml file covered
 # by the following copyright and permission notice:
 #
-# Copyright 2021-2026 The Khronos Group Inc.
+# Copyright 2021-2025 The Khronos Group Inc.
 # SPDX-License-Identifier: Apache-2.0 OR MIT
 #
 
@@ -279,5 +279,7 @@
 @ stdcall vkUpdateDescriptorSets(ptr long ptr long ptr)
 @ stdcall vkWaitForFences(ptr long ptr long int64)
 @ stdcall vkWaitSemaphores(ptr ptr int64)
+@ stdcall wine_vkAcquireKeyedMutex(ptr int64 int64 long)
+@ stdcall wine_vkReleaseKeyedMutex(ptr int64 int64)
 @ stdcall -private DllRegisterServer()
 @ stdcall -private DllUnregisterServer()

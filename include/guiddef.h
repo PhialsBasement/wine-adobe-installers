@@ -30,7 +30,7 @@ typedef struct
 #else
 typedef struct _GUID
 {
-#if !defined(__LP64__) && !defined(WINE_UNIX_LIB)
+#ifndef __LP64__
     unsigned long  Data1;
 #else
     unsigned int   Data1;
@@ -142,50 +142,26 @@ typedef GUID FMTID,*LPFMTID;
 
 #endif /* ndef __IID_DEFINED__ */
 
-#ifndef _REFGUID_DEFINED
 #ifdef __cplusplus
 #define REFGUID             const GUID &
-#else
-#define REFGUID             const GUID* __MIDL_CONST
-#endif
-#define _REFGUID_DEFINED
-#endif
-
-#ifndef _REFIID_DEFINED
-#ifdef __cplusplus
-#define REFIID              const IID &
-#else
-#define REFIID              const IID* __MIDL_CONST
-#endif
-#define _REFIID_DEFINED
-#endif
-
-#ifndef _REFCLSID_DEFINED
-#ifdef __cplusplus
 #define REFCLSID            const CLSID &
-#else
-#define REFCLSID            const CLSID* __MIDL_CONST
-#endif
-#define _REFCLSID_DEFINED
-#endif
-
-#ifndef _REFFMTID_DEFINED
-#ifdef __cplusplus
+#define REFIID              const IID &
 #define REFFMTID            const FMTID &
 #else
+#define REFGUID             const GUID* __MIDL_CONST
+#define REFCLSID            const CLSID* __MIDL_CONST
+#define REFIID              const IID* __MIDL_CONST
 #define REFFMTID            const FMTID* __MIDL_CONST
-#endif
-#define _REFFMTID_DEFINED
 #endif
 
 #ifdef __cplusplus
 #define IsEqualGUID(rguid1, rguid2) (!memcmp(&(rguid1), &(rguid2), sizeof(GUID)))
 inline int InlineIsEqualGUID(REFGUID rguid1, REFGUID rguid2)
 {
-   return (((const unsigned int *)&rguid1)[0] == ((const unsigned int *)&rguid2)[0] &&
-           ((const unsigned int *)&rguid1)[1] == ((const unsigned int *)&rguid2)[1] &&
-           ((const unsigned int *)&rguid1)[2] == ((const unsigned int *)&rguid2)[2] &&
-           ((const unsigned int *)&rguid1)[3] == ((const unsigned int *)&rguid2)[3]);
+   return (((unsigned int *)&rguid1)[0] == ((unsigned int *)&rguid2)[0] &&
+           ((unsigned int *)&rguid1)[1] == ((unsigned int *)&rguid2)[1] &&
+           ((unsigned int *)&rguid1)[2] == ((unsigned int *)&rguid2)[2] &&
+           ((unsigned int *)&rguid1)[3] == ((unsigned int *)&rguid2)[3]);
 }
 #else
 #define IsEqualGUID(rguid1, rguid2) (!memcmp(rguid1, rguid2, sizeof(GUID)))

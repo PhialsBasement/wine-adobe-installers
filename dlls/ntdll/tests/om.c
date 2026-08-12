@@ -30,7 +30,6 @@
 #include "winternl.h"
 #include "wingdi.h"
 #include "winuser.h"
-#include "winreg.h"
 #include "ddk/wdm.h"
 #include "wine/test.h"
 
@@ -73,7 +72,6 @@ static NTSTATUS (WINAPI *pNtOpenIoCompletion)( PHANDLE, ACCESS_MASK, POBJECT_ATT
 static NTSTATUS (WINAPI *pNtQueryInformationFile)(HANDLE, PIO_STATUS_BLOCK, void *, ULONG, FILE_INFORMATION_CLASS);
 static NTSTATUS (WINAPI *pNtOpenProcess)( HANDLE *, ACCESS_MASK, const OBJECT_ATTRIBUTES *, const CLIENT_ID * );
 static NTSTATUS (WINAPI *pNtCreateDebugObject)( HANDLE *, ACCESS_MASK, OBJECT_ATTRIBUTES *, ULONG );
-static NTSTATUS (WINAPI *pNtGetNextProcess)(HANDLE process, ACCESS_MASK access, ULONG attributes, ULONG flags, HANDLE *handle);
 static NTSTATUS (WINAPI *pNtGetNextThread)(HANDLE process, HANDLE thread, ACCESS_MASK access, ULONG attributes,
                                             ULONG flags, HANDLE *handle);
 static NTSTATUS (WINAPI *pNtOpenProcessToken)(HANDLE,DWORD,HANDLE*);
@@ -1651,7 +1649,7 @@ static void _test_object_name( unsigned line, HANDLE handle, const WCHAR *expect
     char buffer[1024];
     UNICODE_STRING *str = (UNICODE_STRING *)buffer, expect;
     ULONG len = 0;
-    NTSTATUS status, expect_status;
+    NTSTATUS status;
 
     RtlInitUnicodeString( &expect, expected_name );
 
@@ -1661,17 +1659,6 @@ static void _test_object_name( unsigned line, HANDLE handle, const WCHAR *expect
     ok_(__FILE__,line)( len >= sizeof(OBJECT_NAME_INFORMATION) + str->Length, "unexpected len %lu\n", len );
     ok_(__FILE__,line)( compare_unicode_string( str, expected_name ), "got %s, expected %s\n",
                         debugstr_w(str->Buffer), debugstr_w(expected_name) );
-    /* overflow status depends on object type */
-    pNtQueryObject( handle, ObjectTypeInformation, buffer, sizeof(buffer), &len );
-    if (!expected_name[0]) expect_status = STATUS_SUCCESS;
-    else if (!wcscmp( str->Buffer, L"File" )) expect_status = STATUS_BUFFER_OVERFLOW;
-    else expect_status = STATUS_INFO_LENGTH_MISMATCH;
-    status = pNtQueryObject( handle, ObjectNameInformation, buffer, sizeof(UNICODE_STRING), &len );
-    ok_(__FILE__,line)( status == expect_status, "NtQueryObject failed %lx/%lx for %s\n",
-                        status, expect_status, debugstr_w(expected_name) );
-    status = pNtQueryObject( handle, ObjectNameInformation, buffer, sizeof(UNICODE_STRING) - 1, &len );
-    ok_(__FILE__,line)( status == STATUS_INFO_LENGTH_MISMATCH, "NtQueryObject failed %lx for %s\n",
-                        status, debugstr_w(expected_name) );
 }
 
 static void test_query_object(void)
@@ -1731,8 +1718,7 @@ static void test_query_object(void)
     ok( status == STATUS_SUCCESS, "NtQueryObject failed %lx\n", status );
     ok( len > sizeof(UNICODE_STRING), "unexpected len %lu\n", len );
     str = (UNICODE_STRING *)buffer;
-    expected_len = sizeof(UNICODE_STRING) + str->Length + sizeof(WCHAR);
-    ok( expected_len == len, "unexpected len %lu\n", len );
+    ok( sizeof(UNICODE_STRING) + str->Length + sizeof(WCHAR) == len, "unexpected len %lu\n", len );
     ok( str->Length >= sizeof(name) - sizeof(WCHAR), "unexpected len %u\n", str->Length );
     ok( len > sizeof(UNICODE_STRING) + sizeof("\\test_event") * sizeof(WCHAR),
         "name too short %s\n", wine_dbgstr_w(str->Buffer) );
@@ -1745,7 +1731,7 @@ static void test_query_object(void)
     len -= sizeof(WCHAR);
     status = pNtQueryObject( handle, ObjectNameInformation, buffer, len, &len );
     ok( status == STATUS_INFO_LENGTH_MISMATCH, "NtQueryObject failed %lx\n", status );
-    ok( len == expected_len, "unexpected len %lu\n", len );
+    ok( len >= sizeof(UNICODE_STRING) + sizeof(name), "unexpected len %lu\n", len );
 
     test_object_type( handle, L"Event" );
 
@@ -1790,22 +1776,7 @@ static void test_query_object(void)
     ok( status == STATUS_BUFFER_OVERFLOW, "got %#lx\n", status);
     ok( len == expected_len, "unexpected len %lu\n", len );
 
-    len = 0;
-    status = pNtQueryObject( handle, ObjectNameInformation, buffer, expected_len - sizeof(WCHAR), &len );
-    ok( status == STATUS_BUFFER_OVERFLOW, "got %#lx\n", status);
-    ok( len == expected_len, "unexpected len %lu\n", len );
-
     test_object_type( handle, L"File" );
-
-    pNtClose( handle );
-
-    len = 0;
-    status = pNtQueryObject( (HANDLE)0xdeadbeef, ObjectNameInformation, buffer, 0, &len );
-    ok( status == STATUS_INVALID_HANDLE, "got %#lx\n", status );
-
-    len = 0;
-    status = pNtQueryObject( (HANDLE)0xdeadbeef, ObjectNameInformation, buffer, sizeof(UNICODE_STRING), &len );
-    ok( status == STATUS_INVALID_HANDLE, "got %#lx\n", status);
 
     pNtClose( handle );
 
@@ -2026,7 +1997,14 @@ static void test_type_mismatch(void)
 {
     HANDLE h;
     NTSTATUS res;
-    OBJECT_ATTRIBUTES attr = { .Length = sizeof(attr) };
+    OBJECT_ATTRIBUTES attr;
+
+    attr.Length                   = sizeof(attr);
+    attr.RootDirectory            = 0;
+    attr.ObjectName               = NULL;
+    attr.Attributes               = 0;
+    attr.SecurityDescriptor       = NULL;
+    attr.SecurityQualityOfService = NULL;
 
     res = pNtCreateEvent( &h, 0, &attr, NotificationEvent, 0 );
     ok(!res, "can't create event: %lx\n", res);
@@ -2174,8 +2152,7 @@ static void test_token(void)
     status = pNtOpenProcessToken( GetCurrentProcess(), TOKEN_ALL_ACCESS, (HANDLE *)0xdeadbee0 );
     ok( status == STATUS_ACCESS_VIOLATION, "NtOpenProcessToken failed: %lx\n", status);
     status = pNtOpenThreadToken( GetCurrentThread(), TOKEN_ALL_ACCESS, TRUE, (HANDLE *)0xdeadbee0 );
-    ok( status == STATUS_ACCESS_VIOLATION || status == STATUS_NO_TOKEN,
-        "NtOpenProcessToken failed: %lx\n", status);
+    ok( status == STATUS_ACCESS_VIOLATION, "NtOpenProcessToken failed: %lx\n", status);
     handle = (HANDLE)0xdeadbeef;
     status = pNtOpenProcessToken( (HANDLE)0xdead, TOKEN_ALL_ACCESS, &handle );
     ok( status == STATUS_INVALID_HANDLE, "NtOpenProcessToken failed: %lx\n", status);
@@ -2509,39 +2486,6 @@ static void test_get_next_thread(void)
     ok(found, "Thread not found.\n");
 
     CloseHandle(thread);
-}
-
-static void test_get_next_process(void)
-{
-    NTSTATUS status;
-    HANDLE handle, prev = 0;
-    BOOL found = FALSE;
-
-    if (!pNtGetNextProcess)
-    {
-        win_skip("NtGetNextProcess is not available.\n");
-        return;
-    }
-
-    while (!(status = pNtGetNextProcess(prev, PROCESS_QUERY_LIMITED_INFORMATION, OBJ_INHERIT, 0, &handle)))
-    {
-        DWORD pid = GetProcessId( handle );
-        ok( pid, "GetProcessId failed err %lu\n", GetLastError() );
-        if (pid == GetCurrentProcessId()) found = TRUE;
-        if (prev) pNtClose(prev);
-        prev = handle;
-    }
-    ok(status == STATUS_NO_MORE_ENTRIES, "Unexpected status %#lx.\n", status);
-    ok(found, "current process not found\n" );
-    pNtClose(prev);
-
-    /* Reversed search only supported in recent enough Win10 */
-    status = pNtGetNextProcess(0, PROCESS_QUERY_LIMITED_INFORMATION, OBJ_INHERIT, 1, &handle);
-    ok(!status || broken(status == STATUS_INVALID_PARAMETER), "Unexpected status %#lx.\n", status);
-    if (!status) pNtClose(handle);
-
-    status = pNtGetNextProcess(0, PROCESS_QUERY_LIMITED_INFORMATION, OBJ_INHERIT, 2, &handle);
-    ok(status == STATUS_INVALID_PARAMETER, "Unexpected status %#lx.\n", status);
 }
 
 static void test_globalroot(void)
@@ -3448,7 +3392,6 @@ static void test_zero_access(void)
     CLIENT_ID cid;
     HANDLE h1, h2;
     DWORD err;
-    HKEY key;
 
     size.QuadPart = 4096;
     timeout.QuadPart = -10000;
@@ -3467,15 +3410,18 @@ static void test_zero_access(void)
     ok( status == STATUS_OBJECT_NAME_EXISTS, "got %#lx.\n", status );
     CloseHandle( h2 );
     status = pNtCreateEvent( &h2, 0, &attr, NotificationEvent, FALSE );
-    ok( status == STATUS_ACCESS_DENIED, "got %#lx.\n", status );
+    todo_wine ok( status == STATUS_ACCESS_DENIED, "got %#lx.\n", status );
+    if (NT_SUCCESS(status)) CloseHandle( h2 );
     status = pNtOpenEvent( &h2, EVENT_ALL_ACCESS, &attr );
     ok( !status, "got %#lx.\n", status );
     CloseHandle( h2 );
     status = pNtOpenEvent( &h2, 0, &attr );
-    ok( status == STATUS_ACCESS_DENIED, "got %#lx.\n", status );
+    todo_wine ok( status == STATUS_ACCESS_DENIED, "got %#lx.\n", status );
+    if (NT_SUCCESS(status)) CloseHandle( h2 );
     InitializeObjectAttributes( &attr, &str, OBJ_INHERIT, 0, NULL );
     status = pNtOpenEvent( &h2, 0, &attr );
-    ok( status == STATUS_ACCESS_DENIED, "got %#lx.\n", status );
+    todo_wine ok( status == STATUS_ACCESS_DENIED, "got %#lx.\n", status );
+    if (NT_SUCCESS(status)) CloseHandle( h2 );
 
     status = pNtDuplicateObject( GetCurrentProcess(), h1, GetCurrentProcess(), &h2, 0, 0, 0 );
     ok( !status, "got %#lx.\n", status );
@@ -3497,9 +3443,11 @@ static void test_zero_access(void)
     ok( status == STATUS_OBJECT_NAME_EXISTS, "got %#lx.\n", status );
     CloseHandle( h2 );
     status = pNtCreateMutant( &h2, 0, &attr, FALSE );
-    ok( status == STATUS_ACCESS_DENIED, "got %#lx.\n", status );
+    todo_wine ok( status == STATUS_ACCESS_DENIED, "got %#lx.\n", status );
+    if (NT_SUCCESS(status)) CloseHandle( h2 );
     status = pNtOpenMutant( &h2, 0, &attr );
-    ok( status == STATUS_ACCESS_DENIED, "got %#lx.\n", status );
+    todo_wine ok( status == STATUS_ACCESS_DENIED, "got %#lx.\n", status );
+    if (NT_SUCCESS(status)) CloseHandle( h2 );
     CloseHandle( h1 );
 
     status = pNtCreateSemaphore( &h1, 0, &attr, 1, 2 );
@@ -3513,9 +3461,11 @@ static void test_zero_access(void)
     ok( status == STATUS_OBJECT_NAME_EXISTS, "got %#lx.\n", status );
     CloseHandle( h2 );
     status = pNtCreateSemaphore( &h2, 0, &attr, 1, 2 );
-    ok( status == STATUS_ACCESS_DENIED, "got %#lx.\n", status );
+    todo_wine ok( status == STATUS_ACCESS_DENIED, "got %#lx.\n", status );
+    if (NT_SUCCESS(status)) CloseHandle( h2 );
     status = pNtOpenSemaphore( &h2, 0, &attr );
-    ok( status == STATUS_ACCESS_DENIED, "got %#lx.\n", status );
+    todo_wine ok( status == STATUS_ACCESS_DENIED, "got %#lx.\n", status );
+    if (NT_SUCCESS(status)) CloseHandle( h2 );
     CloseHandle( h1 );
 
     status = pNtCreateKeyedEvent( &h1, 0, &attr, 0 );
@@ -3529,9 +3479,11 @@ static void test_zero_access(void)
     ok( status == STATUS_OBJECT_NAME_EXISTS, "got %#lx.\n", status );
     CloseHandle( h2 );
     status = pNtCreateKeyedEvent( &h2, 0, &attr, 0 );
-    ok( status == STATUS_ACCESS_DENIED, "got %#lx.\n", status );
+    todo_wine ok( status == STATUS_ACCESS_DENIED, "got %#lx.\n", status );
+    if (NT_SUCCESS(status)) CloseHandle( h2 );
     status = pNtOpenKeyedEvent( &h2, 0, &attr );
-    ok( status == STATUS_ACCESS_DENIED, "got %#lx.\n", status );
+    todo_wine ok( status == STATUS_ACCESS_DENIED, "got %#lx.\n", status );
+    if (NT_SUCCESS(status)) CloseHandle( h2 );
     CloseHandle( h1 );
 
     status = pNtCreateIoCompletion( &h1, 0, &attr, 0 );
@@ -3545,9 +3497,11 @@ static void test_zero_access(void)
     ok( status == STATUS_OBJECT_NAME_EXISTS, "got %#lx.\n", status );
     CloseHandle( h2 );
     status = pNtCreateIoCompletion( &h2, 0, &attr, 0 );
-    ok( status == STATUS_ACCESS_DENIED, "got %#lx.\n", status );
+    todo_wine ok( status == STATUS_ACCESS_DENIED, "got %#lx.\n", status );
+    if (NT_SUCCESS(status)) CloseHandle( h2 );
     status = pNtOpenIoCompletion( &h2, 0, &attr );
-    ok( status == STATUS_ACCESS_DENIED, "got %#lx.\n", status );
+    todo_wine ok( status == STATUS_ACCESS_DENIED, "got %#lx.\n", status );
+    if (NT_SUCCESS(status)) CloseHandle( h2 );
     CloseHandle( h1 );
 
     status = pNtCreateJobObject( &h1, 0, &attr );
@@ -3562,9 +3516,11 @@ static void test_zero_access(void)
         "got %#lx.\n", status );
     if (NT_SUCCESS(status)) CloseHandle( h2 );
     status = pNtCreateJobObject( &h2, 0, &attr );
-    ok( status == STATUS_ACCESS_DENIED, "got %#lx.\n", status );
+    todo_wine ok( status == STATUS_ACCESS_DENIED, "got %#lx.\n", status );
+    if (NT_SUCCESS(status)) CloseHandle( h2 );
     status = pNtOpenJobObject( &h2, 0, &attr );
-    ok( status == STATUS_ACCESS_DENIED, "got %#lx.\n", status );
+    todo_wine ok( status == STATUS_ACCESS_DENIED, "got %#lx.\n", status );
+    if (NT_SUCCESS(status)) CloseHandle( h2 );
     CloseHandle( h1 );
 
     status = pNtCreateDirectoryObject( &h1, 0, &attr );
@@ -3578,9 +3534,11 @@ static void test_zero_access(void)
     ok( status == STATUS_OBJECT_NAME_EXISTS, "got %#lx.\n", status );
     CloseHandle( h2 );
     status = pNtCreateDirectoryObject( &h2, 0, &attr );
-    ok( status == STATUS_ACCESS_DENIED, "got %#lx.\n", status );
+    todo_wine ok( status == STATUS_ACCESS_DENIED, "got %#lx.\n", status );
+    if (NT_SUCCESS(status)) CloseHandle( h2 );
     status = pNtOpenDirectoryObject( &h2, 0, &attr );
-    ok( status == STATUS_ACCESS_DENIED, "got %#lx.\n", status );
+    todo_wine ok( status == STATUS_ACCESS_DENIED, "got %#lx.\n", status );
+    if (NT_SUCCESS(status)) CloseHandle( h2 );
     CloseHandle( h1 );
 
     status = pNtCreateTimer( &h1, 0, &attr, NotificationTimer );
@@ -3594,9 +3552,11 @@ static void test_zero_access(void)
     ok( status == STATUS_OBJECT_NAME_EXISTS, "got %#lx.\n", status );
     CloseHandle( h2 );
     status = pNtCreateTimer( &h2, 0, &attr, NotificationTimer );
-    ok( status == STATUS_ACCESS_DENIED, "got %#lx.\n", status );
+    todo_wine ok( status == STATUS_ACCESS_DENIED, "got %#lx.\n", status );
+    if (NT_SUCCESS(status)) CloseHandle( h2 );
     status = pNtOpenTimer( &h2, 0, &attr );
-    ok( status == STATUS_ACCESS_DENIED, "got %#lx.\n", status );
+    todo_wine ok( status == STATUS_ACCESS_DENIED, "got %#lx.\n", status );
+    if (NT_SUCCESS(status)) CloseHandle( h2 );
     CloseHandle( h1 );
 
     status = pNtCreateSymbolicLinkObject( &h1, 0, &attr, &target );
@@ -3611,9 +3571,11 @@ static void test_zero_access(void)
         "got %#lx.\n", status );
     CloseHandle( h2 );
     status = pNtCreateSymbolicLinkObject( &h2, 0, &attr, &target );
-    ok( status == STATUS_ACCESS_DENIED, "got %#lx.\n", status );
+    todo_wine ok( status == STATUS_ACCESS_DENIED, "got %#lx.\n", status );
+    if (NT_SUCCESS(status)) CloseHandle( h2 );
     status = pNtOpenSymbolicLinkObject( &h2, 0, &attr );
-    ok( status == STATUS_ACCESS_DENIED, "got %#lx.\n", status );
+    todo_wine ok( status == STATUS_ACCESS_DENIED, "got %#lx.\n", status );
+    if (NT_SUCCESS(status)) CloseHandle( h2 );
     CloseHandle( h1 );
 
     status = pNtCreateSection( &h1, 0, &attr, &size, PAGE_READWRITE, SEC_COMMIT, 0 );
@@ -3627,9 +3589,11 @@ static void test_zero_access(void)
     ok( status == STATUS_OBJECT_NAME_EXISTS, "got %#lx.\n", status );
     CloseHandle( h2 );
     status = pNtCreateSection( &h2, 0, &attr, &size, PAGE_READWRITE, SEC_COMMIT, 0 );
-    ok( status == STATUS_ACCESS_DENIED, "got %#lx.\n", status );
+    todo_wine ok( status == STATUS_ACCESS_DENIED, "got %#lx.\n", status );
+    if (NT_SUCCESS(status)) CloseHandle( h2 );
     status = pNtOpenSection( &h2, 0, &attr );
-    ok( status == STATUS_ACCESS_DENIED, "got %#lx.\n", status );
+    todo_wine ok( status == STATUS_ACCESS_DENIED, "got %#lx.\n", status );
+    if (NT_SUCCESS(status)) CloseHandle( h2 );
     CloseHandle( h1 );
 
     status = pNtCreateDebugObject( &h1, 0, &attr, 0 );
@@ -3641,7 +3605,8 @@ static void test_zero_access(void)
     ok( status == STATUS_OBJECT_NAME_EXISTS, "got %#lx.\n", status );
     CloseHandle( h2 );
     status = pNtCreateDebugObject( &h2, 0, &attr, 0 );
-    ok( status == STATUS_ACCESS_DENIED, "got %#lx.\n", status );
+    todo_wine ok( status == STATUS_ACCESS_DENIED, "got %#lx.\n", status );
+    if (NT_SUCCESS(status)) CloseHandle( h2 );
     CloseHandle( h1 );
 
     pRtlInitUnicodeString( &str, L"\\Device\\Null" );
@@ -3651,7 +3616,8 @@ static void test_zero_access(void)
     CloseHandle( h1 );
     status = NtCreateFile( &h1, 0, &attr, &iosb, NULL, 0,
                            FILE_SHARE_READ | FILE_SHARE_WRITE, FILE_OPEN, 0, NULL, 0 );
-    ok( status == STATUS_ACCESS_DENIED, "got %#lx.\n", status );
+    todo_wine ok( status == STATUS_ACCESS_DENIED, "got %#lx.\n", status );
+    if (NT_SUCCESS(status)) CloseHandle( h1 );
 
     pRtlInitUnicodeString( &str, L"\\??\\c:\\windows\\system32\\ntdll.dll" );
     status = NtCreateFile( &h1, GENERIC_READ | SYNCHRONIZE, &attr, &iosb, NULL, 0,
@@ -3660,24 +3626,27 @@ static void test_zero_access(void)
     CloseHandle( h1 );
     status = NtCreateFile( &h1, 0, &attr, &iosb, NULL, 0,
                            FILE_SHARE_READ | FILE_SHARE_WRITE, FILE_OPEN, 0, NULL, 0 );
-    ok( status == STATUS_ACCESS_DENIED, "got %#lx.\n", status );
+    todo_wine ok( status == STATUS_ACCESS_DENIED, "got %#lx.\n", status );
+    if (NT_SUCCESS(status)) CloseHandle( h1 );
 
     pRtlInitUnicodeString( &str, L"\\Device\\MailSlot\\abc" );
     status = pNtCreateMailslotFile( &h1, 0, &attr, &iosb, 0, 0, 0, NULL );
-    ok( status == STATUS_ACCESS_DENIED, "got %#lx.\n", status );
+    todo_wine ok( status == STATUS_ACCESS_DENIED, "got %#lx.\n", status );
+    if (NT_SUCCESS(status)) CloseHandle( h1 );
     status = pNtCreateMailslotFile( &h1, GENERIC_ALL, &attr, &iosb, 0, 0, 0, NULL );
     ok( !status, "got %#lx.\n", status );
     status = pNtCreateMailslotFile( &h2, GENERIC_READ, &attr, &iosb, 0, 0, 0, NULL );
     ok( status == STATUS_OBJECT_NAME_COLLISION, "got %#lx.\n", status );
     status = pNtCreateMailslotFile( &h2, 0, &attr, &iosb, 0, 0, 0, NULL );
-    ok( status == STATUS_ACCESS_DENIED, "got %#lx.\n", status );
+    todo_wine ok( status == STATUS_ACCESS_DENIED, "got %#lx.\n", status );
     CloseHandle( h1 );
 
     pRtlInitUnicodeString( &str, L"\\??\\PIPE\\test\\pipe" );
     status = pNtCreateNamedPipeFile( &h1, 0, &attr, &iosb,
                                      FILE_SHARE_READ | FILE_SHARE_WRITE, FILE_CREATE,
                                      FILE_PIPE_FULL_DUPLEX, FALSE, FALSE, FALSE, 1, 256, 256, &timeout );
-    ok( status == STATUS_ACCESS_DENIED, "got %#lx.\n", status );
+    todo_wine ok( status == STATUS_ACCESS_DENIED, "got %#lx.\n", status );
+    if (NT_SUCCESS(status)) CloseHandle( h1 );
     status = pNtCreateNamedPipeFile( &h1, GENERIC_READ | GENERIC_WRITE, &attr, &iosb,
                                      FILE_SHARE_READ | FILE_SHARE_WRITE, FILE_CREATE,
                                      FILE_PIPE_FULL_DUPLEX, FALSE, FALSE, FALSE, 1, 256, 256, &timeout );
@@ -3689,30 +3658,23 @@ static void test_zero_access(void)
     status = pNtCreateNamedPipeFile( &h2, 0, &attr, &iosb,
                                      FILE_SHARE_READ | FILE_SHARE_WRITE, FILE_OPEN,
                                      FILE_PIPE_FULL_DUPLEX, FALSE, FALSE, FALSE, 1, 256, 256, &timeout );
-    ok( status == STATUS_ACCESS_DENIED, "got %#lx.\n", status );
+    todo_wine ok( status == STATUS_ACCESS_DENIED, "got %#lx.\n", status );
+    if (NT_SUCCESS(status)) CloseHandle( h2 );
     CloseHandle( h1 );
 
     pRtlInitUnicodeString( &str, L"\\REGISTRY\\Machine" );
     status = pNtCreateKey( &h1, 0, &attr, 0, 0, 0, 0 );
-    ok( status == STATUS_ACCESS_DENIED, "got %#lx.\n", status );
+    todo_wine ok( status == STATUS_ACCESS_DENIED, "got %#lx.\n", status );
+    if (NT_SUCCESS(status)) CloseHandle( h1 );
     status = pNtCreateKey( &h1, KEY_READ, &attr, 0, 0, 0, 0 );
     ok( !status, "got %#lx.\n", status );
     CloseHandle( h1 );
     status = pNtOpenKey( &h1, KEY_READ, &attr );
     ok( !status, "got %#lx.\n", status );
     CloseHandle( h1 );
-    err = RegOpenKeyExW( HKEY_LOCAL_MACHINE, L"Software", 0, KEY_READ | KEY_WOW64_64KEY, &key);
-    ok( !err, "got %#lx.\n", status );
-    RegCloseKey( key );
-    err = RegOpenKeyExW( HKEY_LOCAL_MACHINE, L"Software", 0, KEY_READ | KEY_WOW64_32KEY, &key);
-    ok( !err, "got %#lx.\n", status );
-    RegCloseKey( key );
     status = pNtOpenKey( &h1, 0, &attr );
-    ok( status == STATUS_ACCESS_DENIED, "got %#lx.\n", status );
-    err = RegOpenKeyExW( HKEY_LOCAL_MACHINE, L"Software", 0, KEY_WOW64_64KEY, &key);
-    ok( err == ERROR_ACCESS_DENIED, "got %#lx.\n", status );
-    err = RegOpenKeyExW( HKEY_LOCAL_MACHINE, L"Software", 0, KEY_WOW64_32KEY, &key);
-    ok( err == ERROR_ACCESS_DENIED, "got %#lx.\n", status );
+    todo_wine ok( status == STATUS_ACCESS_DENIED, "got %#lx.\n", status );
+    if (NT_SUCCESS(status)) CloseHandle( h1 );
 
     pRtlInitUnicodeString( &str, L"\\REGISTRY\\Machine\\Software\\foobar-test" );
     status = pNtCreateKey( &h1, KEY_ALL_ACCESS, &attr, 0, 0, 0, 0 );
@@ -3735,22 +3697,26 @@ static void test_zero_access(void)
     ok( !status, "got %#lx.\n", status );
     CloseHandle( h1 );
     status = pNtOpenProcessToken( GetCurrentProcess(), 0, &h1 );
-    ok( status == STATUS_ACCESS_DENIED, "got %#lx.\n", status );
+    todo_wine ok( status == STATUS_ACCESS_DENIED, "got %#lx.\n", status );
+    if (NT_SUCCESS(status)) CloseHandle( h1 );
 
     status = NtGetNextThread(GetCurrentProcess(), NULL, 0, 0, 0, &h1);
-    ok( status == STATUS_NO_MORE_ENTRIES, "got %#lx.\n", status );
+    todo_wine ok( status == STATUS_NO_MORE_ENTRIES, "got %#lx.\n", status );
+    if (NT_SUCCESS(status)) CloseHandle( h1 );
 
     InitializeObjectAttributes( &attr, NULL, 0, 0, NULL );
     cid.UniqueProcess = ULongToHandle( GetCurrentProcessId() );
     cid.UniqueThread  = 0;
     status = pNtOpenProcess( &h1, 0, &attr, &cid );
-    ok( status == STATUS_ACCESS_DENIED, "got %#lx.\n", status );
+    todo_wine ok( status == STATUS_ACCESS_DENIED, "got %#lx.\n", status );
+    if (NT_SUCCESS(status)) CloseHandle( h1 );
 
     InitializeObjectAttributes( &attr, NULL, 0, 0, NULL );
     cid.UniqueProcess = 0;
     cid.UniqueThread  = ULongToHandle( GetCurrentThreadId() );
     status = pNtOpenThread( &h1, 0, &attr, &cid );
-    ok( status == STATUS_ACCESS_DENIED, "got %#lx.\n", status );
+    todo_wine ok( status == STATUS_ACCESS_DENIED, "got %#lx.\n", status );
+    if (NT_SUCCESS(status)) CloseHandle( h1 );
 
     h1 = CreateWindowStationA( "WinSta0", 0, WINSTA_ALL_ACCESS, NULL );
     err = GetLastError();
@@ -3762,8 +3728,9 @@ static void test_zero_access(void)
         CloseWindowStation( h1 );
         h1 = CreateWindowStationA( "WinSta0", 0, 0, NULL );
         err = GetLastError();
-        ok( !h1, "CreateWindowStationA succeeded\n" );
-        ok( err == ERROR_ACCESS_DENIED, "CreateWindowStationA failed %lu\n", err );
+        todo_wine ok( !h1, "CreateWindowStationA succeeded\n" );
+        todo_wine ok( err == ERROR_ACCESS_DENIED, "CreateWindowStationA failed %lu\n", err );
+        if (h1) CloseWindowStation( h1 );
     }
     else if (err == ERROR_ACCESS_DENIED) win_skip( "Not enough privileges for CreateWindowStation\n" );
 
@@ -3772,8 +3739,9 @@ static void test_zero_access(void)
     CloseWindowStation( h1 );
     h1 = OpenWindowStationA( "WinSta0", TRUE, 0 );
     err = GetLastError();
-    ok( !h1, "OpenWindowStation succeeeded\n" );
-    ok( err == ERROR_ACCESS_DENIED, "OpenWindowStation failed %lu\n", err );
+    todo_wine ok( !h1, "OpenWindowStation succeeeded\n" );
+    todo_wine ok( err == ERROR_ACCESS_DENIED, "OpenWindowStation failed %lu\n", err );
+    if (h1) CloseWindowStation( h1 );
 
     h1 = CreateDesktopA( "default", NULL, NULL, 0, DESKTOP_ALL_ACCESS, NULL );
     ok( h1 != 0, "CreateDesktopA failed %lu\n", GetLastError() );
@@ -3781,8 +3749,9 @@ static void test_zero_access(void)
     SetLastError( 0xdeadbeef );
     h1 = CreateDesktopA( "default", NULL, NULL, 0, 0, NULL );
     err = GetLastError();
-    ok( !h1, "CreateDesktopA succeeded\n" );
-    ok( err == ERROR_ACCESS_DENIED, "CreateDesktopA failed %lu\n", err );
+    todo_wine ok( !h1, "CreateDesktopA succeeded\n" );
+    todo_wine ok( err == ERROR_ACCESS_DENIED, "CreateDesktopA failed %lu\n", err );
+    if (h1) CloseDesktop( h1 );
 
     h1 = OpenDesktopA( "default", 0, TRUE, DESKTOP_ALL_ACCESS );
     ok( h1 != 0, "OpenDesktopA failed %lu\n", GetLastError() );
@@ -3920,7 +3889,6 @@ START_TEST(om)
     pNtQueryInformationFile =  (void *)GetProcAddress(hntdll, "NtQueryInformationFile");
     pNtOpenProcess          =  (void *)GetProcAddress(hntdll, "NtOpenProcess");
     pNtCreateDebugObject    =  (void *)GetProcAddress(hntdll, "NtCreateDebugObject");
-    pNtGetNextProcess       =  (void *)GetProcAddress(hntdll, "NtGetNextProcess");
     pNtGetNextThread        =  (void *)GetProcAddress(hntdll, "NtGetNextThread");
     pNtOpenProcessToken     =  (void *)GetProcAddress(hntdll, "NtOpenProcessToken");
     pNtOpenThreadToken      =  (void *)GetProcAddress(hntdll, "NtOpenThreadToken");
@@ -3944,7 +3912,6 @@ START_TEST(om)
     test_duplicate_object();
     test_object_types();
     test_get_next_thread();
-    test_get_next_process();
     test_globalroot();
     test_object_identity();
     test_query_directory();

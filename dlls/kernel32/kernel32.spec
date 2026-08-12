@@ -268,7 +268,7 @@
 @ stdcall CopyLZFile(long long) LZCopy
 @ stdcall CreateActCtxA(ptr)
 @ stdcall -import CreateActCtxW(ptr)
-@ stdcall CreateBoundaryDescriptorA(str long)
+# @ stub CreateBoundaryDescriptorA
 @ stdcall -import CreateBoundaryDescriptorW(wstr long)
 @ stdcall -import CreateConsoleScreenBuffer(long long ptr long ptr)
 @ stdcall -import CreateDirectoryA(str ptr)
@@ -376,7 +376,7 @@
 # @ stub DisableThreadProfiling
 @ stdcall DisassociateCurrentThreadFromCallback(ptr) NTDLL.TpDisassociateCallback
 @ stdcall DiscardVirtualMemory(ptr long) kernelbase.DiscardVirtualMemory
-@ stdcall DeleteSynchronizationBarrier(ptr)
+@ stdcall -import DeleteSynchronizationBarrier(ptr)
 @ stdcall DeleteTimerQueue(long)
 @ stdcall -import DeleteTimerQueueEx(long long)
 @ stdcall -import DeleteTimerQueueTimer(long long long)
@@ -425,7 +425,7 @@
 @ stdcall -import EnumResourceTypesExA(long ptr long long long)
 @ stdcall -import EnumResourceTypesExW(long ptr long long long)
 @ stdcall EnumResourceTypesW(long ptr long)
-@ stdcall EnterSynchronizationBarrier(ptr long)
+@ stdcall -import EnterSynchronizationBarrier(ptr long)
 @ stdcall EnumSystemCodePagesA(ptr long)
 @ stdcall -import EnumSystemCodePagesW(ptr long)
 @ stdcall -import EnumSystemFirmwareTables(long ptr long)
@@ -624,7 +624,7 @@
 @ stdcall -import GetConsoleProcessList(ptr long)
 @ stdcall -import GetConsoleScreenBufferInfo(long ptr)
 @ stdcall -import GetConsoleScreenBufferInfoEx(long ptr)
-# @ stub GetConsoleSelectionInfo
+@ stdcall -import GetConsoleSelectionInfo(ptr)
 @ stdcall -import GetConsoleTitleA(ptr long)
 @ stdcall -import GetConsoleTitleW(ptr long)
 @ stdcall -import GetConsoleWindow()
@@ -636,7 +636,6 @@
 @ stdcall -import GetCurrentConsoleFontEx(long long ptr)
 @ stdcall -import GetCurrentDirectoryA(long ptr)
 @ stdcall -import GetCurrentDirectoryW(long ptr)
-@ stdcall GetCurrentApplicationUserModelId(ptr ptr) kernelbase.GetCurrentApplicationUserModelId
 @ stdcall GetCurrentPackageFamilyName(ptr ptr) kernelbase.GetCurrentPackageFamilyName
 @ stdcall GetCurrentPackageFullName(ptr ptr) kernelbase.GetCurrentPackageFullName
 @ stdcall GetCurrentPackageId(ptr ptr) kernelbase.GetCurrentPackageId
@@ -732,7 +731,6 @@
 # @ stub GetLongPathNameTransactedA
 # @ stub GetLongPathNameTransactedW
 @ stdcall -import GetLongPathNameW(wstr ptr long)
-@ stdcall -import GetMachineTypeAttributes(long ptr)
 @ stdcall GetMailslotInfo(long ptr ptr ptr ptr)
 @ stdcall GetMaximumProcessorCount(long)
 @ stdcall GetMaximumProcessorGroupCount()
@@ -783,7 +781,8 @@
 @ stdcall -import GetUserPreferredUILanguages(long ptr ptr ptr)
 @ stdcall GetPackageFamilyName(long ptr ptr) kernelbase.GetPackageFamilyName
 @ stdcall GetPackageFullName(long ptr ptr) kernelbase.GetPackageFullName
-@ stdcall GetPackagesByPackageFamily(wstr ptr ptr ptr ptr) kernelbase.GetPackagesByPackageFamily
+@ stdcall -import GetPackagePath(ptr long ptr ptr)
+@ stdcall -import GetPackagesByPackageFamily(wstr ptr ptr ptr ptr)
 @ stdcall GetPackagePathByFullName(wstr ptr wstr) kernelbase.GetPackagePathByFullName
 @ stdcall -import GetPhysicallyInstalledSystemMemory(ptr)
 @ stdcall -import GetPriorityClass(long)
@@ -960,7 +959,7 @@
 @ stub HeapSetFlags
 @ stdcall -import HeapSetInformation(ptr long ptr long)
 @ stdcall HeapSize(long long ptr) NTDLL.RtlSizeHeap
-@ stdcall -import HeapSummary(long long ptr)
+@ stub HeapSummary
 @ stdcall -import HeapUnlock(long)
 @ stub HeapUsage
 @ stdcall -import HeapValidate(long long ptr)
@@ -980,7 +979,7 @@
 @ stdcall -import InitializeCriticalSectionAndSpinCount(ptr long)
 @ stdcall -import InitializeCriticalSectionEx(ptr long long)
 @ stdcall -import InitializeProcThreadAttributeList(ptr long long ptr)
-@ stdcall InitializeSynchronizationBarrier(ptr long long)
+@ stdcall -import InitializeSynchronizationBarrier(ptr long long)
 @ stdcall InitializeSListHead(ptr) NTDLL.RtlInitializeSListHead
 @ stdcall InitializeSRWLock(ptr) NTDLL.RtlInitializeSRWLock
 @ stdcall -arch=i386 InterlockedCompareExchange (ptr long long)
@@ -1175,6 +1174,7 @@
 @ stdcall -import PeekConsoleInputW(ptr ptr long ptr)
 @ stdcall -import PeekNamedPipe(long ptr long ptr ptr ptr)
 @ stdcall -import PostQueuedCompletionStatus(long long ptr ptr)
+@ stdcall -import PackageFullNameFromId(ptr ptr ptr)
 @ stdcall -import PackageIdFromFullName(wstr long ptr ptr)
 @ stdcall PowerClearRequest(long long)
 @ stdcall PowerCreateRequest(ptr)
@@ -1217,7 +1217,6 @@
 @ stdcall -import QueryUnbiasedInterruptTime(ptr)
 @ stub QueryWin31IniFilesMappedToRegistry
 @ stdcall -import QueueUserAPC(ptr long long)
-@ stdcall -import QueueUserAPC2(ptr long long long)
 @ stdcall -import QueueUserWorkItem(ptr ptr long)
 @ stdcall -import RaiseException(long long long ptr)
 @ stdcall -import RaiseFailFastException(ptr ptr long)
@@ -1287,7 +1286,7 @@
 @ stub RegisterConsoleVDM
 @ stdcall RegisterServiceProcess(long long)
 @ stub RegisterSysMsgHandler
-@ stdcall RegisterWaitForInputIdle(ptr)
+@ stub RegisterWaitForInputIdle
 @ stdcall RegisterWaitForSingleObject(ptr long ptr ptr long long)
 @ stdcall -import RegisterWaitForSingleObjectEx(long ptr ptr long long)
 @ stub RegisterWowBaseHandlers
@@ -1324,15 +1323,15 @@
 @ stdcall -import ResolveLocaleName(wstr ptr long)
 @ stdcall RestoreLastError(long) NTDLL.RtlRestoreLastWin32Error
 @ stdcall -import ResumeThread(long)
-@ cdecl -arch=!i386 RtlAddFunctionTable(ptr long long)
+@ cdecl -arch=!i386 RtlAddFunctionTable(ptr long long) NTDLL.RtlAddFunctionTable
 @ stdcall -norelay -import RtlCaptureContext(ptr)
 @ stdcall RtlCaptureStackBackTrace(long long ptr ptr) NTDLL.RtlCaptureStackBackTrace
 @ stdcall -arch=!i386 RtlCompareMemory(ptr ptr long) NTDLL.RtlCompareMemory
 @ stdcall -arch=!i386 RtlCopyMemory(ptr ptr long) NTDLL.RtlCopyMemory
-@ cdecl -arch=!i386 RtlDeleteFunctionTable(ptr)
+@ cdecl -arch=!i386 RtlDeleteFunctionTable(ptr) NTDLL.RtlDeleteFunctionTable
 @ stdcall RtlFillMemory(ptr long long) NTDLL.RtlFillMemory
-@ cdecl -arch=!i386 RtlInstallFunctionTableCallback(long long long ptr ptr ptr)
-@ stdcall -arch=!i386 RtlLookupFunctionEntry(long ptr ptr)
+@ cdecl -arch=!i386 RtlInstallFunctionTableCallback(long long long ptr ptr ptr) NTDLL.RtlInstallFunctionTableCallback
+@ stdcall -arch=!i386 RtlLookupFunctionEntry(long ptr ptr) RtlLookupFunctionEntry
 @ stdcall RtlMoveMemory(ptr ptr long) NTDLL.RtlMoveMemory
 @ stdcall RtlPcToFileHeader(ptr ptr) NTDLL.RtlPcToFileHeader
 @ stdcall -arch=arm,x86_64 -norelay RtlRaiseException(ptr) NTDLL.RtlRaiseException
@@ -1718,11 +1717,6 @@
 @ stdcall -import lstrlen(str)
 @ stdcall -import lstrlenA(str)
 @ stdcall -import lstrlenW(wstr)
-@ stdcall timeBeginPeriod(long)
-@ stdcall timeEndPeriod(long)
-@ stdcall timeGetDevCaps(ptr long)
-@ stdcall timeGetSystemTime(ptr long)
-@ stdcall timeGetTime()
 
 ################################################################
 # Wine internal extensions

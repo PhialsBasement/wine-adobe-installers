@@ -22,6 +22,7 @@
 #include <time.h>
 
 #include "ntstatus.h"
+#define WIN32_NO_STATUS
 #include "wine/debug.h"
 #include "ntdll_misc.h"
 #include "wmistr.h"

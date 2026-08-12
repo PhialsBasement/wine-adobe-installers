@@ -25,6 +25,7 @@
 #include <stdarg.h>
 
 #include "ntstatus.h"
+#define WIN32_NO_STATUS
 #include "windef.h"
 #include "winternl.h"
 #include "ddk/wdm.h"
@@ -45,8 +46,10 @@ typedef struct
     PVECTORED_EXCEPTION_HANDLER *func;
 } VECTORED_HANDLER;
 
-static LIST_ENTRY vectored_exception_handlers = { &vectored_exception_handlers, &vectored_exception_handlers };
-static LIST_ENTRY vectored_continue_handlers  = { &vectored_continue_handlers, &vectored_continue_handlers };
+#define LIST_ENTRY_INIT( list )  { .Flink = &(list), .Blink = &(list) }
+
+static LIST_ENTRY vectored_exception_handlers = LIST_ENTRY_INIT(vectored_exception_handlers);
+static LIST_ENTRY vectored_continue_handlers  = LIST_ENTRY_INIT(vectored_continue_handlers);
 
 static RTL_CRITICAL_SECTION vectored_handlers_section;
 static RTL_CRITICAL_SECTION_DEBUG critsect_debug =
@@ -126,7 +129,7 @@ static ULONG remove_vectored_handler( LIST_ENTRY *handler_list, VECTORED_HANDLER
     mark = handler_list;
     for (entry = mark->Flink; entry != mark; entry = entry->Flink)
     {
-        VECTORED_HANDLER *curr_handler = CONTAINING_RECORD( entry, VECTORED_HANDLER, entry );
+        VECTORED_HANDLER *curr_handler = CONTAINING_RECORD(entry, VECTORED_HANDLER, entry);
         if (curr_handler == handler)
         {
             if (!--*curr_handler->count) RemoveEntryList( entry );
@@ -163,7 +166,8 @@ static LONG call_vectored_handlers( EXCEPTION_RECORD *rec, CONTEXT *context )
     entry = mark->Flink;
     while (entry != mark)
     {
-        handler = CONTAINING_RECORD( entry, VECTORED_HANDLER, entry );
+        handler = CONTAINING_RECORD(entry, VECTORED_HANDLER, entry);
+        entry = entry->Flink;
         ++*handler->count;
         func = RtlDecodePointer( handler->func );
         RtlLeaveCriticalSection( &vectored_handlers_section );
@@ -176,7 +180,6 @@ static LONG call_vectored_handlers( EXCEPTION_RECORD *rec, CONTEXT *context )
         TRACE( "handler at %p returned %lx\n", func, ret );
 
         RtlEnterCriticalSection( &vectored_handlers_section );
-        entry = entry->Flink;
         if (!--*handler->count)  /* removed during execution */
         {
             RemoveEntryList( &handler->entry );
@@ -197,6 +200,20 @@ NTSTATUS WINAPI dispatch_exception( EXCEPTION_RECORD *rec, CONTEXT *context )
 {
     NTSTATUS status;
     DWORD i;
+
+    if (need_backtrace(rec->ExceptionCode))
+    {
+        struct debugstr_pc_args params;
+        char buffer[256];
+
+        params.pc = rec->ExceptionAddress;
+        params.buffer = buffer;
+        params.size = sizeof(buffer);
+        if (!WINE_UNIX_CALL( unix_debugstr_pc, &params ))
+            WINE_BACKTRACE_LOG( "--- Exception %#lx at %s.\n", rec->ExceptionCode, buffer );
+        else
+            WINE_BACKTRACE_LOG( "--- Exception %#lx.\n", rec->ExceptionCode );
+    }
 
     switch (rec->ExceptionCode)
     {
@@ -459,7 +476,7 @@ void __cdecl __wine_spec_unimplemented_stub( const char *module, const char *fun
  *
  * IsBadStringPtrA replacement for ntdll, to catch exception in debug traces.
  */
-BOOL DECLSPEC_NOINLINE WINAPI IsBadStringPtrA( LPCSTR str, UINT_PTR max )
+BOOL WINAPI IsBadStringPtrA( LPCSTR str, UINT_PTR max )
 {
     if (!str) return TRUE;
     __TRY
@@ -480,7 +497,7 @@ BOOL DECLSPEC_NOINLINE WINAPI IsBadStringPtrA( LPCSTR str, UINT_PTR max )
  *
  * IsBadStringPtrW replacement for ntdll, to catch exception in debug traces.
  */
-BOOL DECLSPEC_NOINLINE WINAPI IsBadStringPtrW( LPCWSTR str, UINT_PTR max )
+BOOL WINAPI IsBadStringPtrW( LPCWSTR str, UINT_PTR max )
 {
     if (!str) return TRUE;
     __TRY

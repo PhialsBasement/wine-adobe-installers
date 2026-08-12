@@ -135,7 +135,7 @@ static HRESULT find_decoder(IStream *pIStream, const GUID *pguidVendor,
     IEnumUnknown *enumdecoders = NULL;
     IUnknown *unkdecoderinfo = NULL;
     GUID vendor;
-    HRESULT res;
+    HRESULT res, res_wine;
     ULONG num_fetched;
     BOOL matches, found;
 
@@ -148,6 +148,7 @@ static HRESULT find_decoder(IStream *pIStream, const GUID *pguidVendor,
     while (IEnumUnknown_Next(enumdecoders, 1, &unkdecoderinfo, &num_fetched) == S_OK)
     {
         IWICBitmapDecoderInfo *decoderinfo = NULL;
+        IWICWineDecoder *wine_decoder = NULL;
 
         res = IUnknown_QueryInterface(unkdecoderinfo, &IID_IWICBitmapDecoderInfo, (void**)&decoderinfo);
         if (FAILED(res)) goto next;
@@ -170,12 +171,27 @@ static HRESULT find_decoder(IStream *pIStream, const GUID *pguidVendor,
         res = IWICBitmapDecoder_Initialize(*decoder, pIStream, metadataOptions);
         if (FAILED(res))
         {
-            IWICBitmapDecoder_Release(*decoder);
-            *decoder = NULL;
-            goto next;
+            res_wine = IWICBitmapDecoder_QueryInterface(*decoder, &IID_IWICWineDecoder, (void **)&wine_decoder);
+            if (FAILED(res_wine))
+            {
+                IWICBitmapDecoder_Release(*decoder);
+                *decoder = NULL;
+                goto next;
+            }
+
+            res_wine = IWICWineDecoder_Initialize(wine_decoder, pIStream, metadataOptions);
+            if (FAILED(res_wine))
+            {
+                IWICBitmapDecoder_Release(*decoder);
+                *decoder = NULL;
+                goto next;
+            }
+
+            res = res_wine;
         }
 
     next:
+        if (wine_decoder) IWICWineDecoder_Release(wine_decoder);
         if (decoderinfo) IWICBitmapDecoderInfo_Release(decoderinfo);
         IUnknown_Release(unkdecoderinfo);
         if (found) break;
@@ -791,21 +807,6 @@ static HRESULT WINAPI ImagingFactory_CreateBitmapFromHBITMAP(IWICImagingFactory2
         bmi->bmiHeader.biHeight = -bm.bmHeight;
         GetDIBits(hdc, hbm, 0, bm.bmHeight, buffer, bmi, DIB_RGB_COLORS);
 
-        if (!hpal &&
-            (IsEqualGUID(&format, &GUID_WICPixelFormat1bppIndexed) ||
-            IsEqualGUID(&format, &GUID_WICPixelFormat4bppIndexed) ||
-            IsEqualGUID(&format, &GUID_WICPixelFormat8bppIndexed)))
-        {
-            num_palette_entries = bmi->bmiHeader.biClrUsed ? bmi->bmiHeader.biClrUsed : (UINT)(1 << bmi->bmiHeader.biBitCount);
-            for (UINT i = 0; i < num_palette_entries; i++)
-            {
-                entry[i].peRed = bmi->bmiColors[i].rgbRed;
-                entry[i].peGreen = bmi->bmiColors[i].rgbGreen;
-                entry[i].peBlue = bmi->bmiColors[i].rgbBlue;
-                entry[i].peFlags = 0;
-            }
-        }
-
         DeleteDC(hdc);
         IWICBitmapLock_Release(lock);
 
@@ -999,31 +1000,21 @@ static HRESULT WINAPI ImagingFactory_CreateFastMetadataEncoderFromFrameDecode(
 }
 
 static HRESULT WINAPI ImagingFactory_CreateQueryWriter(IWICImagingFactory2 *iface,
-        REFGUID format, const GUID *vendor, IWICMetadataQueryWriter **query_writer)
+    REFGUID guidMetadataFormat, const GUID *pguidVendor,
+    IWICMetadataQueryWriter **ppIQueryWriter)
 {
-    IWICMetadataWriter *writer;
-    HRESULT hr;
-
-    TRACE("(%p,%s,%s,%p)\n", iface, debugstr_guid(format), debugstr_guid(vendor), query_writer);
-
-    *query_writer = NULL;
-
-    hr = create_metadata_writer(format, vendor, 0, &writer);
-    if (SUCCEEDED(hr))
-    {
-        hr = MetadataQueryWriter_CreateInstance(writer, query_writer);
-        IWICMetadataWriter_Release(writer);
-    }
-
-    return hr;
+    FIXME("(%p,%s,%s,%p): stub\n", iface, debugstr_guid(guidMetadataFormat),
+        debugstr_guid(pguidVendor), ppIQueryWriter);
+    return E_NOTIMPL;
 }
 
 static HRESULT WINAPI ImagingFactory_CreateQueryWriterFromReader(IWICImagingFactory2 *iface,
-        IWICMetadataQueryReader *query_reader, const GUID *vendor, IWICMetadataQueryWriter **query_writer)
+    IWICMetadataQueryReader *pIQueryReader, const GUID *pguidVendor,
+    IWICMetadataQueryWriter **ppIQueryWriter)
 {
-    TRACE("(%p,%p,%s,%p)\n", iface, query_reader, debugstr_guid(vendor), query_writer);
-
-    return create_metadata_query_writer_from_reader(query_reader, vendor, query_writer);
+    FIXME("(%p,%p,%s,%p): stub\n", iface, pIQueryReader, debugstr_guid(pguidVendor),
+        ppIQueryWriter);
+    return E_NOTIMPL;
 }
 
 static HRESULT WINAPI ImagingFactory_CreateImageEncoder(IWICImagingFactory2 *iface, ID2D1Device *device, IWICImageEncoder **encoder)
@@ -1337,8 +1328,7 @@ static enum iterator_result create_metadata_reader_iterator(IUnknown *item,
     IWICPersistStream *persist_stream = NULL;
     IWICMetadataReaderInfo *readerinfo;
     IWICMetadataReader *reader = NULL;
-    LARGE_INTEGER move = {{0}};
-    ULARGE_INTEGER pos;
+    LARGE_INTEGER zero = {{0}};
     HRESULT hr;
     GUID guid;
 
@@ -1371,13 +1361,8 @@ static enum iterator_result create_metadata_reader_iterator(IUnknown *item,
 
     if (context->stream)
     {
-        BOOL restore = FALSE;
-
         if (SUCCEEDED(hr))
-        {
-            move.QuadPart = 0;
-            restore = SUCCEEDED(hr = IStream_Seek(context->stream, move, STREAM_SEEK_CUR, &pos));
-        }
+            hr = IStream_Seek(context->stream, zero, STREAM_SEEK_SET, NULL);
 
         if (SUCCEEDED(hr))
             hr = IWICMetadataReader_QueryInterface(reader, &IID_IWICPersistStream, (void **)&persist_stream);
@@ -1385,12 +1370,6 @@ static enum iterator_result create_metadata_reader_iterator(IUnknown *item,
         if (SUCCEEDED(hr))
             hr = IWICPersistStream_LoadEx(persist_stream, context->stream, context->vendor,
                     context->options & WICPersistOptionMask);
-
-        if (restore)
-        {
-            memcpy(&move, &pos, sizeof(pos));
-            hr = IStream_Seek(context->stream, move, STREAM_SEEK_SET, NULL);
-        }
 
         if (persist_stream)
             IWICPersistStream_Release(persist_stream);
@@ -1404,50 +1383,6 @@ static enum iterator_result create_metadata_reader_iterator(IUnknown *item,
 
     if (reader)
         IWICMetadataReader_Release(reader);
-
-    return ITER_SKIP;
-}
-
-static enum iterator_result create_metadata_writer_iterator(IUnknown *item,
-        struct iterator_context *context)
-{
-    IWICMetadataWriterInfo *writerinfo;
-    IWICMetadataWriter *writer = NULL;
-    HRESULT hr;
-    GUID guid;
-
-    if (FAILED(IUnknown_QueryInterface(item, &IID_IWICMetadataWriterInfo, (void **)&writerinfo)))
-        return ITER_SKIP;
-
-    if (context->vendor)
-    {
-        hr = IWICMetadataWriterInfo_GetVendorGUID(writerinfo, &guid);
-
-        if (FAILED(hr) || !IsEqualIID(context->vendor, &guid))
-        {
-            IWICMetadataWriterInfo_Release(writerinfo);
-            return ITER_SKIP;
-        }
-    }
-
-    hr = IWICMetadataWriterInfo_GetMetadataFormat(writerinfo, &guid);
-
-    if (FAILED(hr) || !IsEqualIID(context->format, &guid))
-    {
-        IWICMetadataWriterInfo_Release(writerinfo);
-        return ITER_SKIP;
-    }
-
-    if (SUCCEEDED(hr))
-        hr = IWICMetadataWriterInfo_CreateInstance(writerinfo, &writer);
-
-    IWICMetadataWriterInfo_Release(writerinfo);
-
-    if (SUCCEEDED(hr))
-    {
-        *context->result = writer;
-        return ITER_DONE;
-    }
 
     return ITER_SKIP;
 }
@@ -1509,11 +1444,17 @@ static HRESULT create_unknown_metadata_reader(IStream *stream, DWORD options, IW
     return hr;
 }
 
-HRESULT create_metadata_reader(REFGUID format, const GUID *vendor, DWORD options, IStream *stream,
-        IWICMetadataReader **reader)
+static HRESULT WINAPI ComponentFactory_CreateMetadataReader(IWICComponentFactory *iface,
+        REFGUID format, const GUID *vendor, DWORD options, IStream *stream, IWICMetadataReader **reader)
 {
     struct iterator_context context = { 0 };
     HRESULT hr;
+
+    TRACE("%p,%s,%s,%lx,%p,%p\n", iface, debugstr_guid(format), debugstr_guid(vendor),
+        options, stream, reader);
+
+    if (!format || !reader)
+        return E_INVALIDARG;
 
     context.format = format;
     context.vendor = vendor;
@@ -1536,18 +1477,6 @@ HRESULT create_metadata_reader(REFGUID format, const GUID *vendor, DWORD options
         hr = create_unknown_metadata_reader(stream, options, reader);
 
     return *reader ? S_OK : WINCODEC_ERR_COMPONENTNOTFOUND;
-}
-
-static HRESULT WINAPI ComponentFactory_CreateMetadataReader(IWICComponentFactory *iface,
-        REFGUID format, const GUID *vendor, DWORD options, IStream *stream, IWICMetadataReader **reader)
-{
-    TRACE("%p,%s,%s,%lx,%p,%p\n", iface, debugstr_guid(format), debugstr_guid(vendor),
-        options, stream, reader);
-
-    if (!format || !reader)
-        return E_INVALIDARG;
-
-    return create_metadata_reader(format, vendor, options, stream, reader);
 }
 
 static HRESULT WINAPI ComponentFactory_CreateMetadataReaderFromContainer(IWICComponentFactory *iface,
@@ -1585,201 +1514,18 @@ static HRESULT WINAPI ComponentFactory_CreateMetadataReaderFromContainer(IWICCom
     return *reader ? S_OK : WINCODEC_ERR_COMPONENTNOTFOUND;
 }
 
-HRESULT create_metadata_writer(REFGUID format, const GUID *vendor, DWORD options,
-        IWICMetadataWriter **writer)
-{
-    struct iterator_context context = { 0 };
-    IWICMetadataWriter *object = NULL;
-    HRESULT hr;
-
-    context.format = format;
-    context.vendor = vendor;
-    context.options = options;
-    context.result = (void **)&object;
-
-    hr = foreach_component(WICMetadataWriter, create_metadata_writer_iterator, &context);
-
-    if (FAILED(hr) && vendor)
-    {
-        context.vendor = NULL;
-        hr = foreach_component(WICMetadataWriter, create_metadata_writer_iterator, &context);
-    }
-
-    if (FAILED(hr))
-        WARN("Failed to create a metadata writer instance, hr %#lx.\n", hr);
-
-    if (!object && !(options & WICMetadataCreationFailUnknown))
-        hr = UnknownMetadataWriter_CreateInstance(&IID_IWICMetadataWriter, (void **)&object);
-
-    if (SUCCEEDED(hr))
-        *writer = object;
-
-    return object ? S_OK : WINCODEC_ERR_COMPONENTNOTFOUND;
-}
-
 static HRESULT WINAPI ComponentFactory_CreateMetadataWriter(IWICComponentFactory *iface,
         REFGUID format, const GUID *vendor, DWORD options, IWICMetadataWriter **writer)
 {
-    TRACE("%p,%s,%s,%lx,%p\n", iface, debugstr_guid(format), debugstr_guid(vendor), options, writer);
-
-    if (!format || !writer)
-        return E_INVALIDARG;
-
-    if (options & WICPersistOptionMask)
-        return E_INVALIDARG;
-
-    return create_metadata_writer(format, vendor, options, writer);
-}
-
-static HRESULT metadata_writer_copy_items_from_reader(IWICMetadataWriter *writer, const GUID *vendor, IWICMetadataReader *reader)
-{
-    IWICMetadataReader *sub_reader;
-    IWICMetadataWriter *sub_writer;
-    PROPVARIANT schema, id, value;
-    UINT i, count;
-    HRESULT hr;
-
-    if (FAILED(hr = IWICMetadataReader_GetCount(reader, &count)))
-        return hr;
-
-    for (i = 0; i < count; ++i)
-    {
-        PropVariantInit(&schema);
-        PropVariantInit(&id);
-        PropVariantInit(&value);
-        if (FAILED(hr = IWICMetadataReader_GetValueByIndex(reader, i, &schema, &id, &value)))
-            break;
-
-        /* Recursively create writers from the nested readers.  */
-        if (value.vt == VT_UNKNOWN)
-        {
-            if (SUCCEEDED(IUnknown_QueryInterface(value.punkVal, &IID_IWICMetadataReader, (void **)&sub_reader)))
-            {
-                hr = create_metadata_writer_from_reader(sub_reader, vendor, &sub_writer);
-                if (SUCCEEDED(hr))
-                {
-                   IUnknown_Release(value.punkVal);
-                   value.punkVal = (IUnknown *)sub_writer;
-                }
-
-                IWICMetadataReader_Release(sub_reader);
-            }
-        }
-
-        if (SUCCEEDED(hr))
-            hr = IWICMetadataWriter_SetValue(writer, &schema, &id, &value);
-
-        PropVariantClear(&schema);
-        PropVariantClear(&id);
-        PropVariantClear(&value);
-        if (FAILED(hr))
-            break;
-    }
-
-    return hr;
-}
-
-HRESULT create_metadata_writer_from_reader(IWICMetadataReader *reader, const GUID *vendor,
-        IWICMetadataWriter **out_writer)
-{
-    IWICStreamProvider *stream_provider = NULL;
-    IWICMetadataWriter *writer = NULL;
-    IStream *stream = NULL;
-    DWORD options = 0;
-    GUID format;
-    HRESULT hr;
-
-    hr = IWICMetadataReader_GetMetadataFormat(reader, &format);
-
-    if (SUCCEEDED(hr))
-        hr = create_metadata_writer(&format, vendor, 0, &writer);
-
-    if (SUCCEEDED(hr))
-        hr = IWICMetadataReader_QueryInterface(reader, &IID_IWICStreamProvider, (void **)&stream_provider);
-
-    if (SUCCEEDED(hr))
-    {
-        IStream *cached_stream = NULL;
-
-        hr = IWICStreamProvider_GetStream(stream_provider, &cached_stream);
-
-        /* Reader does not have to provide a stream. */
-        if (hr == WINCODEC_ERR_STREAMNOTAVAILABLE)
-        {
-            hr = S_OK;
-        }
-
-        if (cached_stream)
-        {
-            LARGE_INTEGER move;
-            ULARGE_INTEGER pos;
-
-            /* Move wrapper stream to match original stream position. */
-            move.QuadPart = 0;
-            hr = IStream_Seek(cached_stream, move, STREAM_SEEK_CUR, &pos);
-
-            if (SUCCEEDED(hr))
-                hr = create_stream_wrapper(cached_stream, 0, &stream);
-
-            if (SUCCEEDED(hr))
-            {
-                move.QuadPart = pos.QuadPart;
-                hr = IStream_Seek(stream, move, STREAM_SEEK_SET, NULL);
-            }
-
-            IStream_Release(cached_stream);
-        }
-    }
-
-    if (SUCCEEDED(hr))
-        hr = IWICStreamProvider_GetPersistOptions(stream_provider, &options);
-
-    if (SUCCEEDED(hr))
-    {
-        if (stream)
-        {
-            IWICPersistStream *persist_stream;
-
-            /* TODO: probably need to check for a dirty stream */
-
-            if (SUCCEEDED(hr = IWICMetadataWriter_QueryInterface(writer, &IID_IWICPersistStream, (void **)&persist_stream)))
-            {
-                hr = IWICPersistStream_LoadEx(persist_stream, stream, vendor, options);
-                IWICPersistStream_Release(persist_stream);
-            }
-        }
-        else
-        {
-            hr = metadata_writer_copy_items_from_reader(writer, vendor, reader);
-        }
-    }
-
-    if (stream_provider)
-        IWICStreamProvider_Release(stream_provider);
-
-    if (SUCCEEDED(hr))
-    {
-        *out_writer = writer;
-        IWICMetadataWriter_AddRef(*out_writer);
-    }
-
-    if (writer)
-        IWICMetadataWriter_Release(writer);
-    if (stream)
-        IStream_Release(stream);
-
-    return hr;
+    FIXME("%p,%s,%s,%lx,%p: stub\n", iface, debugstr_guid(format), debugstr_guid(vendor), options, writer);
+    return E_NOTIMPL;
 }
 
 static HRESULT WINAPI ComponentFactory_CreateMetadataWriterFromReader(IWICComponentFactory *iface,
         IWICMetadataReader *reader, const GUID *vendor, IWICMetadataWriter **writer)
 {
-    TRACE("%p,%p,%s,%p\n", iface, reader, debugstr_guid(vendor), writer);
-
-    if (!reader || !writer)
-        return E_INVALIDARG;
-
-    return create_metadata_writer_from_reader(reader, vendor, writer);
+    FIXME("%p,%p,%s,%p: stub\n", iface, reader, debugstr_guid(vendor), writer);
+    return E_NOTIMPL;
 }
 
 static HRESULT WINAPI ComponentFactory_CreateQueryReaderFromBlockReader(IWICComponentFactory *iface,
@@ -1790,7 +1536,7 @@ static HRESULT WINAPI ComponentFactory_CreateQueryReaderFromBlockReader(IWICComp
     if (!block_reader || !query_reader)
         return E_INVALIDARG;
 
-    return MetadataQueryReader_CreateInstanceFromBlockReader(block_reader, query_reader);
+    return MetadataQueryReader_CreateInstance(block_reader, NULL, query_reader);
 }
 
 static HRESULT WINAPI ComponentFactory_CreateQueryWriterFromBlockWriter(IWICComponentFactory *iface,
@@ -1801,7 +1547,7 @@ static HRESULT WINAPI ComponentFactory_CreateQueryWriterFromBlockWriter(IWICComp
     if (!block_writer || !query_writer)
         return E_INVALIDARG;
 
-    return MetadataQueryWriter_CreateInstanceFromBlockWriter(block_writer, query_writer);
+    return MetadataQueryWriter_CreateInstance(block_writer, NULL, query_writer);
 }
 
 static HRESULT WINAPI ComponentFactory_CreateEncoderPropertyBag(IWICComponentFactory *iface,

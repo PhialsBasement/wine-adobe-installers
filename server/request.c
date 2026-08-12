@@ -49,6 +49,7 @@
 #endif
 
 #include "ntstatus.h"
+#define WIN32_NO_STATUS
 #include "windef.h"
 #include "winbase.h"
 #include "wincon.h"
@@ -88,10 +89,11 @@ static const struct object_ops master_socket_ops =
     no_add_queue,                  /* add_queue */
     NULL,                          /* remove_queue */
     NULL,                          /* signaled */
+    NULL,                          /* get_esync_fd */
+    NULL,                          /* get_fsync_idx */
     NULL,                          /* satisfied */
     no_signal,                     /* signal */
     no_get_fd,                     /* get_fd */
-    default_get_sync,              /* get_sync */
     default_map_access,            /* map_access */
     default_get_sd,                /* get_sd */
     default_set_sd,                /* set_sd */
@@ -514,8 +516,8 @@ timeout_t monotonic_counter(void)
     return mach_continuous_time() * timebase.numer / timebase.denom / 100;
 #elif defined(HAVE_CLOCK_GETTIME)
     struct timespec ts;
-#ifdef CLOCK_BOOTTIME
-    if (!clock_gettime( CLOCK_BOOTTIME, &ts ))
+#ifdef CLOCK_MONOTONIC_RAW
+    if (!clock_gettime( CLOCK_MONOTONIC_RAW, &ts ))
         return (timeout_t)ts.tv_sec * TICKS_PER_SEC + ts.tv_nsec / 100;
 #endif
     if (!clock_gettime( CLOCK_MONOTONIC, &ts ))
@@ -557,13 +559,39 @@ static void master_socket_poll_event( struct fd *fd, int event )
         struct process *process;
         struct sockaddr_un dummy;
         socklen_t len = sizeof(dummy);
+        struct thread *thread = NULL;
+
         int client = accept( get_unix_fd( master_socket->fd ), (struct sockaddr *) &dummy, &len );
         if (client == -1) return;
         fcntl( client, F_SETFL, O_NONBLOCK );
-        if ((process = create_process( client, NULL, 0, NULL, NULL, NULL, 0, NULL )))
+#ifdef SO_PEERCRED
         {
-            struct thread *thread = create_thread( -1, process, NULL );
-            if (thread) add_process_thread( process, thread );
+            struct ucred ucred;
+
+            len = sizeof(ucred);
+            if (!getsockopt( client, SOL_SOCKET, SO_PEERCRED, &ucred, &len ))
+            {
+                pid_t ppid;
+                char s[256];
+                FILE *f;
+
+                sprintf( s, "/proc/%d/status", ucred.pid );
+                if ((f = fopen( s, "r" )))
+                {
+                    while (fgets( s, sizeof(s), f ))
+                    {
+                        if (sscanf( s, "PPid:%d", &ppid ) != 1) continue;
+                        thread = get_thread_from_pid( ppid );
+                        break;
+                    }
+                    fclose( f );
+                }
+            }
+        }
+#endif
+        if ((process = create_process( client, thread ? thread->process : NULL, 0, NULL, NULL, NULL, 0, NULL )))
+        {
+            create_thread( -1, process, NULL );
             release_object( process );
         }
     }

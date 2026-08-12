@@ -24,6 +24,7 @@
 #include <sys/types.h>
 
 #include "ntstatus.h"
+#define WIN32_NO_STATUS
 #include "windef.h"
 #include "winternl.h"
 #include "wine/debug.h"
@@ -416,7 +417,7 @@ NTSTATUS WINAPI RtlExpandEnvironmentStrings( const WCHAR *renv, WCHAR *src, SIZE
                     copy = len;
                     if (count <= copy) /* Either copy the entire value, or nothing at all */
                         copy = 0;
-                    if (count && dst)  /* When the variable is the last thing that fits into dst, the string is null terminated */
+                    if (dst && count)  /* When the variable is the last thing that fits into dst, the string is null terminated */
                        dst[copy] = 0;  /* Either right after, or if it doesn't fit, where it would start */
                 }
                 else
@@ -437,10 +438,10 @@ NTSTATUS WINAPI RtlExpandEnvironmentStrings( const WCHAR *renv, WCHAR *src, SIZE
             }
         }
         total_size += len;
-        if (count && dst)
+        if (dst)
         {
             if (count < len) len = count;
-            if (count <= copy) copy = count - 1; /* If the buffer is too small, we copy one character less */
+            if (count <= copy) copy = count ? count - 1 : 0; /* If the buffer is too small, we copy one character less */
             memcpy(dst, var, copy * sizeof(WCHAR));
             count -= len;
             dst += copy;
@@ -449,7 +450,7 @@ NTSTATUS WINAPI RtlExpandEnvironmentStrings( const WCHAR *renv, WCHAR *src, SIZE
 
     if (!renv) RtlReleasePebLock();
 
-    if (count && dst) *dst = '\0';
+    if (dst && count) *dst = '\0';
     if (plen) *plen = total_size;
 
     return (count) ? STATUS_SUCCESS : STATUS_BUFFER_TOO_SMALL;
@@ -616,7 +617,7 @@ NTSTATUS WINAPI RtlCreateProcessParametersEx( RTL_USER_PROCESS_PARAMETERS **resu
     if (!DllPath) DllPath = &null_str;
     if (!CurrentDirectoryName)
     {
-        if (NtCurrentTeb()->Tib.SubSystemTib)  /* FIXME: hack */
+        if (0 && NtCurrentTeb()->Tib.SubSystemTib)  /* FIXME: hack */
             curdir = ((WIN16_SUBSYSTEM_TIB *)NtCurrentTeb()->Tib.SubSystemTib)->curdir.DosPath;
         else
             curdir = cur_params->CurrentDirectory.DosPath;
@@ -728,4 +729,32 @@ void init_user_process_params(void)
     }
     set_wow64_environment( &new_params->Environment );
     new_params->EnvironmentSize = RtlSizeHeap( GetProcessHeap(), 0, new_params->Environment );
+}
+
+
+/**********************************************************************
+ *      __wine_get_unix_env
+ */
+NTSTATUS WINAPI __wine_get_unix_env( const char *var, char *val, unsigned int buffer_len )
+{
+    struct wine_get_unix_env_params params =
+    {
+        .name = var, .val = val, .buffer_len = buffer_len,
+    };
+
+    return WINE_UNIX_CALL( unix___wine_get_unix_env, &params );
+}
+
+
+/**********************************************************************
+ *      __wine_set_unix_env
+ */
+NTSTATUS WINAPI __wine_set_unix_env( const char *var, const char *val )
+{
+    struct wine_set_unix_env_params params =
+    {
+        .name = var, .val = val
+    };
+
+    return WINE_UNIX_CALL( unix___wine_set_unix_env, &params );
 }

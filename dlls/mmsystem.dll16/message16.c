@@ -766,7 +766,7 @@ typedef	MMSYSTEM_MapType        (*MMSYSTDRV_MAPMSG)(DWORD wMsg, DWORD_PTR* lpPar
 typedef	MMSYSTEM_MapType        (*MMSYSTDRV_UNMAPMSG)(DWORD wMsg, DWORD_PTR* lpParam1, DWORD_PTR* lpParam2, MMRESULT ret);
 typedef void                    (*MMSYSTDRV_MAPCB)(DWORD wMsg, DWORD_PTR* dwUser, DWORD_PTR* dwParam1, DWORD_PTR* dwParam2);
 
-#pragma pack(push,1)
+#include <pshpack1.h>
 #define MMSYSTDRV_MAX_THUNKS      32
 
 static struct mmsystdrv_thunk
@@ -783,7 +783,7 @@ static struct mmsystdrv_thunk
     enum MMSYSTEM_DriverType    kind;
 } *MMSYSTDRV_Thunks;
 
-#pragma pack(pop)
+#include <poppack.h>
 
 static struct MMSYSTDRV_Type
 {
@@ -838,7 +838,7 @@ static LRESULT CALLBACK MMSYSTDRV_Callback3216(struct mmsystdrv_thunk* thunk, HD
         args[2] = LOWORD(dwParam1);
         args[1] = HIWORD(dwParam2);
         args[0] = LOWORD(dwParam2);
-        return WOWCallback16Ex(thunk->callback, WCB16_PASCAL | WCB16_INTERRUPT, sizeof(args), args, NULL);
+        return WOWCallback16Ex(thunk->callback, WCB16_PASCAL, sizeof(args), args, NULL);
     case CALLBACK_EVENT:
         TRACE("Event(%08lx) !\n", thunk->callback);
         SetEvent((HANDLE)thunk->callback);

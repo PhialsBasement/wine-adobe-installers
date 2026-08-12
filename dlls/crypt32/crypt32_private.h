@@ -185,7 +185,6 @@ typedef struct {
 struct _context_t {
     const context_vtbl_t *vtbl;
     LONG ref;
-    BOOL deleted_from_store;
     struct WINE_CRYPTCERTSTORE *store;
     struct _context_t *linked;
     CONTEXT_PROPERTY_LIST *properties;
@@ -254,10 +253,7 @@ typedef BOOL (WINAPI *SetContextPropertyFunc)(const void *context,
  DWORD dwPropID, DWORD dwFlags, const void *pvData);
 typedef BOOL (WINAPI *SerializeElementFunc)(const void *context, DWORD dwFlags,
  BYTE *pbElement, DWORD *pcbElement);
-typedef BOOL (WINAPI *DeleteContextFromStoreFunc)(const void *contex);
-typedef const void * (*FindContextByContextFunc)(HCERTSTORE store, const void *context);
-typedef const void * (WINAPI *DuplicateContextFunc)(const void *context);
-typedef void (WINAPI *FreeContextFunc)(const void *context);
+typedef BOOL (WINAPI *DeleteContextFunc)(const void *contex);
 
 /* An abstract context (certificate, CRL, or CTL) interface */
 typedef struct _WINE_CONTEXT_INTERFACE
@@ -270,10 +266,7 @@ typedef struct _WINE_CONTEXT_INTERFACE
     GetContextPropertyFunc       getProp;
     SetContextPropertyFunc       setProp;
     SerializeElementFunc         serialize;
-    DeleteContextFromStoreFunc   deleteFromStore;
-    FindContextByContextFunc     findContextByContext;
-    DuplicateContextFunc         duplicateContext;
-    FreeContextFunc              freeContext;
+    DeleteContextFunc            deleteFromStore;
 } WINE_CONTEXT_INTERFACE;
 
 extern const WINE_CONTEXT_INTERFACE *pCertInterface;
@@ -424,8 +417,6 @@ context_t *Context_CreateDataContext(size_t contextSize, const context_vtbl_t *v
  */
 context_t *Context_CreateLinkContext(unsigned contextSize, context_t *linked, struct WINE_CRYPTCERTSTORE*);
 
-BOOL CRYPT_DeleteCertificateFromStore(PCCERT_CONTEXT pCertContext);
-
 /* Copies properties from fromContext to toContext. */
 void Context_CopyProperties(const void *to, const void *from);
 
@@ -483,7 +474,6 @@ struct open_cert_store_params
     CRYPT_DATA_BLOB *pfx;
     const WCHAR *password;
     cert_store_data_t *data_ret;
-    unsigned int *key_count_ret;
 };
 
 struct import_store_key_params
@@ -513,17 +503,6 @@ struct enum_root_certs_params
     DWORD *needed;
 };
 
-struct export_cert_store_params
-{
-    const BYTE *cert_data;
-    DWORD       cert_size;
-    const BYTE *key_blob;
-    DWORD       key_blob_size;
-    const WCHAR *password;
-    BYTE        *pfx_data;
-    DWORD       *pfx_size;
-};
-
 enum unix_funcs
 {
     unix_process_attach,
@@ -533,7 +512,6 @@ enum unix_funcs
     unix_import_store_cert,
     unix_close_cert_store,
     unix_enum_root_certs,
-    unix_export_cert_store,
     unix_funcs_count,
 };
 

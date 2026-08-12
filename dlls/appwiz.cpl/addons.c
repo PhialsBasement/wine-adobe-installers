@@ -48,7 +48,7 @@ WINE_DEFAULT_DEBUG_CHANNEL(appwizcpl);
 #ifdef __i386__
 #define GECKO_ARCH "x86"
 #define GECKO_SHA "26cecc47706b091908f7f814bddb074c61beb8063318e9efc5a7f789857793d6"
-#elif defined(__x86_64__)
+#elif defined(__x86_64__) || defined(__aarch64__)
 #define GECKO_ARCH "x86_64"
 #define GECKO_SHA "e590b7d988a32d6aa4cf1d8aa3aa3d33766fdd4cf4c89c2dcc2095ecb28d066f"
 #else
@@ -56,10 +56,10 @@ WINE_DEFAULT_DEBUG_CHANNEL(appwizcpl);
 #define GECKO_SHA "???"
 #endif
 
-#define MONO_VERSION "11.1.0"
-#if defined(__i386__) || defined(__x86_64__)
+#define MONO_VERSION "10.4.1"
+#if defined(__i386__) || defined(__x86_64__) || defined(__aarch64__)
 #define MONO_ARCH "x86"
-#define MONO_SHA "deb0341431f8260b209fff6bc79ddcc5414b97f8e9236ab9fbdca4ce59e0a9b9"
+#define MONO_SHA "071f4b2887e1c97a11d791ff3d65be9429eed6dec4c2708888bfd546ba358e23"
 #else
 #define MONO_ARCH ""
 #define MONO_SHA "???"
@@ -71,9 +71,9 @@ typedef struct {
     const WCHAR *subdir_name;
     const char *sha;
     const char *url_default;
-    const WCHAR *config_key;
-    const WCHAR *url_config_key;
-    const WCHAR *dir_config_key;
+    const char *config_key;
+    const char *url_config_key;
+    const char *dir_config_key;
     LPCWSTR dialog_template;
 } addon_info_t;
 
@@ -87,7 +87,7 @@ static const addon_info_t addons_info[] = {
         L"gecko",
         GECKO_SHA,
         "http://source.winehq.org/winegecko.php",
-        L"MSHTML", L"GeckoUrl", L"GeckoCabDir",
+        "MSHTML", "GeckoUrl", "GeckoCabDir",
         MAKEINTRESOURCEW(ID_DWL_GECKO_DIALOG)
     },
     {
@@ -96,7 +96,7 @@ static const addon_info_t addons_info[] = {
         L"mono",
         MONO_SHA,
         "http://source.winehq.org/winemono.php",
-        L"Dotnet", L"MonoUrl", L"MonoCabDir",
+        "Dotnet", "MonoUrl", "MonoCabDir",
         MAKEINTRESOURCEW(ID_DWL_MONO_DIALOG)
     }
 };
@@ -109,6 +109,7 @@ static IBinding *dwl_binding;
 static WCHAR *msi_file;
 
 static const char * (CDECL *p_wine_get_version)(void);
+static WCHAR * (CDECL *p_wine_get_dos_file_name)(const char*);
 
 static BOOL sha_check(const WCHAR *file_name)
 {
@@ -180,13 +181,12 @@ static enum install_res install_file(const WCHAR *file_name)
     return INSTALL_OK;
 }
 
-static enum install_res install_from_file(const WCHAR *dir, const WCHAR *subdir, const WCHAR *file_name)
+static enum install_res install_from_dos_file(const WCHAR *dir, const WCHAR *subdir, const WCHAR *file_name)
 {
     WCHAR *path, *canonical_path;
-    enum install_res ret = INSTALL_NEXT;
-    DWORD len = lstrlenW( dir );
-    DWORD size = len + 1;
-    HANDLE file;
+    enum install_res ret;
+    int len = lstrlenW( dir );
+    int size = len + 1;
     HRESULT hr;
 
     size += lstrlenW( subdir ) + lstrlenW( file_name ) + 2;
@@ -207,28 +207,31 @@ static enum install_res install_from_file(const WCHAR *dir, const WCHAR *subdir,
         free( path );
         return INSTALL_NEXT;
     }
+    free( path );
 
-    file = CreateFileW( canonical_path, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE,
-                        NULL, OPEN_EXISTING, 0, 0 );
-    LocalFree( canonical_path );
-    if (file == INVALID_HANDLE_VALUE)
+    if (GetFileAttributesW( canonical_path ) == INVALID_FILE_ATTRIBUTES)
     {
-        free( path );
+        TRACE( "%s not found\n", debugstr_w(canonical_path) );
+        LocalFree( canonical_path );
         return INSTALL_NEXT;
     }
 
-    for (;;)
+    ret = install_file( canonical_path );
+
+    LocalFree( canonical_path );
+    return ret;
+}
+
+static enum install_res install_from_unix_file(const char *dir, const WCHAR *subdir, const WCHAR *file_name)
+{
+    WCHAR *dos_dir;
+    enum install_res ret = INSTALL_NEXT;
+
+    if (p_wine_get_dos_file_name && (dos_dir = p_wine_get_dos_file_name( dir )))
     {
-        len = GetFinalPathNameByHandleW( file, path, size, VOLUME_NAME_DOS );
-        if (len <= size) break;
-        free( path );
-        size = len;
-        if (!(path = malloc( size * sizeof(WCHAR) ))) break;
+        ret = install_from_dos_file( dos_dir, subdir, file_name );
+        HeapFree( GetProcessHeap(), 0, dos_dir );
     }
-    CloseHandle( file );
-    if (!path) return INSTALL_FAILED;
-    if (len > 6) ret = install_file( (path[5] == ':') ? path + 4 : path );  /* remove '\\?\' */
-    free( path );
     return ret;
 }
 
@@ -242,32 +245,29 @@ static HKEY open_config_key(void)
     if(res != ERROR_SUCCESS)
         return NULL;
 
-    res = RegOpenKeyW(hkey, addon->config_key, &ret);
+    res = RegOpenKeyA(hkey, addon->config_key, &ret);
     RegCloseKey(hkey);
     return res == ERROR_SUCCESS ? ret : NULL;
 }
 
 static enum install_res install_from_registered_dir(void)
 {
-    static const WCHAR unix_prefix[8] = L"\\\\?\\unix";
-    WCHAR *package_dir, *new_package_dir;
+    char *package_dir, *new_package_dir;
     HKEY hkey;
-    DWORD res, type, size = MAX_PATH * sizeof(WCHAR);
+    DWORD res, type, size = MAX_PATH;
     enum install_res ret;
 
     hkey = open_config_key();
     if(!hkey)
         return INSTALL_NEXT;
 
-    package_dir = malloc(size + sizeof(unix_prefix));
-    res = RegGetValueW(hkey, NULL, addon->dir_config_key, RRF_RT_ANY, &type,
-                        (PBYTE)package_dir + sizeof(unix_prefix), &size);
+    package_dir = malloc(size);
+    res = RegGetValueA(hkey, NULL, addon->dir_config_key, RRF_RT_ANY, &type, (PBYTE)package_dir, &size);
     if(res == ERROR_MORE_DATA) {
-        new_package_dir = realloc(package_dir, size + sizeof(unix_prefix));
+        new_package_dir = realloc(package_dir, size);
         if(new_package_dir) {
             package_dir = new_package_dir;
-            res = RegGetValueW(hkey, NULL, addon->dir_config_key, RRF_RT_ANY, &type,
-                                (PBYTE)package_dir + sizeof(unix_prefix), &size);
+            res = RegGetValueA(hkey, NULL, addon->dir_config_key, RRF_RT_ANY, &type, (PBYTE)package_dir, &size);
         }
     }
     RegCloseKey(hkey);
@@ -279,8 +279,7 @@ static enum install_res install_from_registered_dir(void)
         return INSTALL_FAILED;
     }
 
-    memcpy( package_dir, unix_prefix, sizeof(unix_prefix) );
-    ret = install_from_file(package_dir, L"", addon->file_name);
+    ret = install_from_unix_file(package_dir, L"", addon->file_name);
 
     free(package_dir);
     return ret;
@@ -303,33 +302,30 @@ static enum install_res install_from_default_dir(void)
 
     if (package_dir)
     {
-        ret = install_from_file(package_dir, addon->subdir_name, addon->file_name);
+        ret = install_from_dos_file(package_dir, addon->subdir_name, addon->file_name);
         free(dir_buf);
     }
 
     if (ret == INSTALL_NEXT)
-        ret = install_from_file(L"\\\\?\\unix" INSTALL_DATADIR "/wine/", addon->subdir_name, addon->file_name);
-    if (ret == INSTALL_NEXT && strcmp("" INSTALL_DATADIR, "/usr/share") != 0)
-        ret = install_from_file(L"\\\\?\\unix/usr/share/wine/", addon->subdir_name, addon->file_name);
+        ret = install_from_unix_file(INSTALL_DATADIR "/wine/", addon->subdir_name, addon->file_name);
+    if (ret == INSTALL_NEXT && strcmp(INSTALL_DATADIR, "/usr/share") != 0)
+        ret = install_from_unix_file("/usr/share/wine/", addon->subdir_name, addon->file_name);
     if (ret == INSTALL_NEXT)
-        ret = install_from_file(L"\\\\?\\unix/opt/wine/", addon->subdir_name, addon->file_name);
+        ret = install_from_unix_file("/opt/wine/", addon->subdir_name, addon->file_name);
     return ret;
 }
 
 static WCHAR *get_cache_file_name(BOOL ensure_exists)
 {
-    const WCHAR *xdg_dir;
+    const char *xdg_dir;
     const WCHAR *home_dir;
-    WCHAR *cache_dir=NULL, *ret;
+    WCHAR *cache_dir, *ret;
     size_t len, size;
 
-    xdg_dir = _wgetenv( L"WINE_HOST_XDG_CACHE_HOME" );
-    if (xdg_dir && *xdg_dir)
+    xdg_dir = getenv( "XDG_CACHE_HOME" );
+    if (xdg_dir && *xdg_dir && p_wine_get_dos_file_name)
     {
-        if (!(cache_dir = HeapAlloc( GetProcessHeap(), 0, wcslen(xdg_dir) * sizeof(WCHAR) + sizeof(L"\\\\?\\unix") ))) return NULL;
-        lstrcpyW( cache_dir, L"\\\\?\\unix" );
-        lstrcatW( cache_dir, xdg_dir );
-        TRACE("cache dir %s\n", debugstr_w(cache_dir));
+        if (!(cache_dir = p_wine_get_dos_file_name( xdg_dir ))) return NULL;
     }
     else if ((home_dir = _wgetenv( L"WINEHOMEDIR" )))
     {
@@ -460,8 +456,6 @@ static HRESULT WINAPI InstallCallback_OnProgress(IBindStatusCallback *iface, ULO
 static HRESULT WINAPI InstallCallback_OnStopBinding(IBindStatusCallback *iface,
         HRESULT hresult, LPCWSTR szError)
 {
-    WCHAR message[256];
-
     if(dwl_binding) {
         IBinding_Release(dwl_binding);
         dwl_binding = NULL;
@@ -470,12 +464,6 @@ static HRESULT WINAPI InstallCallback_OnStopBinding(IBindStatusCallback *iface,
     if(FAILED(hresult)) {
         if(hresult == E_ABORT)
             TRACE("Binding aborted\n");
-        else if (hresult == INET_E_DOWNLOAD_FAILURE)
-        {
-            if(LoadStringW(hInst, IDS_DOWNLOAD_FAILED, message, ARRAY_SIZE(message)))
-                MessageBoxW(install_dialog, message, NULL, MB_ICONERROR);
-            EndDialog(install_dialog, IDCANCEL);
-        }
         else
             ERR("Binding failed %08lx\n", hresult);
         return S_OK;
@@ -500,6 +488,8 @@ static HRESULT WINAPI InstallCallback_OnStopBinding(IBindStatusCallback *iface,
             free(cache_file_name);
         }
     }else {
+        WCHAR message[256];
+
         if(LoadStringW(hInst, IDS_INVALID_SHA, message, ARRAY_SIZE(message)))
             MessageBoxW(NULL, message, NULL, MB_ICONERROR);
     }
@@ -625,7 +615,7 @@ static void append_url_params( WCHAR *url )
 static LPWSTR get_url(void)
 {
     DWORD size = INTERNET_MAX_URL_LENGTH*sizeof(WCHAR);
-    WCHAR *url;
+    WCHAR *url, *config_key;
     HKEY hkey;
     DWORD res, type;
     DWORD returned_size;
@@ -638,7 +628,9 @@ static LPWSTR get_url(void)
     hkey = open_config_key();
     if (hkey)
     {
-        res = RegQueryValueExW(hkey, addon->url_config_key, NULL, &type, (LPBYTE)url, &returned_size);
+        config_key = strdupAtoW(addon->url_config_key);
+        res = RegQueryValueExW(hkey, config_key, NULL, &type, (LPBYTE)url, &returned_size);
+        free(config_key);
         RegCloseKey(hkey);
         if(res == ERROR_SUCCESS && type == REG_SZ) goto found;
     }
@@ -757,6 +749,7 @@ BOOL install_addon(addon_t addon_type)
 
     addon = addons_info+addon_type;
 
+    p_wine_get_dos_file_name = (void *)GetProcAddress(GetModuleHandleW(L"kernel32.dll"), "wine_get_dos_file_name");
     p_wine_get_version = (void *)GetProcAddress(GetModuleHandleW(L"ntdll.dll"), "wine_get_version");
 
     /*

@@ -4,6 +4,9 @@
  * Copyright 2005 Detlef Riekenberg
  * Copyright 2019 Dmitry Timoshkov
  *
+ * This file contains only stubs to get the printui.dll up and running
+ * activeds.dll is much much more than this
+ *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
  * License as published by the Free Software Foundation; either
@@ -44,10 +47,8 @@ HRESULT WINAPI ADsGetObject(LPCWSTR path, REFIID riid, void **obj)
 {
     HRESULT hr;
 
-    TRACE("(%s, %s, %p)\n", debugstr_w(path), wine_dbgstr_guid(riid), obj);
-
     hr = ADsOpenObject(path, NULL, NULL, ADS_SECURE_AUTHENTICATION, riid, obj);
-    if (hr != S_OK && hr != E_ADS_BAD_PATHNAME)
+    if (hr != S_OK)
         hr = ADsOpenObject(path, NULL, NULL, 0, riid, obj);
     return hr;
 }
@@ -125,38 +126,10 @@ fail:
 /*****************************************************
  * ADsBuildVarArrayInt     [ACTIVEDS.8]
  */
-HRESULT WINAPI ADsBuildVarArrayInt(LPDWORD values, DWORD count, VARIANT* var)
+HRESULT WINAPI ADsBuildVarArrayInt(LPDWORD lpdwObjectTypes, DWORD dwObjectTypes, VARIANT* pvar)
 {
-    HRESULT hr;
-    SAFEARRAY *sa;
-    LONG idx, end = count;
-
-    TRACE("(%p, %lu, %p)\n", values, count, var);
-
-    if (!var) return E_ADS_BAD_PARAMETER;
-
-    sa = SafeArrayCreateVector(VT_VARIANT, 0, count);
-    if (!sa) return E_OUTOFMEMORY;
-
-    VariantInit(var);
-    for (idx = 0; idx < end; idx++)
-    {
-        VARIANT item;
-
-        V_VT(&item) = VT_I4;
-        V_UI4(&item) = values[idx];
-
-        hr = SafeArrayPutElement(sa, &idx, &item);
-        if (hr != S_OK)
-        {
-            SafeArrayDestroy(sa);
-            return hr;
-        }
-    }
-
-    V_VT(var) = VT_ARRAY | VT_VARIANT;
-    V_ARRAY(var) = sa;
-    return S_OK;
+    FIXME("(%p, %ld, %p)!stub\n",lpdwObjectTypes, dwObjectTypes, pvar);
+    return E_NOTIMPL;
 }
 
 /*****************************************************

@@ -227,7 +227,7 @@ BOOL WINAPI NtGdiResizePalette( HPALETTE hPal, UINT count )
     if( !palPtr ) return FALSE;
     TRACE("hpal = %p, prev = %i, new = %i\n", hPal, palPtr->count, count );
 
-    if (!count || !(entries = realloc( palPtr->entries, count * sizeof(*palPtr->entries) )))
+    if (!(entries = realloc( palPtr->entries, count * sizeof(*palPtr->entries) )))
     {
         GDI_ReleaseObj( hPal );
         return FALSE;
@@ -542,9 +542,9 @@ HPALETTE WINAPI NtUserSelectPalette( HDC hdc, HPALETTE hpal, WORD bkg )
 
 
 /***********************************************************************
- *           NtUserRealizePalette    (win32u.@)
+ *           realize_palette
  */
-UINT WINAPI NtUserRealizePalette( HDC hdc )
+UINT realize_palette( HDC hdc )
 {
     BOOL is_primary = FALSE;
     UINT realized = 0;
@@ -616,7 +616,7 @@ BOOL WINAPI NtGdiUpdateColors( HDC hDC )
  */
 BOOL WINAPI NtGdiSetMagicColors( HDC hdc, DWORD magic, ULONG index )
 {
-    FIXME( "(%p 0x%08x 0x%08x): stub\n", hdc, magic, index );
+    FIXME( "(%p 0x%08x 0x%08x): stub\n", hdc, (int)magic, (int)index );
     return TRUE;
 }
 
@@ -641,7 +641,7 @@ LONG WINAPI NtGdiDoPalette( HGDIOBJ handle, WORD start, WORD count, void *entrie
     case NtGdiGetDIBColorTable:
         return get_dib_dc_color_table( handle, start, count, entries );
     default:
-        WARN( "invalid func %u\n", func );
+        WARN( "invalid func %u\n", (int)func );
         return 0;
     }
 }

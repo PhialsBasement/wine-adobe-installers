@@ -25,7 +25,7 @@
 #include <winsock2.h>
 #endif /* !defined(_WINSOCK2API_) */
 
-#pragma pack(push,4)
+#include <pshpack4.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -58,6 +58,6 @@ INT      WINAPI WSCWriteProviderOrder(LPDWORD,DWORD);
 } /* extern "C" */
 #endif /* defined(__cplusplus) */
 
-#pragma pack(pop)
+#include <poppack.h>
 
 #endif /* !defined(_WINSOCK2SPI_) */

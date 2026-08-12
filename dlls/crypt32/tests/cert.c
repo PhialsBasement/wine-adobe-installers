@@ -275,12 +275,10 @@ static void testAddCert(void)
             CertFreeCertificateContext(context);
         }
 
-        ret = CertCloseStore(collection, CERT_CLOSE_STORE_CHECK_FLAG);
-        ok(ret, "got error %#lx.\n", GetLastError());
+        CertCloseStore(collection, 0);
     }
 
-    ret = CertCloseStore(store, CERT_CLOSE_STORE_CHECK_FLAG);
-    ok(ret, "got error %#lx.\n", GetLastError());
+    CertCloseStore(store, 0);
 }
 
 static void checkHash(const BYTE *data, DWORD dataLen, ALG_ID algID,
@@ -528,95 +526,6 @@ static void testCertProperties(void)
     ok(ret, "CertGetCertificateContextProperty failed: %08lx\n",
      GetLastError());
     ok(keyContext.hCryptProv == 0, "Expected no hCryptProv\n");
-
-    /* Remove the key context so we start fresh for NCrypt tests */
-    ret = CertSetCertificateContextProperty(context, CERT_KEY_CONTEXT_PROP_ID,
-     0, NULL);
-    ok(ret, "CertSetCertificateContextProperty failed: %08lx\n", GetLastError());
-
-    /* Test CERT_NCRYPT_KEY_HANDLE_PROP_ID (78) */
-    /* Getting it when no key context is set should fail */
-    size = sizeof(HCRYPTPROV);
-    SetLastError(0xdeadbeef);
-    ret = CertGetCertificateContextProperty(context,
-     CERT_NCRYPT_KEY_HANDLE_PROP_ID, NULL, &size);
-    ok(!ret && GetLastError() == CRYPT_E_NOT_FOUND,
-     "Expected CRYPT_E_NOT_FOUND, got %08lx\n", GetLastError());
-
-    /* Set an NCrypt key handle via property 78 */
-    {
-        HCRYPTPROV_OR_NCRYPT_KEY_HANDLE ncryptHandle = 0xBEEF1234;
-        HCRYPTPROV_OR_NCRYPT_KEY_HANDLE retrievedHandle = 0;
-
-        ret = CertSetCertificateContextProperty(context,
-         CERT_NCRYPT_KEY_HANDLE_PROP_ID, 0, (void *)ncryptHandle);
-        ok(ret, "CertSetCertificateContextProperty failed: %08lx\n", GetLastError());
-
-        /* Verify the key context was set with CERT_NCRYPT_KEY_SPEC */
-        size = sizeof(keyContext);
-        keyContext.hNCryptKey = keyContext.dwKeySpec = 0;
-        ret = CertGetCertificateContextProperty(context,
-         CERT_KEY_CONTEXT_PROP_ID, &keyContext, &size);
-        ok(ret, "CertGetCertificateContextProperty failed: %08lx\n", GetLastError());
-        ok(keyContext.hNCryptKey == ncryptHandle,
-         "Expected key context to now be hNCryptKey, got something else\n");
-        ok(keyContext.dwKeySpec == CERT_NCRYPT_KEY_SPEC,
-         "Expected dwKeySpec CERT_NCRYPT_KEY_SPEC, got %lx\n", keyContext.dwKeySpec);
-
-        /* Get the NCrypt handle back via property 78 */
-        size = sizeof(retrievedHandle);
-        ret = CertGetCertificateContextProperty(context,
-         CERT_NCRYPT_KEY_HANDLE_PROP_ID, &retrievedHandle, &size);
-        ok(ret, "CertGetCertificateContextProperty failed: %08lx\n", GetLastError());
-        ok(retrievedHandle == keyContext.hNCryptKey,
-         "Expected handle %Ix, got %Ix\n", keyContext.hNCryptKey, retrievedHandle);
-        ok(size == sizeof(retrievedHandle),
-         "Expected size %Iu, got %lu\n", sizeof(retrievedHandle), size);
-
-        /* Getting CERT_KEY_PROV_HANDLE_PROP_ID should fail since this is an NCrypt key */
-        size = sizeof(retrievedHandle);
-        SetLastError(0xdeadbeef);
-        ret = CertGetCertificateContextProperty(context,
-         CERT_KEY_PROV_HANDLE_PROP_ID, &retrievedHandle, &size);
-        ok(!ret && GetLastError() == CRYPT_E_NOT_FOUND,
-         "Expected CRYPT_E_NOT_FOUND for CAPI handle on NCrypt key, got %08lx\n",
-         GetLastError());
-
-        /* Delete the NCrypt key handle by setting property 78 to NULL */
-        ret = CertSetCertificateContextProperty(context,
-         CERT_NCRYPT_KEY_HANDLE_PROP_ID, 0, NULL);
-        ok(ret, "CertSetCertificateContextProperty failed: %08lx\n", GetLastError());
-
-        /* Verify it was deleted */
-        size = sizeof(retrievedHandle);
-        SetLastError(0xdeadbeef);
-        ret = CertGetCertificateContextProperty(context,
-         CERT_NCRYPT_KEY_HANDLE_PROP_ID, &retrievedHandle, &size);
-        ok(!ret && GetLastError() == CRYPT_E_NOT_FOUND,
-         "Expected CRYPT_E_NOT_FOUND after delete, got %08lx\n", GetLastError());
-    }
-
-    /* Test that CERT_NCRYPT_KEY_HANDLE_PROP_ID fails for non-NCrypt key contexts */
-    keyContext.cbSize = sizeof(keyContext);
-    keyContext.hCryptProv = 0xCAFE;
-    keyContext.dwKeySpec = AT_KEYEXCHANGE;
-    ret = CertSetCertificateContextProperty(context, CERT_KEY_CONTEXT_PROP_ID,
-     0, &keyContext);
-    ok(ret, "CertSetCertificateContextProperty failed: %08lx\n", GetLastError());
-    {
-        HCRYPTPROV_OR_NCRYPT_KEY_HANDLE retrievedHandle = 0xdeadbeef;
-
-        size = sizeof(retrievedHandle);
-        SetLastError(0xdeadbeef);
-        ret = CertGetCertificateContextProperty(context,
-         CERT_NCRYPT_KEY_HANDLE_PROP_ID, &retrievedHandle, &size);
-        ok(!ret && GetLastError() == CRYPT_E_NOT_FOUND,
-         "Expected CRYPT_E_NOT_FOUND for CAPI key, got %08lx\n", GetLastError());
-    }
-    /* Clean up */
-    ret = CertSetCertificateContextProperty(context, CERT_KEY_CONTEXT_PROP_ID,
-     0, NULL);
-    ok(ret, "CertSetCertificateContextProperty failed: %08lx\n", GetLastError());
 
     /* According to MSDN the subject key id can be stored as a property,
      * as a subject key extension, or as the SHA1 hash of the public key,
@@ -4507,8 +4416,9 @@ static void testKeyProvInfo(void)
 
     ret = CertDeleteCertificateFromStore(cert);
     ok(ret, "CertDeleteCertificateFromStore error %#lx\n", GetLastError());
-    ret = CertCloseStore(store, CERT_CLOSE_STORE_CHECK_FLAG);
-    ok(ret, "got error %#lx.\n", GetLastError());
+
+    CertFreeCertificateContext(cert);
+    CertCloseStore(store, 0);
 }
 
 static void test_VerifySignature(void)
@@ -4608,6 +4518,7 @@ START_TEST(cert)
     testGetIssuerCert();
     testLinkCert();
     testKeyProvInfo();
+
     testCryptHashCert();
     testCryptHashCert2();
     testCertSigs();

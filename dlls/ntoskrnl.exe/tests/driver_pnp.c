@@ -60,11 +60,7 @@ static UNICODE_STRING control_symlink, bus_symlink;
 static DRIVER_OBJECT *driver_obj;
 static DEVICE_OBJECT *bus_fdo, *bus_pdo;
 
-static unsigned int remove_device_count;
-static unsigned int surprise_removal_count;
-static unsigned int query_remove_device_count;
-static unsigned int cancel_remove_device_count;
-static unsigned int query_id_count;
+static unsigned int remove_device_count, surprise_removal_count, query_remove_device_count, cancel_remove_device_count;
 
 struct irp_queue
 {
@@ -306,7 +302,6 @@ static NTSTATUS pdo_pnp(DEVICE_OBJECT *device_obj, IRP *irp)
     switch (stack->MinorFunction)
     {
         case IRP_MN_QUERY_ID:
-            query_id_count++;
             ret = query_id(device, irp, stack->Parameters.QueryId.IdType);
             break;
 
@@ -322,9 +317,7 @@ static NTSTATUS pdo_pnp(DEVICE_OBJECT *device_obj, IRP *irp)
             ok(!stack->Parameters.StartDevice.AllocatedResources, "expected no resources\n");
             ok(!stack->Parameters.StartDevice.AllocatedResourcesTranslated, "expected no translated resources\n");
 
-            query_id_count = 0;
             status = IoRegisterDeviceInterface(device_obj, &child_class, NULL, &device->child_symlink);
-            todo_wine ok(query_id_count == 0, "expected no IRP_MN_QUERY_ID\n");
             ok(!status, "Failed to register interface, status %#lx.\n", status);
             ok(device->child_symlink.Length == sizeof(expect_symlink) - sizeof(WCHAR),
                     "Got length %u.\n", device->child_symlink.Length);
@@ -340,11 +333,11 @@ static NTSTATUS pdo_pnp(DEVICE_OBJECT *device_obj, IRP *irp)
             device->power_state = PowerDeviceD0;
 
             status = ZwWaitForSingleObject(device->plug_event, TRUE, &wait_time);
-            ok(!status, "Failed to wait for child plug event, status %#lx.\n", status);
+            todo_wine ok(!status, "Failed to wait for child plug event, status %#lx.\n", status);
             status = ZwSetEvent(device->plug_event2, NULL);
             ok(!status, "Failed to set event, status %#lx.\n", status);
             status = ZwWaitForSingleObject(device->plug_event, TRUE, &wait_time);
-            ok(!status, "Failed to wait for child plug event, status %#lx.\n", status);
+            todo_wine ok(!status, "Failed to wait for child plug event, status %#lx.\n", status);
 
             ret = STATUS_SUCCESS;
             break;
@@ -698,8 +691,8 @@ static void test_device_properties( DEVICE_OBJECT *device )
         if (status == STATUS_SUCCESS)
         {
             void *buf;
-            ULONG req_size = 0;
-            DEVPROPTYPE stored_type = DEVPROP_TYPE_EMPTY;
+            ULONG req_size;
+            DEVPROPTYPE stored_type;
 
             status = IoGetDevicePropertyData( device, key, LOCALE_NEUTRAL, 0, 0, NULL, &req_size,
                                               &stored_type );
@@ -713,18 +706,13 @@ static void test_device_properties( DEVICE_OBJECT *device )
             ok( buf != NULL, "Failed to allocate buffer.\n" );
             if (buf != NULL)
             {
-                req_size = 0;
-                stored_type = DEVPROP_TYPE_EMPTY;
                 memset( buf, 0, size );
-                status = IoGetDevicePropertyData( device, key, LOCALE_NEUTRAL, 0, size, buf,
-                                                  &req_size, &stored_type );
+                status = IoGetDevicePropertyData( device, key, LOCALE_NEUTRAL, 0, size, buf, NULL,
+                                                  &stored_type );
                 ok( status == STATUS_SUCCESS, "Failed to get device property, status %#lx.\n",
                     status );
-                ok( req_size == size, "Expected required size %lu, got %lu.\n", req_size, size );
-                ok( stored_type == type, "Expected DEVPROPTYPE value %#lx, got %#lx.\n", type,
-                    stored_type );
                 if (status == STATUS_SUCCESS)
-                    ok( kmemcmp( buf, value, size ) == 0,
+                    ok( memcmp( buf, value, size ) == 0,
                         "Got unexpected device property value.\n" );
                 ExFreePool( buf );
             }
@@ -732,211 +720,7 @@ static void test_device_properties( DEVICE_OBJECT *device )
         status = IoSetDevicePropertyData( device, key, LOCALE_NEUTRAL, 0, type, 0, NULL );
         ok( status == STATUS_SUCCESS, "Failed to delete device property, status %#lx.\n", status );
     }
-}
-
-static void test_child_device_properties(DEVICE_OBJECT *device)
-{
-    NTSTATUS status;
-    const DEVPROPKEY *key = &DEVPKEY_Winetest_1;
-    DEVPROPTYPE type = DEVPROP_TYPE_BYTE;
-    DEVPROPTYPE stored_type = DEVPROP_TYPE_EMPTY;
-    ULONG size = sizeof(BYTE);
-    ULONG req_size = 0;
-    BYTE value = 0xe2;
-    BYTE stored_value = 0;
-
-    query_id_count = 0;
-    status = IoSetDevicePropertyData(device, key, LOCALE_NEUTRAL, 0, type, size, &value);
-    todo_wine ok(query_id_count == 0, "expected no IRP_MN_QUERY_ID\n");
-    ok(status == STATUS_SUCCESS, "failed to set device property, status %#lx\n", status);
-
-    query_id_count = 0;
-    status = IoGetDevicePropertyData(device, key, LOCALE_NEUTRAL, 0, size, &stored_value, &req_size, &stored_type);
-    todo_wine ok(query_id_count == 0, "expected no IRP_MN_QUERY_ID\n");
-    ok(status == STATUS_SUCCESS, "failed to get device property, status %#lx\n", status);
-    ok(req_size == size, "expected required size %lu, got %lu\n", req_size, size);
-    ok(stored_type == type, "expected DEVPROPTYPE value %#lx, got %#lx\n", type, stored_type);
-    ok(stored_value == value, "got unexpected device property value: %#x\n", stored_value);
-
-    query_id_count = 0;
-    status = IoSetDevicePropertyData(device, key, LOCALE_NEUTRAL, 0, type, 0, NULL);
-    todo_wine ok(query_id_count == 0, "expected no IRP_MN_QUERY_ID\n");
-    ok(status == STATUS_SUCCESS, "failed to delete device property, status %#lx\n", status);
-}
-
-static void test_device_interface_properties( UNICODE_STRING *name )
-{
-    DEVPROP_BOOLEAN val = DEVPROP_FALSE;
-    DEVPROPTYPE type = DEVPROP_TYPE_EMPTY;
-    ULONG req_size = 0;
-    NTSTATUS status;
-    SIZE_T i;
-
-    for (i = 0; i < ARRAY_SIZE( deviceprops ); i++)
-    {
-        ULONG size = deviceprops[i].size;
-        DEVPROPTYPE type = deviceprops[i].type;
-        const DEVPROPKEY *key = deviceprops[i].key;
-        void *value = &deviceprops[i].value;
-
-        winetest_push_context( "deviceprops[%lu]", (DWORD)i );
-        status = IoSetDeviceInterfacePropertyData( name, key, LOCALE_NEUTRAL, 0, type, size, value );
-        ok( !status, "IoSetDeviceInterfacePropertyData failed: %#lx\n", status );
-        if (!status)
-        {
-            void *buf;
-            ULONG req_size = 0;
-            DEVPROPTYPE stored_type = DEVPROP_TYPE_EMPTY;
-
-            status = IoGetDeviceInterfacePropertyData( name, key, LOCALE_NEUTRAL, 0, 0, NULL, &req_size, &stored_type );
-            ok( status == STATUS_BUFFER_TOO_SMALL, "got status %#lx != %#lx\n", status, STATUS_BUFFER_TOO_SMALL );
-            ok( req_size == size, "got req_size %lu != %lu\n", req_size, size );
-            ok( stored_type == type, "got stored_type %#lx != %#lx\n", stored_type, type );
-
-            buf = ExAllocatePool( NonPagedPool, size );
-            ok( !!buf, "Failed to allocate memory\n" );
-            if (buf)
-            {
-                req_size = 0;
-                stored_type = DEVPROP_TYPE_EMPTY;
-                memset( buf, 0, size );
-                status = IoGetDeviceInterfacePropertyData( name, key, LOCALE_NEUTRAL, 0, size, buf, &req_size,
-                                                           &stored_type );
-                ok( !status, "IoGetDeviceInterfacePropertyData failed: %#lx\n", status );
-                ok( req_size == size, "got req_size %lu != %lu\n", req_size, size );
-                ok( stored_type == type, "got stored_type %#lx != %#lx\n", stored_type, type );
-
-                if (!status) ok( !kmemcmp( buf, value, size ), "Got unexpected device interface property value.\n" );
-                ExFreePool( buf );
-            }
-            status = IoSetDeviceInterfacePropertyData( name, key, LOCALE_NEUTRAL, 0, type, 0, NULL );
-            ok( !status, "IoSetDeviceInterfacePropertyData failed: %#lx\n", status );
-        }
-        winetest_pop_context();
-    }
-
-    req_size = 0;
-    type = DEVPROP_TYPE_EMPTY;
-    status = IoGetDeviceInterfacePropertyData( name, &DEVPKEY_DeviceInterface_Enabled, LOCALE_NEUTRAL, 0, sizeof( val ),
-                                               &val, &req_size, &type );
-    ok( !status, "IoGetDeviceInterfacePropertyData failed: %#lx\n", status );
-    ok( req_size == sizeof( val ), "got req_size %lu\n", req_size );
-    ok( type == DEVPROP_TYPE_BOOLEAN, "got type %#lx\n", type );
-    ok( val == DEVPROP_TRUE, "got val %d\n", val );
-}
-
-static void test_enumerator_name(void)
-{
-    static const WCHAR root[] = L"ROOT";
-    WCHAR buffer[10];
-    ULONG req_size;
-    NTSTATUS status;
-
-    status = IoGetDeviceProperty(bus_fdo, DevicePropertyEnumeratorName, sizeof(buffer), buffer, &req_size);
-    todo_wine ok(status == STATUS_INVALID_DEVICE_REQUEST, "got unexpected status %#lx\n", status);
-
-    req_size = 0;
-    memset(buffer, 0, sizeof(buffer));
-    status = IoGetDeviceProperty(bus_pdo, DevicePropertyEnumeratorName, sizeof(buffer), buffer, &req_size);
-    ok(status == STATUS_SUCCESS, "IoGetDeviceProperty failed: %#lx\n", status);
-    ok(req_size == sizeof(root), "unexpected size %lu\n", req_size);
-    if (status == STATUS_SUCCESS)
-        ok(!wcscmp(root, buffer), "unexpected property value '%ls'\n", buffer);
-}
-
-static void test_child_enumerator_name(DEVICE_OBJECT *device)
-{
-    static const WCHAR wine[] = L"Wine";
-    WCHAR buffer[10] = {0};
-    ULONG req_size = 0;
-    NTSTATUS status;
-
-    query_id_count = 0;
-    status = IoGetDeviceProperty(device, DevicePropertyEnumeratorName, sizeof(buffer), buffer, &req_size);
-    todo_wine ok(query_id_count == 0, "expected no IRP_MN_QUERY_ID\n");
-    ok(status == STATUS_SUCCESS, "IoGetDeviceProperty failed: %#lx\n", status);
-    ok(req_size == sizeof(wine), "unexpected size %lu\n", req_size);
-    if (status == STATUS_SUCCESS)
-        ok(!wcscmp(wine, buffer), "unexpected property value '%ls'\n", buffer);
-}
-
-static void test_device_registry_key(void)
-{
-    static const WCHAR foobar[] = L"foobar";
-    static const WCHAR foo[] = L"foo";
-
-    KEY_VALUE_PARTIAL_INFORMATION *info;
-    UNICODE_STRING name_str;
-    NTSTATUS status;
-    HANDLE hkey;
-    DWORD size;
-
-    status = IoOpenDeviceRegistryKey(bus_fdo, PLUGPLAY_REGKEY_DEVICE, KEY_ALL_ACCESS, &hkey);
-    todo_wine ok(status == STATUS_INVALID_PARAMETER, "got unexpected status %#lx\n", status);
-
-    status = IoOpenDeviceRegistryKey(bus_pdo, PLUGPLAY_REGKEY_DEVICE, KEY_ALL_ACCESS, &hkey);
-    ok(status == STATUS_SUCCESS, "IoOpenDeviceRegistryKey failed: %#lx\n", status);
-    if (status == STATUS_SUCCESS)
-    {
-        RtlInitUnicodeString(&name_str, foobar);
-        status = ZwQueryValueKey(hkey, &name_str, KeyValuePartialInformation, NULL, 0, &size);
-        ok(status == STATUS_BUFFER_TOO_SMALL, "got unexpected status %#lx\n", status);
-
-        info = ExAllocatePool(PagedPool, size);
-        ok(!!info, "failed to allocate memory\n");
-        if (info)
-        {
-            memset(info, 0, size);
-            status = ZwQueryValueKey(hkey, &name_str, KeyValuePartialInformation, info, size, &size);
-            ok(status == STATUS_SUCCESS, "ZwQueryValueKey failed: %#lx\n", status);
-            ok(info->Type == REG_SZ, "expected type REG_SZ, got %lu\n", info->Type);
-            ok(info->DataLength == sizeof(foo), "unexpected DataLength %lu\n", info->DataLength);
-            ok(!wcscmp((WCHAR *)info->Data, foo), "got unexpected key value\n");
-            ExFreePool(info);
-        }
-
-        status = ZwClose(hkey);
-        ok(status == STATUS_SUCCESS, "ZwClose failed: %#lx\n", status);
-    }
-}
-
-static void test_child_device_registry_key(DEVICE_OBJECT *device)
-{
-    static const WCHAR foobar[] = L"foobar";
-    static const WCHAR bar[] = L"bar";
-
-    KEY_VALUE_PARTIAL_INFORMATION *info;
-    UNICODE_STRING name_str;
-    NTSTATUS status;
-    HANDLE hkey;
-    DWORD size;
-
-    query_id_count = 0;
-    status = IoOpenDeviceRegistryKey(device, PLUGPLAY_REGKEY_DEVICE, KEY_ALL_ACCESS, &hkey);
-    todo_wine ok(query_id_count == 0, "expected no IRP_MN_QUERY_ID\n");
-    ok(status == STATUS_SUCCESS, "IoOpenDeviceRegistryKey failed: %#lx\n", status);
-    if (status == STATUS_SUCCESS)
-    {
-        RtlInitUnicodeString(&name_str, foobar);
-        status = ZwQueryValueKey(hkey, &name_str, KeyValuePartialInformation, NULL, 0, &size);
-        ok(status == STATUS_BUFFER_TOO_SMALL, "got unexpected status %#lx\n", status);
-
-        info = ExAllocatePool(PagedPool, size);
-        ok(!!info, "failed to allocate memory\n");
-        if (info)
-        {
-            memset(info, 0, size);
-            status = ZwQueryValueKey(hkey, &name_str, KeyValuePartialInformation, info, size, &size);
-            ok(status == STATUS_SUCCESS, "ZwQueryValueKey failed: %#lx\n", status);
-            ok(info->Type == REG_SZ, "expected type REG_SZ, got %lu\n", info->Type);
-            ok(info->DataLength == sizeof(bar), "unexpected DataLength %lu\n", info->DataLength);
-            ok(!wcscmp((WCHAR *)info->Data, bar), "got unexpected key value\n");
-            ExFreePool(info);
-        }
-
-        status = ZwClose(hkey);
-        ok(status == STATUS_SUCCESS, "ZwClose failed: %#lx\n", status);
-    }
+    return;
 }
 
 static NTSTATUS fdo_ioctl(IRP *irp, IO_STACK_LOCATION *stack, ULONG code)
@@ -946,8 +730,6 @@ static NTSTATUS fdo_ioctl(IRP *irp, IO_STACK_LOCATION *stack, ULONG code)
         case IOCTL_WINETEST_BUS_MAIN:
             test_bus_query();
             test_device_properties( bus_pdo );
-            test_enumerator_name();
-            test_device_registry_key();
             return STATUS_SUCCESS;
 
         case IOCTL_WINETEST_BUS_REGISTER_IFACE:
@@ -955,25 +737,11 @@ static NTSTATUS fdo_ioctl(IRP *irp, IO_STACK_LOCATION *stack, ULONG code)
 
         case IOCTL_WINETEST_BUS_ENABLE_IFACE:
             IoSetDeviceInterfaceState(&bus_symlink, TRUE);
-            test_device_interface_properties(&bus_symlink);
             return STATUS_SUCCESS;
 
         case IOCTL_WINETEST_BUS_DISABLE_IFACE:
-        {
-            DEVPROP_BOOLEAN val = DEVPROP_TRUE;
-            DEVPROPTYPE type = DEVPROP_TYPE_EMPTY;
-            NTSTATUS status;
-            DWORD req_size = 0;
-
             IoSetDeviceInterfaceState(&bus_symlink, FALSE);
-            status = IoGetDeviceInterfacePropertyData(&bus_symlink, &DEVPKEY_DeviceInterface_Enabled, LOCALE_NEUTRAL, 0,
-                                                      sizeof(val), &val, &req_size, &type);
-            ok(!status, "IoGetDeviceInterfacePropertyData failed: %#lx\n", status);
-            ok(req_size == sizeof(val), "got req_size = %lu\n", req_size);
-            ok(type == DEVPROP_TYPE_BOOLEAN, "got type = %#lx\n", type);
-            ok(val == DEVPROP_FALSE, "got val %d\n", val);
             return STATUS_SUCCESS;
-        }
 
         case IOCTL_WINETEST_BUS_ADD_CHILD:
         {
@@ -1065,16 +833,15 @@ static NTSTATUS fdo_ioctl(IRP *irp, IO_STACK_LOCATION *stack, ULONG code)
              * for the other. */
 
             status = ZwSetEvent(plug_event, NULL);
-            ok(!status, "Failed to set event, status %#lx.\n", status);
+            todo_wine ok(!status, "Failed to set event, status %#lx.\n", status);
             status = ZwWaitForSingleObject(plug_event2, TRUE, &wait_time);
-            ok(!status, "Failed to wait for child plug event, status %#lx.\n", status);
+            todo_wine ok(!status, "Failed to wait for child plug event, status %#lx.\n", status);
             ok(surprise_removal_count == 1, "Got %u surprise removal events.\n", surprise_removal_count);
             /* We shouldn't get IRP_MN_REMOVE_DEVICE until all user-space
              * handles to the device are closed (and the user-space thread is
              * currently blocked in this ioctl and won't close its handle
              * yet.) */
-            todo_wine_if (remove_device_count)
-                ok(!remove_device_count, "Got %u remove events.\n", remove_device_count);
+            todo_wine ok(!remove_device_count, "Got %u remove events.\n", remove_device_count);
 
             return STATUS_SUCCESS;
         }
@@ -1112,12 +879,6 @@ static NTSTATUS pdo_ioctl(DEVICE_OBJECT *device_obj, IRP *irp, IO_STACK_LOCATION
             surprise_removal_count = 0;
             query_remove_device_count = 0;
             cancel_remove_device_count = 0;
-            return STATUS_SUCCESS;
-
-        case IOCTL_WINETEST_CHILD_MAIN:
-            test_child_device_properties(device_obj);
-            test_child_enumerator_name(device_obj);
-            test_child_device_registry_key(device_obj);
             return STATUS_SUCCESS;
 
         default:

@@ -80,7 +80,7 @@ DEFINE_EXPECT(function_do_clean);
 /* Emulate a __thiscall */
 #ifdef __i386__
 
-#pragma pack(push,1)
+#include "pshpack1.h"
 struct thiscall_thunk
 {
     BYTE pop_eax;    /* popl  %eax (ret addr) */
@@ -89,7 +89,7 @@ struct thiscall_thunk
     BYTE push_eax;   /* pushl %eax */
     WORD jmp_edx;    /* jmp  *%edx */
 };
-#pragma pack(pop)
+#include "poppack.h"
 
 static void * (WINAPI *call_thiscall_func1)( void *func, void *this );
 static void * (WINAPI *call_thiscall_func2)( void *func, void *this, const void *a );
@@ -342,9 +342,9 @@ typedef enum {
 } codecvt_base_result;
 
 static codecvt_char16 *(__thiscall * p_codecvt_char16_ctor)(codecvt_char16 *this);
-static codecvt_char16 *(__thiscall * p_codecvt_char16_ctor_refs)(codecvt_char16 *this, size_t refs);
+static codecvt_char16 *(__thiscall * p_codecvt_char16_ctor_refs)(codecvt_char16 *this, unsigned int refs);
 static codecvt_char16 * (__thiscall * p_codecvt_char16_ctor_mode)(codecvt_char16 *this, void *locinfo,
-        ULONG max_code, codecvt_convert_mode mode, size_t refs);
+        ULONG max_code, codecvt_convert_mode mode, unsigned int refs);
 static void (__thiscall * p_codecvt_char16_dtor)(codecvt_char16 *this);
 static int (__thiscall * p_codecvt_char16_do_out)(const codecvt_char16 *this, _Mbstatet *state,
         const char16_t *from, const char16_t *from_end, const char16_t **from_next,
@@ -352,14 +352,6 @@ static int (__thiscall * p_codecvt_char16_do_out)(const codecvt_char16 *this, _M
 static int (__thiscall * p_codecvt_char16_do_in)(const codecvt_char16 *this, _Mbstatet *state,
         const char *from, const char *from_end, const char **from_next,
         char16_t *to, char16_t *to_end, char16_t **to_next);
-
-typedef struct
-{
-    EXCEPTION_RECORD *rec;
-    LONG *ref;
-} exception_ptr;
-
-static void (__cdecl *p___ExceptionPtrSwap)(exception_ptr *a, exception_ptr *b);
 
 static HMODULE msvcp;
 #define SETNOFAIL(x,y) x = (void*)GetProcAddress(msvcp,y)
@@ -382,7 +374,6 @@ static BOOL init(void)
 
     if(sizeof(void*) == 8) { /* 64-bit initialization */
         SET(p_task_continuation_context_ctor, "??0task_continuation_context@Concurrency@@AEAA@XZ");
-        SET(p___ExceptionPtrSwap, "?__ExceptionPtrSwap@@YAXPEAX0@Z");
         SET(p__ContextCallback__Assign, "?_Assign@_ContextCallback@details@Concurrency@@AEAAXPEAX@Z");
         SET(p__ContextCallback__CallInContext, "?_CallInContext@_ContextCallback@details@Concurrency@@QEBAXV?$function@$$A6AXXZ@std@@_N@Z");
         SET(p__ContextCallback__Capture, "?_Capture@_ContextCallback@details@Concurrency@@AEAAXXZ");
@@ -445,7 +436,6 @@ static BOOL init(void)
         SET(p_codecvt_char16_do_out, "?do_out@?$codecvt@_SDU_Mbstatet@@@std@@MBEHAAU_Mbstatet@@PB_S1AAPB_SPAD3AAPAD@Z");
         SET(p_codecvt_char16_do_in, "?do_in@?$codecvt@_SDU_Mbstatet@@@std@@MBEHAAU_Mbstatet@@PBD1AAPBDPA_S3AAPA_S@Z");
 #endif
-        SET(p___ExceptionPtrSwap, "?__ExceptionPtrSwap@@YAXPAX0@Z");
         SET(p__Schedule_chore, "?_Schedule_chore@details@Concurrency@@YAHPAU_Threadpool_chore@12@@Z");
         SET(p__Reschedule_chore, "?_Reschedule_chore@details@Concurrency@@YAHPBU_Threadpool_chore@12@@Z");
         SET(p__Release_chore, "?_Release_chore@details@Concurrency@@YAXPAU_Threadpool_chore@12@@Z");
@@ -714,8 +704,7 @@ static void test__TaskEventLogger(void)
 static void __cdecl chore_callback(void *arg)
 {
     HANDLE event = arg;
-    if (event)
-        SetEvent(event);
+    SetEvent(event);
 }
 
 static void test_chore(void)
@@ -726,14 +715,11 @@ static void test_chore(void)
     int ret;
 
     memset(&chore, 0, sizeof(chore));
-    chore.callback = chore_callback;
     ret = p__Schedule_chore(&chore);
     ok(!ret, "_Schedule_chore returned %d\n", ret);
     ok(chore.work != NULL, "chore.work == NULL\n");
-    ok(chore.callback == chore_callback, "chore.callback != chore_callback\n");
+    ok(!chore.callback, "chore.callback != NULL\n");
     p__Release_chore(&chore);
-    ok(!chore.work, "chore.work != NULL\n");
-    ok(chore.callback == chore_callback, "chore.callback != chore_callback\n");
 
     chore.work = NULL;
     chore.callback = chore_callback;
@@ -1002,15 +988,16 @@ static void test_Stat(void)
         WCHAR const *path;
         enum file_type ret;
         int perms;
+        int is_todo;
     } tests[] = {
-        { NULL, file_not_found, 0xdeadbeef },
-        { L"wine_test_dir", directory_file, 0777 },
-        { L"wine_test_dir/f1", regular_file, 0777 },
-        { L"wine_test_dir/f2", regular_file, 0555 },
-        { L"wine_test_dir/ne", file_not_found, 0xdeadbeef },
-        { L"wine_test_dir\\??invalid_name>>", file_not_found, 0xdeadbeef },
-        { L"wine_test_dir\\f1_link", regular_file, 0777 },
-        { L"wine_test_dir\\dir_link", directory_file, 0777 },
+        { NULL, file_not_found, 0xdeadbeef, FALSE },
+        { L"wine_test_dir", directory_file, 0777, FALSE },
+        { L"wine_test_dir/f1", regular_file, 0777, FALSE },
+        { L"wine_test_dir/f2", regular_file, 0555, FALSE },
+        { L"wine_test_dir/ne", file_not_found, 0xdeadbeef, FALSE },
+        { L"wine_test_dir\\??invalid_name>>", file_not_found, 0xdeadbeef, FALSE },
+        { L"wine_test_dir\\f1_link", regular_file, 0777, TRUE },
+        { L"wine_test_dir\\dir_link", directory_file, 0777, TRUE },
     };
 
     GetCurrentDirectoryW(MAX_PATH, origin_path);
@@ -1068,20 +1055,26 @@ static void test_Stat(void)
     for(i=0; i<ARRAY_SIZE(tests); i++) {
         perms = 0xdeadbeef;
         val = p_Stat(tests[i].path, &perms);
-        ok(tests[i].ret == val, "_Stat(): test %d expect: %d, got %d\n", i+1, tests[i].ret, val);
-        ok(tests[i].perms == perms, "_Stat(): test %d perms expect: 0%o, got 0%o\n",
-                i+1, tests[i].perms, perms);
+        todo_wine_if(tests[i].is_todo) {
+            ok(tests[i].ret == val, "_Stat(): test %d expect: %d, got %d\n", i+1, tests[i].ret, val);
+            ok(tests[i].perms == perms, "_Stat(): test %d perms expect: 0%o, got 0%o\n",
+                    i+1, tests[i].perms, perms);
+        }
         val = p_Stat(tests[i].path, NULL);
-        ok(tests[i].ret == val, "_Stat(): test %d expect: %d, got %d\n", i+1, tests[i].ret, val);
+        todo_wine_if(tests[i].is_todo)
+            ok(tests[i].ret == val, "_Stat(): test %d expect: %d, got %d\n", i+1, tests[i].ret, val);
 
         /* test _Lstat */
         perms = 0xdeadbeef;
         val = p_Lstat(tests[i].path, &perms);
-        ok(tests[i].ret == val, "_Lstat(): test %d expect: %d, got %d\n", i+1, tests[i].ret, val);
-        ok(tests[i].perms == perms, "_Lstat(): test %d perms expect: 0%o, got 0%o\n",
-                i+1, tests[i].perms, perms);
+        todo_wine_if(tests[i].is_todo) {
+            ok(tests[i].ret == val, "_Lstat(): test %d expect: %d, got %d\n", i+1, tests[i].ret, val);
+            ok(tests[i].perms == perms, "_Lstat(): test %d perms expect: 0%o, got 0%o\n",
+                    i+1, tests[i].perms, perms);
+        }
         val = p_Lstat(tests[i].path, NULL);
-        ok(tests[i].ret == val, "_Lstat(): test %d expect: %d, got %d\n", i+1, tests[i].ret, val);
+        todo_wine_if(tests[i].is_todo)
+            ok(tests[i].ret == val, "_Lstat(): test %d expect: %d, got %d\n", i+1, tests[i].ret, val);
     }
 
     GetSystemDirectoryW(sys_path, MAX_PATH);
@@ -1093,9 +1086,9 @@ static void test_Stat(void)
     ok(perms == expected_perms, "_Stat(): perms expect: 0%o, got 0%o\n", expected_perms, perms);
 
     if(ret) {
-        ok(DeleteFileW(L"wine_test_dir\\f1_link"),
+        todo_wine ok(DeleteFileW(L"wine_test_dir\\f1_link"),
                 "expect wine_test_dir/f1_link to exist\n");
-        ok(RemoveDirectoryW(L"wine_test_dir\\dir_link"),
+        todo_wine ok(RemoveDirectoryW(L"wine_test_dir\\dir_link"),
                 "expect wine_test_dir/dir_link to exist\n");
     }
     ok(DeleteFileW(L"wine_test_dir/f1"), "expect wine_test_dir/f1 to exist\n");
@@ -1214,14 +1207,15 @@ static void test_Unlink(void)
     struct {
         WCHAR const *path;
         int last_error;
+        MSVCP_bool is_todo;
     } tests[] = {
-        { L"wine_test_dir\\f1_symlink", ERROR_SUCCESS },
-        { L"wine_test_dir\\f1_link", ERROR_SUCCESS },
-        { L"wine_test_dir\\f1", ERROR_SUCCESS },
-        { L"wine_test_dir", ERROR_ACCESS_DENIED },
-        { L"not_exist", ERROR_FILE_NOT_FOUND },
-        { L"not_exist_dir\\not_exist_file", ERROR_PATH_NOT_FOUND },
-        { NULL, ERROR_PATH_NOT_FOUND }
+        { L"wine_test_dir\\f1_symlink", ERROR_SUCCESS, TRUE },
+        { L"wine_test_dir\\f1_link", ERROR_SUCCESS, FALSE },
+        { L"wine_test_dir\\f1", ERROR_SUCCESS, FALSE },
+        { L"wine_test_dir", ERROR_ACCESS_DENIED, FALSE },
+        { L"not_exist", ERROR_FILE_NOT_FOUND, FALSE },
+        { L"not_exist_dir\\not_exist_file", ERROR_PATH_NOT_FOUND, FALSE },
+        { NULL, ERROR_PATH_NOT_FOUND, FALSE }
     };
 
     GetCurrentDirectoryW(MAX_PATH, current_path);
@@ -1250,8 +1244,9 @@ static void test_Unlink(void)
     for(i=0; i<ARRAY_SIZE(tests); i++) {
         errno = 0xdeadbeef;
         ret = p_Unlink(tests[i].path);
-        ok(ret == tests[i].last_error, "_Unlink(): test %d expect: %d, got %d\n",
-           i+1, tests[i].last_error, ret);
+        todo_wine_if(tests[i].is_todo)
+            ok(ret == tests[i].last_error, "_Unlink(): test %d expect: %d, got %d\n",
+                    i+1, tests[i].last_error, ret);
         ok(errno == 0xdeadbeef, "_Unlink(): test %d errno expect: 0xdeadbeef, got %d\n", i+1, ret);
     }
 
@@ -1937,53 +1932,60 @@ void test_codecvt_char16(void)
         generate_header,
         consume_header | generate_header,
     };
-    char16_t str16[16], *str16_ptr = NULL;
-    char buffer[256], *str_ptr = NULL;
-    codecvt_char16 this;
+    char16_t str16[16], *str16_ptr;
+    codecvt_char16 *this, *this2;
     unsigned int i, j, len, wlen;
     char str[16], expect_str[16];
+    char buffer[256], *str_ptr;
     _Mbstatet state;
     int ret;
 
-    memset(&this, 0xcc, sizeof(this));
-    call_func1(p_codecvt_char16_ctor, &this);
-    ok(!this.base.facet.refs, "got %u.\n", this.base.facet.refs);
-    ok(this.convert_mode == consume_header, "got %#x.\n", this.max_code);
-    ok(this.max_code == MAX_UCSCHAR, "got %#x.\n", this.max_code);
-    call_func1(p_codecvt_char16_dtor, &this);
+    this = (codecvt_char16 *)buffer;
+    memset(buffer, 0xcc, sizeof(buffer));
+    this2 = call_func1(p_codecvt_char16_ctor, this);
+    ok(!this->base.facet.refs, "got %u.\n", this->base.facet.refs);
+    ok(this->convert_mode == consume_header, "got %#x.\n", this->max_code);
+    ok(this->max_code == MAX_UCSCHAR, "got %#x.\n", this->max_code);
+    ok(*(unsigned int *)(buffer + sizeof(*this)) == 0xcccccccc, "got %#x.\n", *(unsigned int *)(buffer + sizeof(*this)));
+    call_func1(p_codecvt_char16_dtor, this);
 
-    memset(&this, 0xcc, sizeof(this));
-    call_func2(p_codecvt_char16_ctor_refs, &this, 12);
-    ok(this.base.facet.refs == 12, "got %u.\n", this.base.facet.refs);
-    ok(this.convert_mode == consume_header, "got %#x.\n", this.max_code);
-    ok(this.max_code == MAX_UCSCHAR, "got %#x.\n", this.max_code);
-    call_func1(p_codecvt_char16_dtor, &this);
+    this = (codecvt_char16 *)buffer;
+    memset(buffer, 0xcc, sizeof(buffer));
+    this2 = call_func2(p_codecvt_char16_ctor_refs, this, 12);
+    ok(this2 == this, "got %p, %p.\n", this2, this);
+    ok(this->base.facet.refs == 12, "got %u.\n", this->base.facet.refs);
+    ok(this->convert_mode == consume_header, "got %#x.\n", this->max_code);
+    ok(this->max_code == MAX_UCSCHAR, "got %#x.\n", this->max_code);
+    ok(*(unsigned int *)(buffer + sizeof(*this)) == 0xcccccccc, "got %#x.\n", *(unsigned int *)(buffer + sizeof(*this)));
+    call_func1(p_codecvt_char16_dtor, this);
 
-    memset(&this, 0xcc, sizeof(this));
-    call_func5(p_codecvt_char16_ctor_mode, &this, (void *)0xdeadbeef, 0xffffffff, 0x44, 12);
-    ok(this.base.facet.refs == 12, "got %#x.\n", this.base.facet.refs);
-    ok(this.convert_mode == 0x44, "got %#x.\n", this.convert_mode);
-    ok(this.max_code == 0xffffffff, "got %#x.\n", this.max_code);
-    call_func1(p_codecvt_char16_dtor, &this);
+    this = (codecvt_char16 *)buffer;
+    memset(buffer, 0xcc, sizeof(buffer));
+    this2 = call_func5(p_codecvt_char16_ctor_mode, this, (void *)0xdeadbeef, 0xffffffff, 0x44, 12);
+    ok(this2 == this, "got %p, %p.\n", this2, this);
+    ok(this->base.facet.refs == 12, "got %#x.\n", this->base.facet.refs);
+    ok(this->convert_mode == 0x44, "got %#x.\n", this->convert_mode);
+    ok(this->max_code == 0xffffffff, "got %#x.\n", this->max_code);
+    ok(*(unsigned int *)(buffer + sizeof(*this)) == 0xcccccccc, "got %#x.\n", *(unsigned int *)(buffer + sizeof(*this)));
+    call_func1(p_codecvt_char16_dtor, this);
 
     for (j = 0; j < ARRAY_SIZE(test_flags); ++j)
     {
         winetest_push_context("flags %#lx", test_flags[j]);
+        this = (codecvt_char16 *)buffer;
         memset(buffer, 0xcc, sizeof(buffer));
-        call_func5(p_codecvt_char16_ctor_mode, &this, (void *)0xdeadbeef, MAX_UCSCHAR, test_flags[j], 0);
+        call_func5(p_codecvt_char16_ctor_mode, this, (void *)0xdeadbeef, MAX_UCSCHAR, test_flags[j], 0);
 
         str16[0] = 'a';
         memset(&state, 0, sizeof(state));
-        ret = (int)call_func8(p_codecvt_char16_do_out, &this, &state, str16, str16 + 1, (const char16_t **)&str16_ptr,
-                str, str, &str_ptr);
+        ret = (int)call_func8(p_codecvt_char16_do_out, this, &state, str16, str16 + 1, (const char16_t **)&str16_ptr, str, str, &str_ptr);
         ok(ret == CODECVT_partial, "got %d.\n", ret);
         ok(str16_ptr - str16 == 0, "got %Id.\n", str16_ptr - str16);
         ok(str_ptr - str == 0, "got %Id.\n", str_ptr - str);
         ok(state.wchar == 0, "got %#x.\n", state.wchar);
 
         memset(&state, 0, sizeof(state));
-        ret = (int)call_func8(p_codecvt_char16_do_out, &this, &state, str16, str16, (const char16_t **)&str16_ptr, str,
-                str, &str_ptr);
+        ret = (int)call_func8(p_codecvt_char16_do_out, this, &state, str16, str16, (const char16_t **)&str16_ptr, str, str, &str_ptr);
         ok(ret == CODECVT_partial, "got %d.\n", ret);
         ok(str16_ptr - str16 == 0, "got %Id.\n", str16_ptr - str16);
         ok(str_ptr - str == 0, "got %Id.\n", str_ptr - str);
@@ -1993,8 +1995,7 @@ void test_codecvt_char16(void)
 
         memset(&state, 0, sizeof(state));
         memset(str, 0, sizeof(str));
-        ret = (int)call_func8(p_codecvt_char16_do_out, &this, &state, str16, str16 + 1, (const char16_t **)&str16_ptr,
-                str, str + 1, &str_ptr);
+        ret = (int)call_func8(p_codecvt_char16_do_out, this, &state, str16, str16 + 1, (const char16_t **)&str16_ptr, str, str + 1, &str_ptr);
         if (test_flags[j] & generate_header)
         {
             ok(ret == CODECVT_partial, "got %d.\n", ret);
@@ -2013,8 +2014,7 @@ void test_codecvt_char16(void)
 
         memset(&state, 0, sizeof(state));
         memset(str, 0, sizeof(str));
-        ret = (int)call_func8(p_codecvt_char16_do_out, &this, &state, str16, str16 + 1, (const char16_t **)&str16_ptr,
-                str, str + 2, &str_ptr);
+        ret = (int)call_func8(p_codecvt_char16_do_out, this, &state, str16, str16 + 1, (const char16_t **)&str16_ptr, str, str + 2, &str_ptr);
         if (test_flags[j] & generate_header)
         {
             ok(ret == CODECVT_partial, "got %d.\n", ret);
@@ -2033,8 +2033,7 @@ void test_codecvt_char16(void)
 
         memset(&state, 0, sizeof(state));
         memset(str, 0, sizeof(str));
-        ret = (int)call_func8(p_codecvt_char16_do_out, &this, &state, str16, str16 + 1, (const char16_t **)&str16_ptr,
-                str, str + 3, &str_ptr);
+        ret = (int)call_func8(p_codecvt_char16_do_out, this, &state, str16, str16 + 1, (const char16_t **)&str16_ptr, str, str + 3, &str_ptr);
         if (test_flags[j] & generate_header)
         {
             ok(ret == CODECVT_partial, "got %d.\n", ret);
@@ -2053,8 +2052,7 @@ void test_codecvt_char16(void)
 
         memset(&state, 0, sizeof(state));
         memset(str, 0, sizeof(str));
-        ret = (int)call_func8(p_codecvt_char16_do_out, &this, &state, str16, str16 + 1, (const char16_t **)&str16_ptr,
-                str, str + 4, &str_ptr);
+        ret = (int)call_func8(p_codecvt_char16_do_out, this, &state, str16, str16 + 1, (const char16_t **)&str16_ptr, str, str + 4, &str_ptr);
         ok(ret == CODECVT_ok, "got %d.\n", ret);
         ok(str16_ptr - str16 == 1, "got %Id.\n", str16_ptr - str16);
         if (test_flags[j] & generate_header)
@@ -2068,8 +2066,7 @@ void test_codecvt_char16(void)
             ok(str_ptr - str == 1, "got %Id.\n", str_ptr - str);
         }
         ok(state.wchar == 0x7d, "got %#x.\n", state.wchar);
-        ret = (int)call_func8(p_codecvt_char16_do_out, &this, &state, str16_ptr, str16 + wcslen(str16),
-                (const char16_t **)&str16_ptr, str, str + 8, &str_ptr);
+        ret = (int)call_func8(p_codecvt_char16_do_out, this, &state, str16_ptr, str16 + wcslen(str16), (const char16_t **)&str16_ptr, str, str + 8, &str_ptr);
         ok(ret == CODECVT_ok, "got %d.\n", ret);
         ok(str16_ptr - str16 == 4, "got %Id.\n", str16_ptr - str16);
         ok(str_ptr - str == 7, "got %Id.\n", str_ptr - str);
@@ -2078,8 +2075,7 @@ void test_codecvt_char16(void)
 
         memset(&state, 0, sizeof(state));
         memset(str, 0, sizeof(str));
-        ret = (int)call_func8(p_codecvt_char16_do_out, &this, &state, str16, str16 + 1, (const char16_t **)&str16_ptr,
-                str, str + 3, &str_ptr);
+        ret = (int)call_func8(p_codecvt_char16_do_out, this, &state, str16, str16 + 1, (const char16_t **)&str16_ptr, str, str + 3, &str_ptr);
         if (test_flags[j] & generate_header)
         {
             ok(ret == CODECVT_partial, "got %d.\n", ret);
@@ -2100,16 +2096,14 @@ void test_codecvt_char16(void)
 
         memset(&state, 0, sizeof(state));
         memset(str16, 0, sizeof(str16));
-        ret = (int)call_func8(p_codecvt_char16_do_in, &this, &state, str, str + 3, (const char **)&str_ptr,
-                str16, str16 + 2, &str16_ptr);
+        ret = (int)call_func8(p_codecvt_char16_do_in, this, &state, str, str + 3, (const char **)&str_ptr, str16, str16 + 2, &str16_ptr);
         ok(ret == CODECVT_ok, "got %d.\n", ret);
         ok(str16_ptr - str16 == 2, "got %Id.\n", str16_ptr - str16);
         ok(!wcscmp(str16, L"ab"), "got %s.\n", debugstr_w(str16));
         ok(str_ptr - str == 2, "got %Id.\n", str_ptr - str);
         ok(state.wchar == 1, "got %#x.\n", state.wchar);
 
-        ret = (int)call_func8(p_codecvt_char16_do_in, &this, &state, str, str + 2, (const char **)&str_ptr,
-                str16, str16 + 3, &str16_ptr);
+        ret = (int)call_func8(p_codecvt_char16_do_in, this, &state, str, str + 2, (const char **)&str_ptr, str16, str16 + 3, &str16_ptr);
         ok(ret == CODECVT_ok, "got %d.\n", ret);
         ok(str16_ptr - str16 == 2, "got %Id.\n", str16_ptr - str16);
         ok(!wcscmp(str16, L"ab"), "got %s.\n", debugstr_w(str16));
@@ -2120,24 +2114,21 @@ void test_codecvt_char16(void)
 
         memset(&state, 0, sizeof(state));
         memset(str16, 0, sizeof(str16));
-        ret = (int)call_func8(p_codecvt_char16_do_in, &this, &state, str, str + 4, (const char **)&str_ptr,
-                str16, str16 + 2, &str16_ptr);
+        ret = (int)call_func8(p_codecvt_char16_do_in, this, &state, str, str + 4, (const char **)&str_ptr, str16, str16 + 2, &str16_ptr);
         ok(ret == CODECVT_ok, "got %d.\n", ret);
         ok(str16_ptr - str16 == 2, "got %Id.\n", str16_ptr - str16);
         ok(!wcscmp(str16, L"\xd808\xdc12"), "got %s.\n", debugstr_w(str16));
         ok(str_ptr - str == 4, "got %Id.\n", str_ptr - str);
         ok(state.wchar == 1, "got %#x.\n", state.wchar);
 
-        ret = (int)call_func8(p_codecvt_char16_do_in, &this, &state, str, str + 1, (const char **)&str_ptr,
-                str16, str16 + 2, &str16_ptr);
+        ret = (int)call_func8(p_codecvt_char16_do_in, this, &state, str, str + 1, (const char **)&str_ptr, str16, str16 + 2, &str16_ptr);
         ok(ret == CODECVT_partial, "got %d.\n", ret);
         ok(str16_ptr - str16 == 0, "got %Id.\n", str16_ptr - str16);
         ok(!wcscmp(str16, L"\xd808\xdc12"), "got %s.\n", debugstr_w(str16));
         ok(str_ptr - str == 0, "got %Id.\n", str_ptr - str);
         ok(state.wchar == 1, "got %#x.\n", state.wchar);
 
-        ret = (int)call_func8(p_codecvt_char16_do_in, &this, &state, str, str + 2, (const char **)&str_ptr,
-                str16, str16 + 2, &str16_ptr);
+        ret = (int)call_func8(p_codecvt_char16_do_in, this, &state, str, str + 2, (const char **)&str_ptr, str16, str16 + 2, &str16_ptr);
         ok(ret == CODECVT_partial, "got %d.\n", ret);
         ok(str16_ptr - str16 == 0, "got %Id.\n", str16_ptr - str16);
         ok(!wcscmp(str16, L"\xd808\xdc12"), "got %s.\n", debugstr_w(str16));
@@ -2146,8 +2137,7 @@ void test_codecvt_char16(void)
 
         memset(&state, 0, sizeof(state));
         memset(str16, 0, sizeof(str16));
-        ret = (int)call_func8(p_codecvt_char16_do_in, &this, &state, str, str + 3, (const char **)&str_ptr,
-                str16, str16 + 1, &str16_ptr);
+        ret = (int)call_func8(p_codecvt_char16_do_in, this, &state, str, str + 3, (const char **)&str_ptr, str16, str16 + 1, &str16_ptr);
         ok(ret == CODECVT_ok, "got %d.\n", ret);
         ok(str16_ptr - str16 == 1, "got %Id.\n", str16_ptr - str16);
         ok(!wcscmp(str16, L"\xd808"), "got %s.\n", debugstr_w(str16));
@@ -2156,8 +2146,7 @@ void test_codecvt_char16(void)
 
         memset(&state, 0, sizeof(state));
         memset(str16, 0, sizeof(str16));
-        ret = (int)call_func8(p_codecvt_char16_do_in, &this, &state, str, str + 4, (const char **)&str_ptr,
-                str16, str16 , &str16_ptr);
+        ret = (int)call_func8(p_codecvt_char16_do_in, this, &state, str, str + 4, (const char **)&str_ptr, str16, str16 , &str16_ptr);
         ok(ret == CODECVT_partial, "got %d.\n", ret);
         ok(str16_ptr - str16 == 0, "got %Id.\n", str16_ptr - str16);
         ok(str_ptr - str == 0, "got %Id.\n", str_ptr - str);
@@ -2165,8 +2154,7 @@ void test_codecvt_char16(void)
 
         memset(&state, 0, sizeof(state));
         memset(str16, 0, sizeof(str16));
-        ret = (int)call_func8(p_codecvt_char16_do_in, &this, &state, str, str + 4, (const char **)&str_ptr,
-                str16, str16 + 1, &str16_ptr);
+        ret = (int)call_func8(p_codecvt_char16_do_in, this, &state, str, str + 4, (const char **)&str_ptr, str16, str16 + 1, &str16_ptr);
         ok(ret == CODECVT_ok, "got %d.\n", ret);
         ok(str16_ptr - str16 == 1, "got %Id.\n", str16_ptr - str16);
         ok(!wcscmp(str16, L"\xd808"), "got %s.\n", debugstr_w(str16));
@@ -2175,16 +2163,14 @@ void test_codecvt_char16(void)
 
         memset(&state, 0, sizeof(state));
         memset(str16, 0, sizeof(str16));
-        ret = (int)call_func8(p_codecvt_char16_do_in, &this, &state, str, str + 3, (const char **)&str_ptr,
-                str16, str16 + 2, &str16_ptr);
+        ret = (int)call_func8(p_codecvt_char16_do_in, this, &state, str, str + 3, (const char **)&str_ptr, str16, str16 + 2, &str16_ptr);
         ok(ret == CODECVT_ok, "got %d.\n", ret);
         ok(str16_ptr - str16 == 1, "got %Id.\n", str16_ptr - str16);
         ok(!wcscmp(str16, L"\xd808"), "got %s.\n", debugstr_w(str16));
         ok(str_ptr - str == 3, "got %Id.\n", str_ptr - str);
         ok(state.wchar == 0xdc00, "got %#x.\n", state.wchar);
 
-        ret = (int)call_func8(p_codecvt_char16_do_in, &this, &state, str + 3, str + 4, (const char **)&str_ptr,
-                str16, str16 + 2, &str16_ptr);
+        ret = (int)call_func8(p_codecvt_char16_do_in, this, &state, str + 3, str + 4, (const char **)&str_ptr, str16, str16 + 2, &str16_ptr);
         ok(ret == CODECVT_ok, "got %d.\n", ret);
         ok(str16_ptr - str16 == 1, "got %Id.\n", str16_ptr - str16);
         ok(!wcscmp(str16, L"\xdc12"), "got %s.\n", debugstr_w(str16));
@@ -2194,15 +2180,13 @@ void test_codecvt_char16(void)
         strcpy(str, "\xf0\x92\x80\x92");
         memset(&state, 0, sizeof(state));
         memset(str16, 0, sizeof(str16));
-        ret = (int)call_func8(p_codecvt_char16_do_in, &this, &state, str, str + 4, (const char **)&str_ptr,
-                str16, str16 + 1, &str16_ptr);
+        ret = (int)call_func8(p_codecvt_char16_do_in, this, &state, str, str + 4, (const char **)&str_ptr, str16, str16 + 1, &str16_ptr);
         ok(ret == CODECVT_ok, "got %d.\n", ret);
         ok(str16_ptr - str16 == 1, "got %Id.\n", str16_ptr - str16);
         ok(!wcscmp(str16, L"\xd808"), "got %s.\n", debugstr_w(str16));
         ok(str_ptr - str == 3, "got %Id.\n", str_ptr - str);
         ok(state.wchar == 0xdc00, "got %#x.\n", state.wchar);
-        ret = (int)call_func8(p_codecvt_char16_do_in, &this, &state, str + 3, str + 4, (const char **)&str_ptr,
-                str16, str16 + 1, &str16_ptr);
+        ret = (int)call_func8(p_codecvt_char16_do_in, this, &state, str + 3, str + 4, (const char **)&str_ptr, str16, str16 + 1, &str16_ptr);
         ok(ret == CODECVT_ok, "got %d.\n", ret);
         ok(str16_ptr - str16 == 1, "got %Id.\n", str16_ptr - str16);
         ok(!wcscmp(str16, L"\xdc12"), "got %s.\n", debugstr_w(str16));
@@ -2212,8 +2196,7 @@ void test_codecvt_char16(void)
         strcpy(str, "\xe0\xa1\x93");
         memset(&state, 0, sizeof(state));
         memset(str16, 0, sizeof(str16));
-        ret = (int)call_func8(p_codecvt_char16_do_in, &this, &state, str, str + 3, (const char **)&str_ptr,
-                str16, str16 + 1, &str16_ptr);
+        ret = (int)call_func8(p_codecvt_char16_do_in, this, &state, str, str + 3, (const char **)&str_ptr, str16, str16 + 1, &str16_ptr);
         ok(ret == CODECVT_ok, "got %d.\n", ret);
         ok(str16_ptr - str16 == 1, "got %Id.\n", str16_ptr - str16);
         ok(!wcscmp(str16, L"\x0853"), "got %s.\n", debugstr_w(str16));
@@ -2223,8 +2206,7 @@ void test_codecvt_char16(void)
         strcpy(str, "\xe0\xa1\x93");
         memset(&state, 0, sizeof(state));
         memset(str16, 0, sizeof(str16));
-        ret = (int)call_func8(p_codecvt_char16_do_in, &this, &state, str, str + 3, (const char **)&str_ptr,
-                str16, str16, &str16_ptr);
+        ret = (int)call_func8(p_codecvt_char16_do_in, this, &state, str, str + 3, (const char **)&str_ptr, str16, str16, &str16_ptr);
         ok(ret == CODECVT_partial, "got %d.\n", ret);
         ok(str16_ptr - str16 == 0, "got %Id.\n", str16_ptr - str16);
         ok(str_ptr - str == 0, "got %Id.\n", str_ptr - str);
@@ -2233,8 +2215,7 @@ void test_codecvt_char16(void)
         strcpy(str, "\xe0\xa1\x93");
         memset(&state, 0, sizeof(state));
         memset(str16, 0, sizeof(str16));
-        ret = (int)call_func8(p_codecvt_char16_do_in, &this, &state, str, str + 2, (const char **)&str_ptr,
-                str16, str16 + 2, &str16_ptr);
+        ret = (int)call_func8(p_codecvt_char16_do_in, this, &state, str, str + 2, (const char **)&str_ptr, str16, str16 + 2, &str16_ptr);
         ok(ret == CODECVT_partial, "got %d.\n", ret);
         ok(str16_ptr - str16 == 0, "got %Id.\n", str16_ptr - str16);
         ok(str_ptr - str == 0, "got %Id.\n", str_ptr - str);
@@ -2243,8 +2224,7 @@ void test_codecvt_char16(void)
         strcpy(str, "\xf0\xff\xff\xff");
         memset(&state, 0, sizeof(state));
         memset(str16, 0, sizeof(str16));
-        ret = (int)call_func8(p_codecvt_char16_do_in, &this, &state, str, str + 2, (const char **)&str_ptr,
-                str16, str16 + 4, &str16_ptr);
+        ret = (int)call_func8(p_codecvt_char16_do_in, this, &state, str, str + 2, (const char **)&str_ptr, str16, str16 + 4, &str16_ptr);
         ok(ret == CODECVT_partial, "got %d.\n", ret);
         ok(str16_ptr - str16 == 0, "got %Id.\n", str16_ptr - str16);
         ok(str_ptr - str == 0, "got %Id.\n", str_ptr - str);
@@ -2253,8 +2233,7 @@ void test_codecvt_char16(void)
         strcpy(str, "\xf0\xff\xff\xff");
         memset(&state, 0, sizeof(state));
         memset(str16, 0, sizeof(str16));
-        ret = (int)call_func8(p_codecvt_char16_do_in, &this, &state, str, str + 3, (const char **)&str_ptr,
-                str16, str16 + 4, &str16_ptr);
+        ret = (int)call_func8(p_codecvt_char16_do_in, this, &state, str, str + 3, (const char **)&str_ptr, str16, str16 + 4, &str16_ptr);
         ok(ret == CODECVT_error, "got %d.\n", ret);
         ok(str16_ptr - str16 == 0, "got %Id.\n", str16_ptr - str16);
         ok(str_ptr - str == 1, "got %Id.\n", str_ptr - str);
@@ -2264,8 +2243,7 @@ void test_codecvt_char16(void)
 
         memset(&state, 0, sizeof(state));
         memset(str16, 0, sizeof(str16));
-        ret = (int)call_func8(p_codecvt_char16_do_in, &this, &state, str, str + 4, (const char **)&str_ptr,
-                str16, str16 + 2, &str16_ptr);
+        ret = (int)call_func8(p_codecvt_char16_do_in, this, &state, str, str + 4, (const char **)&str_ptr, str16, str16 + 2, &str16_ptr);
         ok(ret == CODECVT_ok, "got %d.\n", ret);
         ok(str16_ptr - str16 == 1, "got %Id.\n", str16_ptr - str16);
         ok(!wcscmp(str16, L"\x2012"), "got %s.\n", debugstr_w(str16));
@@ -2275,8 +2253,7 @@ void test_codecvt_char16(void)
         strcpy(str, "\xf0\xff\xff\xff");
         memset(&state, 0, sizeof(state));
         memset(str16, 0, sizeof(str16));
-        ret = (int)call_func8(p_codecvt_char16_do_in, &this, &state, str, str + 4, (const char **)&str_ptr,
-                str16, str16 + 4, &str16_ptr);
+        ret = (int)call_func8(p_codecvt_char16_do_in, this, &state, str, str + 4, (const char **)&str_ptr, str16, str16 + 4, &str16_ptr);
         ok(ret == CODECVT_error, "got %d.\n", ret);
         ok(str16_ptr - str16 == 0, "got %Id.\n", str16_ptr - str16);
         ok(str_ptr - str == 1, "got %Id.\n", str_ptr - str);
@@ -2285,8 +2262,7 @@ void test_codecvt_char16(void)
         strcpy(str, "\xed\xa0\x80");
         memset(&state, 0, sizeof(state));
         memset(str16, 0, sizeof(str16));
-        ret = (int)call_func8(p_codecvt_char16_do_in, &this, &state, str, str + 3, (const char **)&str_ptr,
-                str16, str16 + 4, &str16_ptr);
+        ret = (int)call_func8(p_codecvt_char16_do_in, this, &state, str, str + 3, (const char **)&str_ptr, str16, str16 + 4, &str16_ptr);
         ok(ret == CODECVT_ok, "got %d.\n", ret);
         ok(str16_ptr - str16 == 1, "got %Id.\n", str16_ptr - str16);
         ok(!wcscmp(str16, L"\xd800"), "got %s.\n", debugstr_w(str16));
@@ -2302,43 +2278,35 @@ void test_codecvt_char16(void)
             memset(&state, 0, sizeof(state));
             if (test_flags[j] & generate_header)
             {
-                ret = (int)call_func8(p_codecvt_char16_do_out, &this, &state, str16, str16 + wlen,
-                        (const char16_t **)&str16_ptr, str, str + len + 3, &str_ptr);
+                ret = (int)call_func8(p_codecvt_char16_do_out, this, &state, str16, str16 + wlen, (const char16_t **)&str16_ptr, str, str + len + 3, &str_ptr);
                 ok(ret == CODECVT_ok, "got %d.\n", ret);
                 ok(str16_ptr - str16 == wlen, "got %Id, expected %u.\n", str16_ptr - str16, wlen);
                 ok(str_ptr - str == len + 3, "got %Id, expected %u.\n", str_ptr - str, len + 3);
                 memcpy(expect_str, bom_header, sizeof(bom_header));
                 strcpy(expect_str + sizeof(bom_header), tests[i].str);
-                ok(!strncmp(str, expect_str, len + 3), "got %s, expected %s.\n", debugstr_an(str, len),
-                        debugstr_an(expect_str, len + 3));
+                ok(!strncmp(str, expect_str, len + 3), "got %s, expected %s.\n", debugstr_an(str, len), debugstr_an(expect_str, len + 3));
 
                 memset(&state, 0, sizeof(state));
-                ret = (int)call_func8(p_codecvt_char16_do_out, &this, &state, str16, str16 + wlen,
-                        (const char16_t **)&str16_ptr, str, str + 2, &str_ptr);
+                ret = (int)call_func8(p_codecvt_char16_do_out, this, &state, str16, str16 + wlen, (const char16_t **)&str16_ptr, str, str + 2, &str_ptr);
                 ok(ret == CODECVT_partial, "got %d.\n", ret);
                 ok(str16_ptr - str16 == 0, "got %Id, expected %u.\n", str16_ptr - str16, 0);
                 ok(str_ptr - str == 0, "got %Id, expected %u.\n", str_ptr - str, 0);
             }
             else
             {
-                ret = (int)call_func8(p_codecvt_char16_do_out, &this, &state, str16, str16 + wlen,
-                        (const char16_t **)&str16_ptr, str, str + len, &str_ptr);
+                ret = (int)call_func8(p_codecvt_char16_do_out, this, &state, str16, str16 + wlen, (const char16_t **)&str16_ptr, str, str + len, &str_ptr);
                 ok(ret == CODECVT_ok, "got %d.\n", ret);
                 ok(str16_ptr - str16 == wlen, "got %Id, expected %u.\n", str16_ptr - str16, wlen);
                 ok(str_ptr - str == len, "got %Id, expected %u.\n", str_ptr - str, len);
-                ok(!strncmp(str, tests[i].str, len), "got %s, expected %s.\n",
-                        debugstr_an(str, len), debugstr_an(tests[i].str, len));
+                ok(!strncmp(str, tests[i].str, len), "got %s, expected %s.\n", debugstr_an(str, len), debugstr_an(tests[i].str, len));
 
-                ret = (int)call_func8(p_codecvt_char16_do_out, &this, &state, str16, str16 + wlen,
-                        (const char16_t **)&str16_ptr, str, str + len - 1, &str_ptr);
+                ret = (int)call_func8(p_codecvt_char16_do_out, this, &state, str16, str16 + wlen, (const char16_t **)&str16_ptr, str, str + len - 1, &str_ptr);
                 if (tests[i].short_output)
                 {
                     ok(ret == CODECVT_ok, "got %d.\n", ret);
                     ok(str16_ptr - str16 == wlen - 1, "got %Id, expected %u.\n", str16_ptr - str16, wlen - 1);
-                    ok(str_ptr - str == len - tests[i].short_output, "got %Id, expected %u.\n",
-                            str_ptr - str, len - tests[i].short_output);
-                    ok(!strncmp(str, tests[i].str, len - 1), "got %s, expected %s.\n",
-                            debugstr_an(str, len - 1), debugstr_an(tests[i].str, len - 1));
+                    ok(str_ptr - str == len - tests[i].short_output, "got %Id, expected %u.\n", str_ptr - str, len - tests[i].short_output);
+                    ok(!strncmp(str, tests[i].str, len - 1), "got %s, expected %s.\n", debugstr_an(str, len - 1), debugstr_an(tests[i].str, len - 1));
                 }
                 else
                 {
@@ -2350,8 +2318,7 @@ void test_codecvt_char16(void)
             strcpy(str, tests[i].str);
             memset(&state, 0, sizeof(state));
 
-            ret = (int)call_func8(p_codecvt_char16_do_in, &this, &state, str, str + len, (const char **)&str_ptr,
-                    str16, str16 + wlen + 10, &str16_ptr);
+            ret = (int)call_func8(p_codecvt_char16_do_in, this, &state, str, str + len, (const char **)&str_ptr, str16, str16 + wlen + 10, &str16_ptr);
             if (test_flags[j] & consume_header && str_has_bom_header(str))
             {
                 if (strlen(str) == sizeof(bom_header))
@@ -2374,13 +2341,12 @@ void test_codecvt_char16(void)
                 ok(ret == CODECVT_ok, "got %d.\n", ret);
                 ok(str_ptr - str == len, "got %Id, expected %u.\n", str_ptr - str, len);
                 ok(str16_ptr - str16 == wlen, "got %Id, expected %u.\n", str16_ptr - str16, wlen);
-                ok(!wcsncmp(str16, tests[i].wstr, wlen), "got %s, expected %s.\n",
-                        debugstr_wn(str16, wlen), debugstr_wn(tests[i].wstr, wlen));
+                ok(!wcsncmp(str16, tests[i].wstr, wlen), "got %s, expected %s.\n", debugstr_wn(str16, wlen), debugstr_wn(tests[i].wstr, wlen));
             }
 
             winetest_pop_context();
         }
-        call_func1(p_codecvt_char16_dtor, &this);
+        call_func1(p_codecvt_char16_dtor, this);
         winetest_pop_context();
     }
 }
@@ -2467,21 +2433,6 @@ static void test_thread_library_reference(void)
     CloseHandle(detach_event);
 }
 
-static void test_exception_pointer(void)
-{
-    exception_ptr ptr1, ptr2;
-
-    ptr1.rec = (void *)1;
-    ptr1.ref = (void *)2;
-    ptr2.rec = (void *)3;
-    ptr2.ref = (void *)4;
-    p___ExceptionPtrSwap(&ptr1, &ptr2);
-    ok(ptr1.rec == (void *)3, "ptr1.rec = %p\n", ptr1.rec);
-    ok(ptr1.ref == (void *)4, "ptr1.ref = %p\n", ptr1.ref);
-    ok(ptr2.rec == (void *)1, "ptr2.rec = %p\n", ptr2.rec);
-    ok(ptr2.ref == (void *)2, "ptr2.ref = %p\n", ptr2.ref);
-}
-
 START_TEST(msvcp140)
 {
     if(!init()) return;
@@ -2513,6 +2464,5 @@ START_TEST(msvcp140)
     test__Fiopen();
     test_codecvt_char16();
     test_thread_library_reference();
-    test_exception_pointer();
     FreeLibrary(msvcp);
 }

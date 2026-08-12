@@ -24,6 +24,7 @@
  */
 
 #include <stdarg.h>
+#include <math.h>
 
 #define COBJMACROS
 #include "windef.h"
@@ -52,12 +53,6 @@ static DWORD speaker_config_to_channel_mask(DWORD speaker_config)
 
         case DSSPEAKER_5POINT1_BACK:
             return SPEAKER_FRONT_LEFT | SPEAKER_FRONT_RIGHT | SPEAKER_FRONT_CENTER | SPEAKER_LOW_FREQUENCY | SPEAKER_BACK_LEFT | SPEAKER_BACK_RIGHT;
-
-        case DSSPEAKER_7POINT1_SURROUND:
-            return KSAUDIO_SPEAKER_5POINT1 | SPEAKER_SIDE_LEFT | SPEAKER_SIDE_RIGHT;
-
-        case DSSPEAKER_7POINT1_WIDE:
-            return KSAUDIO_SPEAKER_5POINT1 | SPEAKER_FRONT_LEFT_OF_CENTER | SPEAKER_FRONT_RIGHT_OF_CENTER;
     }
 
     WARN("unknown speaker_config %lu\n", speaker_config);
@@ -99,11 +94,7 @@ static DWORD DSOUND_FindSpeakerConfig(IMMDevice *mmdevice, int channels)
     PropVariantClear(&pv);
     IPropertyStore_Release(store);
 
-    if ((channels >= 8 || channels == 0) && (phys_speakers & KSAUDIO_SPEAKER_7POINT1_SURROUND) == KSAUDIO_SPEAKER_7POINT1_SURROUND)
-        return DSSPEAKER_7POINT1_SURROUND;
-    else if ((channels >= 8 || channels == 0) && (phys_speakers & KSAUDIO_SPEAKER_7POINT1) == KSAUDIO_SPEAKER_7POINT1)
-        return DSSPEAKER_7POINT1_WIDE;
-    else if ((channels >= 6 || channels == 0) && (phys_speakers & KSAUDIO_SPEAKER_5POINT1) == KSAUDIO_SPEAKER_5POINT1)
+    if ((channels >= 6 || channels == 0) && (phys_speakers & KSAUDIO_SPEAKER_5POINT1) == KSAUDIO_SPEAKER_5POINT1)
         return DSSPEAKER_5POINT1_BACK;
     else if ((channels >= 6 || channels == 0) && (phys_speakers & KSAUDIO_SPEAKER_5POINT1_SURROUND) == KSAUDIO_SPEAKER_5POINT1_SURROUND)
         return DSSPEAKER_5POINT1_SURROUND;
@@ -117,38 +108,121 @@ static DWORD DSOUND_FindSpeakerConfig(IMMDevice *mmdevice, int channels)
     return def;
 }
 
+static void DSOUND_ParseSpeakerConfig(DirectSoundDevice *device)
+{
+    switch (DSSPEAKER_CONFIG(device->speaker_config)) {
+        case DSSPEAKER_MONO:
+            device->speaker_angles[0] = M_PI/180.0f * 0.0f;
+            device->speaker_num[0] = 0;
+            device->num_speakers = 1;
+            device->lfe_channel = -1;
+        break;
+
+        case DSSPEAKER_STEREO:
+        case DSSPEAKER_HEADPHONE:
+            device->speaker_angles[0] = M_PI/180.0f * -90.0f;
+            device->speaker_angles[1] = M_PI/180.0f *  90.0f;
+            device->speaker_num[0] = 0; /* Left */
+            device->speaker_num[1] = 1; /* Right */
+            device->num_speakers = 2;
+            device->lfe_channel = -1;
+        break;
+
+        case DSSPEAKER_QUAD:
+            device->speaker_angles[0] = M_PI/180.0f * -135.0f;
+            device->speaker_angles[1] = M_PI/180.0f *  -45.0f;
+            device->speaker_angles[2] = M_PI/180.0f *   45.0f;
+            device->speaker_angles[3] = M_PI/180.0f *  135.0f;
+            device->speaker_num[0] = 2; /* Rear left */
+            device->speaker_num[1] = 0; /* Front left */
+            device->speaker_num[2] = 1; /* Front right */
+            device->speaker_num[3] = 3; /* Rear right */
+            device->num_speakers = 4;
+            device->lfe_channel = -1;
+        break;
+
+        case DSSPEAKER_5POINT1_BACK:
+            device->speaker_angles[0] = M_PI/180.0f * -135.0f;
+            device->speaker_angles[1] = M_PI/180.0f *  -45.0f;
+            device->speaker_angles[2] = M_PI/180.0f *    0.0f;
+            device->speaker_angles[3] = M_PI/180.0f *   45.0f;
+            device->speaker_angles[4] = M_PI/180.0f *  135.0f;
+            device->speaker_angles[5] = 9999.0f;
+            device->speaker_num[0] = 4; /* Rear left */
+            device->speaker_num[1] = 0; /* Front left */
+            device->speaker_num[2] = 2; /* Front centre */
+            device->speaker_num[3] = 1; /* Front right */
+            device->speaker_num[4] = 5; /* Rear right */
+            device->speaker_num[5] = 3; /* LFE */
+            device->num_speakers = 6;
+            device->lfe_channel = 3;
+        break;
+
+        case DSSPEAKER_5POINT1_SURROUND:
+            device->speaker_angles[0] = M_PI/180.0f *  -90.0f;
+            device->speaker_angles[1] = M_PI/180.0f *  -30.0f;
+            device->speaker_angles[2] = M_PI/180.0f *    0.0f;
+            device->speaker_angles[3] = M_PI/180.0f *   30.0f;
+            device->speaker_angles[4] = M_PI/180.0f *   90.0f;
+            device->speaker_angles[5] = 9999.0f;
+            device->speaker_num[0] = 4; /* Rear left */
+            device->speaker_num[1] = 0; /* Front left */
+            device->speaker_num[2] = 2; /* Front centre */
+            device->speaker_num[3] = 1; /* Front right */
+            device->speaker_num[4] = 5; /* Rear right */
+            device->speaker_num[5] = 3; /* LFE */
+            device->num_speakers = 6;
+            device->lfe_channel = 3;
+        break;
+
+        default:
+            WARN("unknown speaker_config %lu\n", device->speaker_config);
+    }
+}
+
 static HRESULT DSOUND_WaveFormat(DirectSoundDevice *device, IAudioClient *client,
 				 BOOL forcewave, WAVEFORMATEX **wfx)
 {
+    WAVEFORMATEXTENSIBLE *retwfe = NULL;
     WAVEFORMATEX *w;
     HRESULT hr;
 
     if (!forcewave) {
-        WAVEFORMATEXTENSIBLE *mixwfe, wfe;
-
+        WAVEFORMATEXTENSIBLE *mixwfe;
         hr = IAudioClient_GetMixFormat(client, (WAVEFORMATEX**)&mixwfe);
+
         if (FAILED(hr))
             return hr;
 
-        wfe = *mixwfe;
-        CoTaskMemFree(mixwfe);
-
-        wfe.Format.wFormatTag = WAVE_FORMAT_EXTENSIBLE;
-        wfe.SubFormat = KSDATAFORMAT_SUBTYPE_IEEE_FLOAT;
-        wfe.Samples.wValidBitsPerSample = wfe.Format.wBitsPerSample = 32;
-
-        if (wfe.Format.nChannels < device->num_speakers) {
-            device->speaker_config = DSOUND_FindSpeakerConfig(device->mmdevice, wfe.Format.nChannels);
+        if (device->num_speakers == 0 || mixwfe->Format.nChannels < device->num_speakers) {
+            device->speaker_config = DSOUND_FindSpeakerConfig(device->mmdevice, mixwfe->Format.nChannels);
             DSOUND_ParseSpeakerConfig(device);
-        } else if (wfe.Format.nChannels > device->num_speakers) {
-            wfe.Format.nChannels = device->num_speakers;
-            wfe.dwChannelMask = speaker_config_to_channel_mask(device->speaker_config);
+        } else if (mixwfe->Format.nChannels > device->num_speakers) {
+            mixwfe->Format.nChannels = device->num_speakers;
+            mixwfe->Format.nBlockAlign = mixwfe->Format.nChannels * mixwfe->Format.wBitsPerSample / 8;
+            mixwfe->Format.nAvgBytesPerSec = mixwfe->Format.nSamplesPerSec * mixwfe->Format.nBlockAlign;
+            mixwfe->dwChannelMask = speaker_config_to_channel_mask(device->speaker_config);
         }
 
-        wfe.Format.nBlockAlign = wfe.Format.nChannels * wfe.Format.wBitsPerSample / 8;
-        wfe.Format.nAvgBytesPerSec = wfe.Format.nSamplesPerSec * wfe.Format.nBlockAlign;
+        if (!IsEqualGUID(&mixwfe->SubFormat, &KSDATAFORMAT_SUBTYPE_IEEE_FLOAT)) {
+            WAVEFORMATEXTENSIBLE testwfe = *mixwfe;
 
-        w = DSOUND_CopyFormat(&wfe.Format);
+            testwfe.SubFormat = KSDATAFORMAT_SUBTYPE_IEEE_FLOAT;
+            testwfe.Samples.wValidBitsPerSample = testwfe.Format.wBitsPerSample = 32;
+            testwfe.Format.nBlockAlign = testwfe.Format.nChannels * testwfe.Format.wBitsPerSample / 8;
+            testwfe.Format.nAvgBytesPerSec = testwfe.Format.nSamplesPerSec * testwfe.Format.nBlockAlign;
+
+            if (FAILED(IAudioClient_IsFormatSupported(client, AUDCLNT_SHAREMODE_SHARED, &testwfe.Format, (WAVEFORMATEX**)&retwfe)))
+                w = DSOUND_CopyFormat(&mixwfe->Format);
+            else if (retwfe)
+                w = DSOUND_CopyFormat(&retwfe->Format);
+            else
+                w = DSOUND_CopyFormat(&testwfe.Format);
+            CoTaskMemFree(retwfe);
+            retwfe = NULL;
+        } else
+            w = DSOUND_CopyFormat(&mixwfe->Format);
+        CoTaskMemFree(mixwfe);
     } else if (device->primary_pwfx->wFormatTag == WAVE_FORMAT_PCM ||
                device->primary_pwfx->wFormatTag == WAVE_FORMAT_IEEE_FLOAT) {
         WAVEFORMATEX *wi = device->primary_pwfx;
@@ -179,6 +253,16 @@ static HRESULT DSOUND_WaveFormat(DirectSoundDevice *device, IAudioClient *client
     if (!w)
         return DSERR_OUTOFMEMORY;
 
+    hr = IAudioClient_IsFormatSupported(client, AUDCLNT_SHAREMODE_SHARED, w, (WAVEFORMATEX**)&retwfe);
+    if (retwfe) {
+        memcpy(w, retwfe, sizeof(WAVEFORMATEX) + retwfe->Format.cbSize);
+        CoTaskMemFree(retwfe);
+    }
+    if (FAILED(hr)) {
+        WARN("IsFormatSupported failed: %08lx\n", hr);
+        free(w);
+        return hr;
+    }
     *wfx = w;
     return S_OK;
 }
@@ -295,8 +379,7 @@ HRESULT DSOUND_ReopenDevice(DirectSoundDevice *device, BOOL forcewave)
 
     hres = IAudioClient_Initialize(client,
             AUDCLNT_SHAREMODE_SHARED, AUDCLNT_STREAMFLAGS_NOPERSIST |
-            AUDCLNT_STREAMFLAGS_EVENTCALLBACK | AUDCLNT_STREAMFLAGS_AUTOCONVERTPCM,
-            800000, 0, wfx, NULL);
+            AUDCLNT_STREAMFLAGS_EVENTCALLBACK, 800000, 0, wfx, NULL);
     if(FAILED(hres)){
         IAudioClient_Release(client);
         ERR("Initialize failed: %08lx\n", hres);
@@ -735,7 +818,7 @@ static HRESULT WINAPI PrimaryBufferImpl_GetCurrentPosition(IDirectSoundBuffer8 *
 	LeaveCriticalSection(&(device->mixlock));
 	/* **** */
 
-	TRACE("playpos = %ld, writepos = %ld (%p, time=%lu)\n", playpos?*playpos:0, writepos?*writepos:0, device, GetTickCount());
+	TRACE("playpos = %ld, writepos = %ld (%p, time=%ld)\n", playpos?*playpos:0, writepos?*writepos:0, device, GetTickCount());
 	return DS_OK;
 }
 
@@ -799,7 +882,7 @@ static HRESULT WINAPI PrimaryBufferImpl_Lock(IDirectSoundBuffer8 *iface, DWORD w
 	HRESULT hres;
         IDirectSoundBufferImpl *This = impl_from_IDirectSoundBuffer8(iface);
         DirectSoundDevice *device = This->device;
-	TRACE("(%p,%ld,%ld,%p,%p,%p,%p,0x%08lx) at %lu\n",
+	TRACE("(%p,%ld,%ld,%p,%p,%p,%p,0x%08lx) at %ld\n",
 		iface,
 		writecursor,
 		writebytes,

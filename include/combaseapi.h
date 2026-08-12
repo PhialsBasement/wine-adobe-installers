@@ -37,10 +37,6 @@
 extern "C" {
 #endif
 
-#define CLSCTX_ALL    (CLSCTX_INPROC_SERVER | CLSCTX_INPROC_HANDLER | CLSCTX_LOCAL_SERVER | CLSCTX_REMOTE_SERVER)
-#define CLSCTX_INPROC (CLSCTX_INPROC_SERVER | CLSCTX_INPROC_HANDLER)
-#define CLSCTX_SERVER (CLSCTX_INPROC_SERVER | CLSCTX_LOCAL_SERVER | CLSCTX_REMOTE_SERVER)
-
 typedef struct tagServerInformation
 {
     DWORD   dwServerPid;
@@ -55,17 +51,7 @@ enum AgileReferenceOptions
 };
 
 HRESULT WINAPI CoDecodeProxy(DWORD client_pid, UINT64 proxy_addr, ServerInformation *server_info);
-HRESULT WINAPI CoRegisterActivationFilter(IActivationFilter *filter);
 HRESULT WINAPI RoGetAgileReference(enum AgileReferenceOptions options, REFIID riid, IUnknown *obj, IAgileReference **agile_reference);
-
-#ifdef __cplusplus
-extern "C++" template<typename T> void **IID_PPV_ARGS_Helper(T **obj)
-{
-    (void)static_cast<IUnknown *>(*obj);
-    return reinterpret_cast<void **>(obj);
-}
-#define IID_PPV_ARGS(obj) __uuidof(**(obj)), IID_PPV_ARGS_Helper(obj)
-#endif /* __cplusplus */
 
 #ifdef __cplusplus
 }

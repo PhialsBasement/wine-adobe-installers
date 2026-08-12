@@ -79,7 +79,7 @@ static int full_numeric_leaf(struct full_value *fv, const unsigned char *leaf)
 
         case LF_USHORT:
             length += 2;
-            fv->v.i = *(const unsigned short*)leaf;
+            fv->v.i = *leaf;
             break;
 
         case LF_LONG:
@@ -676,21 +676,21 @@ static void do_field(const unsigned char* start, const unsigned char* end)
             printf("\t\tFriend function V1: '%s' type:%x\n",
                    p_string(&fieldtype->friendfcn_v1.p_name),
                    fieldtype->friendfcn_v1.type);
-            ptr += 2 + 2 + (1 + fieldtype->friendfcn_v1.p_name.namelen);
+            ptr += 2 + 2 + (1 + fieldtype->stmember_v2.p_name.namelen);
             break;
 
         case LF_FRIENDFCN_V2:
             printf("\t\tFriend function V2: '%s' type:%x\n",
                    p_string(&fieldtype->friendfcn_v2.p_name),
                    fieldtype->friendfcn_v2.type);
-            ptr += 2 + 2 + 4 + (1 + fieldtype->friendfcn_v2.p_name.namelen);
+            ptr += 2 + 2 + 4 + (1 + fieldtype->stmember_v2.p_name.namelen);
             break;
 
         case LF_FRIENDFCN_V3:
             printf("\t\tFriend function V3: '%s' type:%x\n",
                    fieldtype->friendfcn_v3.name,
                    fieldtype->friendfcn_v3.type);
-            ptr += 2 + 2 + 4 + (strlen(fieldtype->friendfcn_v3.name) + 1);
+            ptr += 2 + 2 + 4 + (strlen(fieldtype->stmember_v3.name) + 1);
             break;
 
         case LF_BCLASS_V1:
@@ -713,7 +713,7 @@ static void do_field(const unsigned char* start, const unsigned char* end)
         case LF_IVBCLASS_V1:
             leaf_len = numeric_leaf(&value, fieldtype->vbclass_v1.data);
             printf("\t\t%sirtual base class V1: type:%x (ptr:%x) attr:%s vbpoff:%d ",
-                   (fieldtype->generic.id == LF_VBCLASS_V1) ? "V" : "Indirect v",
+                   (fieldtype->generic.id == LF_VBCLASS_V2) ? "V" : "Indirect v",
                    fieldtype->vbclass_v1.btype, fieldtype->vbclass_v1.vbtype,
                    get_attr(fieldtype->vbclass_v1.attribute), value);
             ptr += 2 + 2 + 2 + 2 + leaf_len;
@@ -724,7 +724,7 @@ static void do_field(const unsigned char* start, const unsigned char* end)
 
         case LF_VBCLASS_V2:
         case LF_IVBCLASS_V2:
-            leaf_len = numeric_leaf(&value, fieldtype->vbclass_v2.data);
+            leaf_len = numeric_leaf(&value, fieldtype->vbclass_v1.data);
             printf("\t\t%sirtual base class V2: type:%x (ptr:%x) attr:%s vbpoff:%d ",
                    (fieldtype->generic.id == LF_VBCLASS_V2) ? "V" : "Indirect v",
                    fieldtype->vbclass_v2.btype, fieldtype->vbclass_v2.vbtype,
@@ -902,7 +902,7 @@ static void codeview_dump_one_type(unsigned curr_type, const union codeview_type
                str, type->struct_v3.n_element, get_property(type->struct_v3.property),
                type->struct_v3.fieldlist, type->struct_v3.derived,
                type->struct_v3.vshape, value);
-        if (type->struct_v3.property.has_decorated_name)
+        if (type->union_v3.property.has_decorated_name)
             printf("\t\tDecorated name:%s\n", str + strlen(str) + 1);
         break;
 
@@ -958,7 +958,7 @@ static void codeview_dump_one_type(unsigned curr_type, const union codeview_type
                type->enumeration_v3.fieldlist,
                type->enumeration_v3.count,
                get_property(type->enumeration_v3.property));
-        if (type->enumeration_v3.property.has_decorated_name)
+        if (type->union_v3.property.has_decorated_name)
             printf("\t\tDecorated name:%s\n", type->enumeration_v3.name + strlen(type->enumeration_v3.name) + 1);
         break;
 
@@ -990,7 +990,7 @@ static void codeview_dump_one_type(unsigned curr_type, const union codeview_type
     case LF_PROCEDURE_V2:
         printf("\t%x => Procedure V2 ret_type:%x callconv:%s attr:%s (#%u args_type:%x)\n",
                curr_type, type->procedure_v2.rvtype,
-               get_callconv(type->procedure_v2.callconv), get_funcattr(type->procedure_v2.funcattr),
+               get_callconv(type->procedure_v2.callconv), get_funcattr(type->procedure_v1.funcattr),
                type->procedure_v2.params, type->procedure_v2.arglist);
         break;
 
@@ -1009,19 +1009,13 @@ static void codeview_dump_one_type(unsigned curr_type, const union codeview_type
         break;
 
     case LF_MODIFIER_V1:
-        printf("\t%x => Modifier V1 type:%x modif:%x%s%s%s\n",
-               curr_type, type->modifier_v1.type, type->modifier_v1.attribute,
-               (type->modifier_v1.attribute & 1) ? "-const" : "",
-               (type->modifier_v1.attribute & 2) ? "-volatile" : "",
-               (type->modifier_v1.attribute & 4) ? "-unaligned" : "");
+        printf("\t%x => Modifier V1 type:%x modif:%x\n",
+               curr_type, type->modifier_v1.type, type->modifier_v1.attribute);
         break;
 
     case LF_MODIFIER_V2:
-        printf("\t%x => Modifier V2 type:%x modif:%x%s%s%s\n",
-               curr_type, type->modifier_v2.type, type->modifier_v2.attribute,
-               (type->modifier_v2.attribute & 1) ? "-const" : "",
-               (type->modifier_v2.attribute & 2) ? "-volatile" : "",
-               (type->modifier_v2.attribute & 4) ? "-unaligned" : "");
+        printf("\t%x => Modifier V2 type:%x modif:%x\n",
+               curr_type, type->modifier_v2.type, type->modifier_v2.attribute);
         break;
 
     case LF_METHODLIST_V1:
@@ -1186,7 +1180,7 @@ BOOL codeview_dump_types_from_offsets(const void* table, const DWORD* offsets, u
     return TRUE;
 }
 
-BOOL codeview_dump_types_from_block(const void* table, unsigned long len, unsigned int from, unsigned int to)
+BOOL codeview_dump_types_from_block(const void* table, unsigned long len)
 {
     unsigned int        curr_type = 0x1000;
     const unsigned char*ptr = table;
@@ -1195,8 +1189,7 @@ BOOL codeview_dump_types_from_block(const void* table, unsigned long len, unsign
     {
         const union codeview_type* type = (const union codeview_type*)ptr;
 
-        if (from <= curr_type && curr_type < to)
-            codeview_dump_one_type(curr_type, type);
+        codeview_dump_one_type(curr_type, type);
         curr_type++;
         ptr += type->generic.len + 2;
     }
@@ -1363,9 +1356,6 @@ BOOL codeview_dump_symbols(const void* root, unsigned long start, unsigned long 
     int          length;
     struct symbol_dumper sd;
 
-    if (start == sizeof(unsigned))
-        printf("        [header: %x]\n", *((unsigned*)root));
-
     init_symbol_dumper(&sd);
     /*
      * Loop over the different types of records and whenever we
@@ -1440,21 +1430,12 @@ BOOL codeview_dump_symbols(const void* root, unsigned long start, unsigned long 
 	case S_PROCREF:
 	case S_LPROCREF:
 	case S_TOKENREF:
-        case S_ANNOTATIONREF:
-            {
-                const char *kind;
-                switch (sym->generic.id)
-                {
-                case S_DATAREF:       kind = "Data";       break;
-                case S_PROCREF:       kind = "Proc";       break;
-                case S_LPROCREF:      kind = "LProc";      break;
-                case S_TOKENREF:      kind = "Token";      break;
-                case S_ANNOTATIONREF: kind = "Annotation"; break;
-                default:              kind = "----";       break;
-                }
-                printf("%sref V3 '%s' %04x:%08x name:%08x\n", kind, get_symbol_str(sym->refsym2_v3.name),
-                       sym->refsym2_v3.imod, sym->refsym2_v3.ibSym, sym->refsym2_v3.sumName);
-            }
+            printf("%sref V3 '%s' %04x:%08x name:%08x\n",
+                   sym->generic.id == S_DATAREF ? "Data" :
+                                      (sym->generic.id == S_PROCREF ? "Proc" :
+                                       (sym->generic.id == S_LPROCREF ? "Lproc" : "Token")),
+                   get_symbol_str(sym->refsym2_v3.name),
+                   sym->refsym2_v3.imod, sym->refsym2_v3.ibSym, sym->refsym2_v3.sumName);
 	    break;
 
         /*
@@ -2013,14 +1994,6 @@ BOOL codeview_dump_symbols(const void* root, unsigned long start, unsigned long 
             }
             break;
 
-        case S_ARMSWITCHTABLE:
-            printf("ARM switch table type=%u base=%04x:%08x branch=%04x:%08x table=%04x:%08x entries=#%u\n",
-                   sym->armswitchtable.switch_type,
-                   sym->armswitchtable.base_section, sym->armswitchtable.base_offset,
-                   sym->armswitchtable.branch_section, sym->armswitchtable.branch_offset,
-                   sym->armswitchtable.table_section, sym->armswitchtable.table_offset,
-                   sym->armswitchtable.number_entries);
-            break;
         default:
             printf("\n\t\t>>> Unsupported symbol-id %x sz=%d\n", sym->generic.id, sym->generic.len + 2);
             dump_data((const void*)sym, sym->generic.len + 2, "  ");

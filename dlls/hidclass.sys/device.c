@@ -122,7 +122,7 @@ void hid_queue_remove_pending_irps( struct hid_queue *queue )
 
     while ((irp = hid_queue_pop_irp( queue )))
     {
-        irp->IoStatus.Status = STATUS_DEVICE_NOT_CONNECTED;
+        irp->IoStatus.Status = STATUS_DELETE_PENDING;
         IoCompleteRequest( irp, IO_NO_INCREMENT );
     }
 }
@@ -163,7 +163,7 @@ static NTSTATUS hid_queue_push_irp( struct hid_queue *queue, IRP *irp )
     KeAcquireSpinLock( &queue->lock, &irql );
 
     IoSetCancelRoutine( irp, read_cancel_routine );
-    if (irp->Cancel && IoSetCancelRoutine( irp, NULL ))
+    if (irp->Cancel && !IoSetCancelRoutine( irp, NULL ))
     {
         /* IRP was canceled before we set cancel routine */
         InitializeListHead( &irp->Tail.Overlay.ListEntry );
@@ -221,6 +221,7 @@ static void hid_device_queue_input( struct phys_device *pdo, HID_XFER_PACKET *pa
     HIDP_COLLECTION_DESC *desc = pdo->collection_desc;
     ULONG size, report_len = polled ? packet->reportBufferLen : desc->InputLength;
     struct hid_report *last_report, *report;
+    BOOL steam_overlay_open = FALSE;
     struct hid_queue *queue;
     LIST_ENTRY completed, *entry;
     KIRQL irql;
@@ -228,7 +229,10 @@ static void hid_device_queue_input( struct phys_device *pdo, HID_XFER_PACKET *pa
 
     TRACE( "pdo %p, packet %p\n", pdo, packet );
 
-    if (IsEqualGUID( pdo->base.class_guid, &GUID_DEVINTERFACE_HID ))
+    if (WaitForSingleObject( pdo->base.steam_overlay_event, 0 ) == WAIT_OBJECT_0) /* steam overlay is open */
+        steam_overlay_open = TRUE;
+
+    if (IsEqualGUID( pdo->base.class_guid, &GUID_DEVINTERFACE_HID ) && !steam_overlay_open)
     {
         struct hid_packet *hid;
 
@@ -378,6 +382,8 @@ struct device_strings
 
 static const struct device_strings device_strings[] =
 {
+    /* CW-Bug-Id: #23185 Emulate Steam Input native hooks for native SDL */
+    { .id = L"VID_28DE&PID_11FF", .product = L"Controller (XBOX 360 For Windows)" },
     /* Microsoft controllers */
     { .id = L"VID_045E&PID_028E", .product = L"Controller (XBOX 360 For Windows)" },
     { .id = L"VID_045E&PID_028F", .product = L"Controller (XBOX 360 For Windows)" },
@@ -809,10 +815,5 @@ NTSTATUS WINAPI pdo_close( DEVICE_OBJECT *device, IRP *irp )
 
     irp->IoStatus.Status = STATUS_SUCCESS;
     IoCompleteRequest( irp, IO_NO_INCREMENT );
-    return STATUS_SUCCESS;
-}
-
-NTSTATUS WINAPI DriverEntry( DRIVER_OBJECT *driver, UNICODE_STRING *path )
-{
     return STATUS_SUCCESS;
 }

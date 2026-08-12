@@ -40,7 +40,6 @@ typedef enum {
     EVENTID_FOCUSOUT,
     EVENTID_HELP,
     EVENTID_INPUT,
-    EVENTID_INVALID,
     EVENTID_KEYDOWN,
     EVENTID_KEYPRESS,
     EVENTID_KEYUP,
@@ -111,6 +110,7 @@ HRESULT doc_init_events(HTMLDocumentNode*);
 void detach_events(HTMLDocumentNode *doc);
 HRESULT create_event_obj(DOMEvent*,HTMLDocumentNode*,IHTMLEventObj**);
 void bind_target_event(HTMLDocumentNode*,EventTarget*,const WCHAR*,IDispatch*);
+HRESULT set_node_event_handler_by_attr(HTMLDOMNode*,const WCHAR*,VARIANT*);
 HRESULT ensure_doc_nsevent_handler(HTMLDocumentNode*,nsIDOMNode*,eventid_t);
 
 void dispatch_event(EventTarget*,DOMEvent*);

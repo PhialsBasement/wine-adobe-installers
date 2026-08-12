@@ -23,6 +23,7 @@
 #include <stdio.h>
 
 #include "ntstatus.h"
+#define WIN32_NO_STATUS
 #include "windef.h"
 #include "winbase.h"
 #include "wincon.h"
@@ -341,7 +342,11 @@ DWORD WINAPI DECLSPEC_HOTPATCH SignalObjectAndWait( HANDLE signal, HANDLE wait,
                                                     DWORD timeout, BOOL alertable )
 {
     NTSTATUS status;
+#ifdef __i386__
+    DECLSPEC_ALIGN(4) LARGE_INTEGER time;
+#else
     LARGE_INTEGER time;
+#endif
 
     TRACE( "%p %p %ld %d\n", signal, wait, timeout, alertable );
 
@@ -394,7 +399,7 @@ BOOL WINAPI DECLSPEC_HOTPATCH UnregisterWaitEx( HANDLE handle, HANDLE event )
  */
 DWORD WINAPI DECLSPEC_HOTPATCH WaitForSingleObject( HANDLE handle, DWORD timeout )
 {
-    return WaitForSingleObjectEx( handle, timeout, FALSE );
+    return WaitForMultipleObjectsEx( 1, &handle, FALSE, timeout, FALSE );
 }
 
 
@@ -403,18 +408,7 @@ DWORD WINAPI DECLSPEC_HOTPATCH WaitForSingleObject( HANDLE handle, DWORD timeout
  */
 DWORD WINAPI DECLSPEC_HOTPATCH WaitForSingleObjectEx( HANDLE handle, DWORD timeout, BOOL alertable )
 {
-    NTSTATUS status;
-    LARGE_INTEGER time;
-
-    status = NtWaitForSingleObject( normalize_std_handle( handle ), alertable,
-                                    get_nt_timeout( &time, timeout ) );
-
-    if (NT_ERROR(status))
-    {
-        SetLastError( RtlNtStatusToDosError(status) );
-        status = WAIT_FAILED;
-    }
-    return status;
+    return WaitForMultipleObjectsEx( 1, &handle, FALSE, timeout, alertable );
 }
 
 
@@ -446,9 +440,9 @@ DWORD WINAPI DECLSPEC_HOTPATCH WaitForMultipleObjectsEx( DWORD count, const HAND
     }
     for (i = 0; i < count; i++) hloc[i] = normalize_std_handle( handles[i] );
 
-    status = NtWaitForMultipleObjects( count, hloc, wait_all ? WaitAll : WaitAny, alertable,
+    status = NtWaitForMultipleObjects( count, hloc, !wait_all, alertable,
                                        get_nt_timeout( &time, timeout ) );
-    if (NT_ERROR(status))
+    if (HIWORD(status))  /* is it an error code? */
     {
         SetLastError( RtlNtStatusToDosError(status) );
         status = WAIT_FAILED;
@@ -765,7 +759,7 @@ HANDLE WINAPI DECLSPEC_HOTPATCH OpenMutexW( DWORD access, BOOL inherit, LPCWSTR 
 {
     HANDLE ret;
     UNICODE_STRING nameW;
-    OBJECT_ATTRIBUTES attr;
+    DECLSPEC_ALIGN(32) OBJECT_ATTRIBUTES attr;
 
     if (!is_version_nt()) access = MUTEX_ALL_ACCESS;
 
@@ -1085,35 +1079,6 @@ HANDLE WINAPI DECLSPEC_HOTPATCH CreateFileMappingW( HANDLE file, LPSECURITY_ATTR
     get_create_object_attributes( &attr, &nameW, sa, name );
 
     status = NtCreateSection( &ret, access, &attr, &size, protect, sec_type, file );
-    if (status == STATUS_OBJECT_NAME_EXISTS)
-        SetLastError( ERROR_ALREADY_EXISTS );
-    else
-        SetLastError( RtlNtStatusToDosError(status) );
-    return ret;
-}
-
-
-/***********************************************************************
- *             CreateFileMapping2   (kernelbase.@)
- */
-HANDLE WINAPI DECLSPEC_HOTPATCH CreateFileMapping2( HANDLE file, SECURITY_ATTRIBUTES *sa, ULONG access,
-                                                    ULONG protect, ULONG sec_type, ULONG64 max_size,
-                                                    const WCHAR *name, MEM_EXTENDED_PARAMETER *params,
-                                                    ULONG count )
-{
-    HANDLE ret;
-    NTSTATUS status;
-    LARGE_INTEGER size;
-    UNICODE_STRING nameW;
-    OBJECT_ATTRIBUTES attr;
-
-    if (!sec_type) sec_type = SEC_COMMIT;
-    size.QuadPart = max_size;
-    if (file == INVALID_HANDLE_VALUE) file = 0;
-
-    get_create_object_attributes( &attr, &nameW, sa, name );
-
-    status = NtCreateSectionEx( &ret, access, &attr, &size, protect, sec_type, file, params, count );
     if (status == STATUS_OBJECT_NAME_EXISTS)
         SetLastError( ERROR_ALREADY_EXISTS );
     else

@@ -37,11 +37,11 @@ static inline USHORT read_ushort_be(BYTE* data)
 
 static inline ULONG read_ulong_be(BYTE* data)
 {
-    return ((ULONG)data[0] << 24) | data[1] << 16 | data[2] << 8 | data[3];
+    return data[0] << 24 | data[1] << 16 | data[2] << 8 | data[3];
 }
 
-static HRESULT LoadTextMetadata(MetadataHandler *handler, IStream *stream, const GUID *preferred_vendor,
-    DWORD persist_options)
+static HRESULT LoadTextMetadata(IStream *stream, const GUID *preferred_vendor,
+    DWORD persist_options, MetadataItem **items, DWORD *item_count)
 {
     HRESULT hr;
     BYTE type[4];
@@ -92,9 +92,8 @@ static HRESULT LoadTextMetadata(MetadataHandler *handler, IStream *stream, const
     result[0].value.vt = VT_LPSTR;
     result[0].value.pszVal = value;
 
-    MetadataHandler_FreeItems(handler);
-    handler->items = result;
-    handler->item_count = 1;
+    *items = result;
+    *item_count = 1;
 
     free(data);
 
@@ -112,34 +111,15 @@ HRESULT PngTextReader_CreateInstance(REFIID iid, void** ppv)
     return MetadataReader_Create(&TextReader_Vtbl, iid, ppv);
 }
 
-static HRESULT create_gamma_item(ULONG gamma, MetadataItem **item)
-{
-    HRESULT hr;
-
-    if (!(*item = calloc(1, sizeof(**item))))
-        return E_OUTOFMEMORY;
-
-    hr = init_propvar_from_string(L"ImageGamma", &(*item)->id);
-    if (FAILED(hr))
-    {
-        free(*item);
-        return hr;
-    }
-
-    (*item)->value.vt = VT_UI4;
-    (*item)->value.ulVal = gamma;
-
-    return S_OK;
-}
-
-static HRESULT LoadGamaMetadata(MetadataHandler *handler, IStream *stream, const GUID *preferred_vendor,
-    DWORD persist_options)
+static HRESULT LoadGamaMetadata(IStream *stream, const GUID *preferred_vendor,
+    DWORD persist_options, MetadataItem **items, DWORD *item_count)
 {
     HRESULT hr;
     BYTE type[4];
     BYTE *data;
     ULONG data_size;
     ULONG gamma;
+    LPWSTR name;
     MetadataItem *result;
 
     hr = read_png_chunk(stream, type, &data, &data_size);
@@ -155,26 +135,26 @@ static HRESULT LoadGamaMetadata(MetadataHandler *handler, IStream *stream, const
 
     free(data);
 
-    if (FAILED(hr = create_gamma_item(gamma, &result)))
-        return hr;
+    result = calloc(1, sizeof(MetadataItem));
+    SHStrDupW(L"ImageGamma", &name);
+    if (!result || !name)
+    {
+        free(result);
+        CoTaskMemFree(name);
+        return E_OUTOFMEMORY;
+    }
 
-    MetadataHandler_FreeItems(handler);
-    handler->items = result;
-    handler->item_count = 1;
+    PropVariantInit(&result[0].schema);
+    PropVariantInit(&result[0].id);
+    PropVariantInit(&result[0].value);
 
-    return S_OK;
-}
+    result[0].id.vt = VT_LPWSTR;
+    result[0].id.pwszVal = name;
+    result[0].value.vt = VT_UI4;
+    result[0].value.ulVal = gamma;
 
-static HRESULT CreateGamaHandler(MetadataHandler *handler)
-{
-    MetadataItem *item;
-    HRESULT hr;
-
-    if (FAILED(hr = create_gamma_item(45455, &item)))
-        return hr;
-
-    handler->items = item;
-    handler->item_count = 1;
+    *items = result;
+    *item_count = 1;
 
     return S_OK;
 }
@@ -182,8 +162,7 @@ static HRESULT CreateGamaHandler(MetadataHandler *handler)
 static const MetadataHandlerVtbl GamaReader_Vtbl = {
     0,
     &CLSID_WICPngGamaMetadataReader,
-    LoadGamaMetadata,
-    CreateGamaHandler,
+    LoadGamaMetadata
 };
 
 HRESULT PngGamaReader_CreateInstance(REFIID iid, void** ppv)
@@ -191,10 +170,14 @@ HRESULT PngGamaReader_CreateInstance(REFIID iid, void** ppv)
     return MetadataReader_Create(&GamaReader_Vtbl, iid, ppv);
 }
 
-static HRESULT create_chrm_items(const ULONG *values, MetadataItem **ret)
+static HRESULT LoadChrmMetadata(IStream *stream, const GUID *preferred_vendor,
+    DWORD persist_options, MetadataItem **items, DWORD *item_count)
 {
-    static const WCHAR *names[8] =
-    {
+    HRESULT hr;
+    BYTE type[4];
+    BYTE *data;
+    ULONG data_size;
+    static const WCHAR names[8][12] = {
         L"WhitePointX",
         L"WhitePointY",
         L"RedX",
@@ -204,43 +187,8 @@ static HRESULT create_chrm_items(const ULONG *values, MetadataItem **ret)
         L"BlueX",
         L"BlueY",
     };
-    MetadataItem *items;
-    HRESULT hr = S_OK;
-
-    if (!(items = calloc(ARRAY_SIZE(names), sizeof(*items))))
-        return E_OUTOFMEMORY;
-
-    for (int i = 0; i < ARRAY_SIZE(names); ++i)
-    {
-        if (FAILED(hr = init_propvar_from_string(names[i], &items[i].id)))
-            break;
-
-        items[i].value.vt = VT_UI4;
-        items[i].value.ulVal = values[i];
-    }
-
-    if (FAILED(hr))
-    {
-        for (int i = 0; i < ARRAY_SIZE(names); ++i)
-            clear_metadata_item(&items[i]);
-        free(items);
-        items = NULL;
-    }
-
-    *ret = items;
-
-    return hr;
-}
-
-static HRESULT LoadChrmMetadata(MetadataHandler *handler, IStream *stream, const GUID *preferred_vendor,
-    DWORD persist_options)
-{
-    HRESULT hr;
-    BYTE type[4];
-    BYTE *data;
-    ULONG data_size;
+    LPWSTR dyn_names[8] = {0};
     MetadataItem *result;
-    ULONG values[8];
     int i;
 
     hr = read_png_chunk(stream, type, &data, &data_size);
@@ -252,32 +200,38 @@ static HRESULT LoadChrmMetadata(MetadataHandler *handler, IStream *stream, const
         return E_FAIL;
     }
 
-    for (i = 0; i < ARRAY_SIZE(values); ++i)
-        values[i] = read_ulong_be(&data[i*4]);
+    result = calloc(8, sizeof(MetadataItem));
+    for (i=0; i<8; i++)
+    {
+        SHStrDupW(names[i], &dyn_names[i]);
+        if (!dyn_names[i]) break;
+    }
+    if (!result || i < 8)
+    {
+        free(result);
+        for (i=0; i<8; i++)
+            CoTaskMemFree(dyn_names[i]);
+        free(data);
+        return E_OUTOFMEMORY;
+    }
+
+    for (i=0; i<8; i++)
+    {
+        PropVariantInit(&result[i].schema);
+
+        PropVariantInit(&result[i].id);
+        result[i].id.vt = VT_LPWSTR;
+        result[i].id.pwszVal = dyn_names[i];
+
+        PropVariantInit(&result[i].value);
+        result[i].value.vt = VT_UI4;
+        result[i].value.ulVal = read_ulong_be(&data[i*4]);
+    }
+
+    *items = result;
+    *item_count = 8;
 
     free(data);
-
-    if (FAILED(hr = create_chrm_items(values, &result)))
-        return hr;
-
-    MetadataHandler_FreeItems(handler);
-    handler->items = result;
-    handler->item_count = ARRAY_SIZE(values);
-
-    return S_OK;
-}
-
-static HRESULT CreateChrmHandler(MetadataHandler *handler)
-{
-    const ULONG values[8] = { 31270, 32900, 64000, 33000, 30000, 60000, 15000, 6000 };
-    MetadataItem *items;
-    HRESULT hr;
-
-    if (FAILED(hr = create_chrm_items(values, &items)))
-        return hr;
-
-    handler->items = items;
-    handler->item_count = ARRAY_SIZE(values);
 
     return S_OK;
 }
@@ -285,8 +239,7 @@ static HRESULT CreateChrmHandler(MetadataHandler *handler)
 static const MetadataHandlerVtbl ChrmReader_Vtbl = {
     0,
     &CLSID_WICPngChrmMetadataReader,
-    LoadChrmMetadata,
-    CreateChrmHandler,
+    LoadChrmMetadata
 };
 
 HRESULT PngChrmReader_CreateInstance(REFIID iid, void** ppv)
@@ -294,34 +247,14 @@ HRESULT PngChrmReader_CreateInstance(REFIID iid, void** ppv)
     return MetadataReader_Create(&ChrmReader_Vtbl, iid, ppv);
 }
 
-static HRESULT create_hist_item(USHORT *data, ULONG count, MetadataItem **item)
-{
-    HRESULT hr;
-
-    if (!(*item = calloc(1, sizeof(**item))))
-        return E_OUTOFMEMORY;
-
-    hr = init_propvar_from_string(L"Frequencies", &(*item)->id);
-    if (FAILED(hr))
-    {
-        free(*item);
-        return hr;
-    }
-
-    (*item)->value.vt = VT_UI2 | VT_VECTOR;
-    (*item)->value.caui.cElems = count;
-    (*item)->value.caui.pElems = data;
-
-    return S_OK;
-}
-
-static HRESULT LoadHistMetadata(MetadataHandler *handler, IStream *stream, const GUID *preferred_vendor,
-    DWORD persist_options)
+static HRESULT LoadHistMetadata(IStream *stream, const GUID *preferred_vendor,
+    DWORD persist_options, MetadataItem **items, DWORD *item_count)
 {
     HRESULT hr;
     BYTE type[4];
     BYTE *data;
     ULONG data_size, element_count, i;
+    LPWSTR name;
     MetadataItem *result;
     USHORT *elements;
 
@@ -340,29 +273,28 @@ static HRESULT LoadHistMetadata(MetadataHandler *handler, IStream *stream, const
 
     free(data);
 
-    if (FAILED(hr = create_hist_item(elements, element_count, &result)))
-    {
+    result = calloc(1, sizeof(MetadataItem));
+    SHStrDupW(L"Frequencies", &name);
+    if (!result || !name) {
+        free(result);
+        CoTaskMemFree(name);
         CoTaskMemFree(elements);
         return E_OUTOFMEMORY;
     }
 
-    MetadataHandler_FreeItems(handler);
-    handler->items = result;
-    handler->item_count = 1;
+    PropVariantInit(&result[0].schema);
+    PropVariantInit(&result[0].id);
+    PropVariantInit(&result[0].value);
 
-    return S_OK;
-}
+    result[0].id.vt = VT_LPWSTR;
+    result[0].id.pwszVal = name;
 
-static HRESULT CreateHistHandler(MetadataHandler *handler)
-{
-    MetadataItem *item;
-    HRESULT hr;
+    result[0].value.vt = VT_UI2|VT_VECTOR;
+    result[0].value.caui.cElems = element_count;
+    result[0].value.caui.pElems = elements;
 
-    if (FAILED(hr = create_hist_item(NULL, 0, &item)))
-        return hr;
-
-    handler->items = item;
-    handler->item_count = 1;
+    *items = result;
+    *item_count = 1;
 
     return S_OK;
 }
@@ -370,8 +302,7 @@ static HRESULT CreateHistHandler(MetadataHandler *handler)
 static const MetadataHandlerVtbl HistReader_Vtbl = {
     0,
     &CLSID_WICPngHistMetadataReader,
-    LoadHistMetadata,
-    CreateHistHandler,
+    LoadHistMetadata
 };
 
 HRESULT PngHistReader_CreateInstance(REFIID iid, void** ppv)
@@ -379,18 +310,14 @@ HRESULT PngHistReader_CreateInstance(REFIID iid, void** ppv)
     return MetadataReader_Create(&HistReader_Vtbl, iid, ppv);
 }
 
-struct time_data
+static HRESULT LoadTimeMetadata(IStream *stream, const GUID *preferred_vendor,
+    DWORD persist_options, MetadataItem **items, DWORD *item_count)
 {
-    USHORT year;
-    BYTE month;
-    BYTE day;
-    BYTE hour;
-    BYTE minute;
-    BYTE second;
-};
-
-static HRESULT create_time_items(const struct time_data *data, MetadataItem **ret)
-{
+    HRESULT hr;
+    BYTE type[4];
+    BYTE *data;
+    ULONG data_size, i;
+    MetadataItem *result;
     static const WCHAR *names[6] =
     {
         L"Year",
@@ -400,56 +327,8 @@ static HRESULT create_time_items(const struct time_data *data, MetadataItem **re
         L"Minute",
         L"Second",
     };
-    MetadataItem *items;
-    HRESULT hr = S_OK;
+    LPWSTR id_values[6] = {0};
 
-    if (!(items = calloc(ARRAY_SIZE(names), sizeof(*items))))
-        return E_OUTOFMEMORY;
-
-    for (int i = 0; i < ARRAY_SIZE(names); ++i)
-    {
-        if (FAILED(hr = init_propvar_from_string(names[i], &items[i].id)))
-            break;
-    }
-
-    if (SUCCEEDED(hr))
-    {
-        items[0].value.vt = VT_UI2;
-        items[0].value.uiVal = data->year;
-        items[1].value.vt = VT_UI1;
-        items[1].value.bVal = data->month;
-        items[2].value.vt = VT_UI1;
-        items[2].value.bVal = data->day;
-        items[3].value.vt = VT_UI1;
-        items[3].value.bVal = data->hour;
-        items[4].value.vt = VT_UI1;
-        items[4].value.bVal = data->minute;
-        items[5].value.vt = VT_UI1;
-        items[5].value.bVal = data->second;
-    }
-
-    if (FAILED(hr))
-    {
-        for (int i = 0; i < ARRAY_SIZE(names); ++i)
-            clear_metadata_item(&items[i]);
-        free(items);
-        items = NULL;
-    }
-
-    *ret = items;
-
-    return hr;
-}
-
-static HRESULT LoadTimeMetadata(MetadataHandler *handler, IStream *stream, const GUID *preferred_vendor,
-    DWORD persist_options)
-{
-    HRESULT hr;
-    BYTE type[4];
-    BYTE *data;
-    ULONG data_size;
-    MetadataItem *result;
-    struct time_data time_data;
 
     hr = read_png_chunk(stream, type, &data, &data_size);
     if (FAILED(hr)) return hr;
@@ -460,36 +339,48 @@ static HRESULT LoadTimeMetadata(MetadataHandler *handler, IStream *stream, const
         return E_FAIL;
     }
 
-    time_data.year   = read_ushort_be(data);
-    time_data.month  = data[2];
-    time_data.day    = data[3];
-    time_data.hour   = data[4];
-    time_data.minute = data[5];
-    time_data.second = data[6];
+    result = calloc(6, sizeof(MetadataItem));
+    for (i = 0; i < 6; i++)
+    {
+        SHStrDupW(names[i], &id_values[i]);
+        if (!id_values[i]) break;
+    }
+    if (!result || i < 6)
+    {
+        free(result);
+        for (i = 0; i < 6; i++)
+            CoTaskMemFree(id_values[i]);
+        free(data);
+        return E_OUTOFMEMORY;
+    }
+
+    for (i = 0; i < 6; i++)
+    {
+        PropVariantInit(&result[i].schema);
+        PropVariantInit(&result[i].id);
+        PropVariantInit(&result[i].value);
+
+        result[i].id.vt = VT_LPWSTR;
+        result[i].id.pwszVal = id_values[i];
+    }
+
+    result[0].value.vt = VT_UI2;
+    result[0].value.uiVal = read_ushort_be(data);
+    result[1].value.vt = VT_UI1;
+    result[1].value.bVal = data[2];
+    result[2].value.vt = VT_UI1;
+    result[2].value.bVal = data[3];
+    result[3].value.vt = VT_UI1;
+    result[3].value.bVal = data[4];
+    result[4].value.vt = VT_UI1;
+    result[4].value.bVal = data[5];
+    result[5].value.vt = VT_UI1;
+    result[5].value.bVal = data[6];
+
+    *items = result;
+    *item_count = 6;
 
     free(data);
-
-    if (FAILED(hr = create_time_items(&time_data, &result)))
-        return hr;
-
-    MetadataHandler_FreeItems(handler);
-    handler->items = result;
-    handler->item_count = 6;
-
-    return S_OK;
-}
-
-static HRESULT CreateTimeHandler(MetadataHandler *handler)
-{
-    static const struct time_data time_data = { .month = 1, .day = 1 };
-    MetadataItem *items;
-    HRESULT hr;
-
-    if (FAILED(hr = create_time_items(&time_data, &items)))
-        return hr;
-
-    handler->items = items;
-    handler->item_count = 6;
 
     return S_OK;
 }
@@ -497,150 +388,12 @@ static HRESULT CreateTimeHandler(MetadataHandler *handler)
 static const MetadataHandlerVtbl TimeReader_Vtbl = {
     0,
     &CLSID_WICPngTimeMetadataReader,
-    LoadTimeMetadata,
-    CreateTimeHandler,
+    LoadTimeMetadata
 };
 
 HRESULT PngTimeReader_CreateInstance(REFIID iid, void** ppv)
 {
     return MetadataReader_Create(&TimeReader_Vtbl, iid, ppv);
-}
-
-static const MetadataHandlerVtbl TimeWriter_Vtbl =
-{
-    METADATAHANDLER_FIXED_ITEMS | METADATAHANDLER_IS_WRITER,
-    &CLSID_WICPngTimeMetadataWriter,
-    LoadTimeMetadata,
-    CreateTimeHandler,
-};
-
-HRESULT PngTimeWriter_CreateInstance(REFIID iid, void** ppv)
-{
-    return MetadataReader_Create(&TimeWriter_Vtbl, iid, ppv);
-}
-
-static HRESULT create_bkgd_item(const PROPVARIANT *value, MetadataItem **ret)
-{
-    MetadataItem *item;
-    HRESULT hr;
-
-    if (!(item = calloc(1, sizeof(*item))))
-        return E_OUTOFMEMORY;
-
-    if (FAILED(hr = init_propvar_from_string(L"BackgroundColor", &item->id)))
-    {
-        free(item);
-        return hr;
-    }
-
-    item->value = *value;
-    *ret = item;
-
-    return S_OK;
-}
-
-static HRESULT LoadBkgdMetadata(MetadataHandler *handler, IStream *stream, const GUID *preferred_vendor,
-        DWORD persist_options)
-{
-    MetadataItem *result;
-    PROPVARIANT value;
-    ULONG data_size;
-    BYTE type[4];
-    HRESULT hr;
-    BYTE *data;
-
-    hr = read_png_chunk(stream, type, &data, &data_size);
-    if (FAILED(hr)) return hr;
-
-    PropVariantInit(&value);
-    if (data_size == 1)
-    {
-        value.vt = VT_UI1;
-        value.bVal = *data;
-    }
-    else if (data_size == 2)
-    {
-        value.vt = VT_UI2;
-        value.uiVal = read_ushort_be(data);
-    }
-    else if (data_size == 6)
-    {
-        value.vt = VT_UI2 | VT_VECTOR;
-        value.caui.cElems = 3;
-        if (!(value.caui.pElems = CoTaskMemAlloc(3 * sizeof(USHORT))))
-        {
-            hr = E_OUTOFMEMORY;
-        }
-        else
-        {
-            BYTE *ptr = data;
-            for (int i = 0; i < value.caui.cElems; ++i, ptr += 2)
-                value.caui.pElems[i] = read_ushort_be(ptr);
-        }
-    }
-    else
-    {
-        hr = WINCODEC_ERR_BADMETADATAHEADER;
-    }
-
-    free(data);
-
-    if (SUCCEEDED(hr))
-        hr = create_bkgd_item(&value, &result);
-
-    if (FAILED(hr))
-    {
-        PropVariantClear(&value);
-        return hr;
-    }
-
-    MetadataHandler_FreeItems(handler);
-    handler->items = result;
-    handler->item_count = 1;
-
-    return S_OK;
-}
-
-static HRESULT CreateBkgdHandler(MetadataHandler *handler)
-{
-    MetadataItem *item;
-    PROPVARIANT value;
-    HRESULT hr;
-
-    PropVariantInit(&value);
-    if (FAILED(hr = create_bkgd_item(&value, &item)))
-        return hr;
-
-    handler->items = item;
-    handler->item_count = 1;
-
-    return S_OK;
-}
-
-static const MetadataHandlerVtbl BkgdReader_Vtbl =
-{
-    0,
-    &CLSID_WICPngBkgdMetadataReader,
-    LoadBkgdMetadata,
-    CreateBkgdHandler,
-};
-
-HRESULT PngBkgdReader_CreateInstance(REFIID iid, void** ppv)
-{
-    return MetadataReader_Create(&BkgdReader_Vtbl, iid, ppv);
-}
-
-static const MetadataHandlerVtbl BkgdWriter_Vtbl =
-{
-    METADATAHANDLER_FIXED_ITEMS | METADATAHANDLER_IS_WRITER,
-    &CLSID_WICPngBkgdMetadataWriter,
-    LoadBkgdMetadata,
-    CreateBkgdHandler,
-};
-
-HRESULT PngBkgdWriter_CreateInstance(REFIID iid, void** ppv)
-{
-    return MetadataReader_Create(&BkgdWriter_Vtbl, iid, ppv);
 }
 
 HRESULT PngDecoder_CreateInstance(REFIID iid, void** ppv)

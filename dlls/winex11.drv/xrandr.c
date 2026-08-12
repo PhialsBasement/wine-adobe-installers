@@ -32,13 +32,11 @@
 #include <X11/extensions/Xrandr.h>
 #endif
 #include <dlfcn.h>
+#include <stdlib.h>
 #include "x11drv.h"
 #include "wine/debug.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(xrandr);
-#ifdef HAVE_XRRGETPROVIDERRESOURCES
-WINE_DECLARE_DEBUG_CHANNEL(winediag);
-#endif
 
 #ifdef SONAME_LIBXRANDR
 
@@ -238,30 +236,31 @@ static BOOL xrandr10_get_id( const WCHAR *device_name, BOOL is_primary, x11drv_s
     return TRUE;
 }
 
-static void add_xrandr10_mode( struct x11drv_mode *mode, DWORD depth, DWORD width, DWORD height,
-                               DWORD frequency, SizeID size_id )
+static void add_xrandr10_mode( DEVMODEW *mode, DWORD depth, DWORD width, DWORD height,
+                               DWORD frequency, SizeID size_id, BOOL full )
 {
-    mode->mode.dmSize = sizeof(*mode);
-    mode->mode.dmDriverExtra = sizeof(*mode) - sizeof(mode->mode);
-    mode->mode.dmFields = DM_DISPLAYORIENTATION | DM_BITSPERPEL | DM_PELSWIDTH |
+    mode->dmSize = sizeof(*mode);
+    mode->dmDriverExtra = full ? sizeof(SizeID) : 0;
+    mode->dmFields = DM_DISPLAYORIENTATION | DM_BITSPERPEL | DM_PELSWIDTH |
                      DM_PELSHEIGHT | DM_DISPLAYFLAGS;
     if (frequency)
     {
-        mode->mode.dmFields |= DM_DISPLAYFREQUENCY;
-        mode->mode.dmDisplayFrequency = frequency;
+        mode->dmFields |= DM_DISPLAYFREQUENCY;
+        mode->dmDisplayFrequency = frequency;
     }
-    mode->mode.dmDisplayOrientation = DMDO_DEFAULT;
-    mode->mode.dmBitsPerPel = depth;
-    mode->mode.dmPelsWidth = width;
-    mode->mode.dmPelsHeight = height;
-    mode->mode.dmDisplayFlags = 0;
-    mode->size_id = size_id;
+    mode->dmDisplayOrientation = DMDO_DEFAULT;
+    mode->dmBitsPerPel = depth;
+    mode->dmPelsWidth = width;
+    mode->dmPelsHeight = height;
+    mode->dmDisplayFlags = 0;
+    if (full) memcpy( mode + 1, &size_id, sizeof(size_id) );
 }
 
-static BOOL xrandr10_get_modes( x11drv_settings_id id, DWORD flags, struct x11drv_mode **new_modes, UINT *new_mode_count )
+static BOOL xrandr10_get_modes( x11drv_settings_id id, DWORD flags, DEVMODEW **new_modes, UINT *new_mode_count, BOOL full )
 {
-    INT size_idx, depth_idx, rate_idx, size_count, rate_count, mode_count = 0;
-    struct x11drv_mode *modes, *mode;
+    INT size_idx, depth_idx, rate_idx, mode_idx = 0;
+    INT size_count, rate_count, mode_count = 0;
+    DEVMODEW *modes, *mode;
     XRRScreenSize *sizes;
     short *rates;
 
@@ -278,7 +277,10 @@ static BOOL xrandr10_get_modes( x11drv_settings_id id, DWORD flags, struct x11dr
             ++mode_count;
     }
 
-    if (!(modes = calloc( mode_count * DEPTH_COUNT, sizeof(*modes) )))
+    /* Allocate space for reported modes in three depths, and put an SizeID at the end of DEVMODEW as
+     * driver private data */
+    modes = calloc( mode_count * DEPTH_COUNT, sizeof(*modes) + sizeof(SizeID) );
+    if (!modes)
     {
         RtlSetLastWin32Error( ERROR_NOT_ENOUGH_MEMORY );
         return FALSE;
@@ -291,22 +293,31 @@ static BOOL xrandr10_get_modes( x11drv_settings_id id, DWORD flags, struct x11dr
             rates = pXRRRates( gdi_display, DefaultScreen( gdi_display ), size_idx, &rate_count );
             if (!rate_count)
             {
-                add_xrandr10_mode( mode++, depths[depth_idx], sizes[size_idx].width,
-                                   sizes[size_idx].height, 0, size_idx );
+                add_xrandr10_mode( mode, depths[depth_idx], sizes[size_idx].width,
+                                   sizes[size_idx].height, 0, size_idx, full );
+                mode = NEXT_DEVMODEW( mode );
+                mode_idx++;
                 continue;
             }
 
             for (rate_idx = 0; rate_idx < rate_count; ++rate_idx)
             {
-                add_xrandr10_mode( mode++, depths[depth_idx], sizes[size_idx].width,
-                                   sizes[size_idx].height, rates[rate_idx], size_idx );
+                add_xrandr10_mode( mode, depths[depth_idx], sizes[size_idx].width,
+                                   sizes[size_idx].height, rates[rate_idx], size_idx, full );
+                mode = NEXT_DEVMODEW( mode );
+                mode_idx++;
             }
         }
     }
 
     *new_modes = modes;
-    *new_mode_count = mode - modes;
+    *new_mode_count = mode_idx;
     return TRUE;
+}
+
+static void xrandr10_free_modes( DEVMODEW *modes )
+{
+    free( modes );
 }
 
 static BOOL xrandr10_get_current_mode( x11drv_settings_id id, DEVMODEW *mode )
@@ -351,15 +362,13 @@ static BOOL xrandr10_get_current_mode( x11drv_settings_id id, DEVMODEW *mode )
     return TRUE;
 }
 
-static LONG xrandr10_set_current_mode( x11drv_settings_id id, const struct x11drv_mode *full_mode )
+static LONG xrandr10_set_current_mode( x11drv_settings_id id, const DEVMODEW *mode )
 {
-    const DEVMODEW *mode = &full_mode->mode;
     XRRScreenConfiguration *screen_config;
     Rotation rotation;
+    SizeID size_id;
     Window root;
     Status stat;
-
-    assert( sizeof(*full_mode) == sizeof(full_mode->mode) + full_mode->mode.dmDriverExtra );
 
     if (id.id != 1)
     {
@@ -375,22 +384,26 @@ static LONG xrandr10_set_current_mode( x11drv_settings_id id, const struct x11dr
 
     if (mode->dmFields & DM_BITSPERPEL && mode->dmBitsPerPel != screen_bpp)
         WARN("Cannot change screen bit depth from %dbits to %dbits!\n",
-             screen_bpp, mode->dmBitsPerPel);
+             screen_bpp, (int)mode->dmBitsPerPel);
 
     root = DefaultRootWindow( gdi_display );
     screen_config = pXRRGetScreenInfo( gdi_display, root );
     pXRRConfigCurrentConfiguration( screen_config, &rotation );
 
+    assert( mode->dmDriverExtra == sizeof(SizeID) );
+    memcpy( &size_id, (BYTE *)mode + sizeof(*mode), sizeof(size_id) );
+
     if (mode->dmFields & DM_DISPLAYFREQUENCY && mode->dmDisplayFrequency)
-        stat = pXRRSetScreenConfigAndRate( gdi_display, screen_config, root, full_mode->size_id, rotation,
+        stat = pXRRSetScreenConfigAndRate( gdi_display, screen_config, root, size_id, rotation,
                                            mode->dmDisplayFrequency, CurrentTime );
     else
-        stat = pXRRSetScreenConfig( gdi_display, screen_config, root, full_mode->size_id, rotation, CurrentTime );
+        stat = pXRRSetScreenConfig( gdi_display, screen_config, root, size_id, rotation, CurrentTime );
     pXRRFreeScreenConfigInfo( screen_config );
 
     if (stat != RRSetConfigSuccess)
         return DISP_CHANGE_FAILED;
 
+    XFlush( gdi_display );
     return DISP_CHANGE_SUCCESSFUL;
 }
 
@@ -441,7 +454,6 @@ static BOOL is_broken_driver(void)
     XRRScreenResources *screen_resources;
     XRROutputInfo *output_info;
     XRRModeInfo *first_mode;
-    INT major, event, error;
     INT output_idx, i, j;
     BOOL only_one_mode;
 
@@ -492,15 +504,6 @@ static BOOL is_broken_driver(void)
 
         if (!only_one_mode)
             continue;
-
-        /* Check if it is NVIDIA proprietary driver */
-        if (XQueryExtension( gdi_display, "NV-CONTROL", &major, &event, &error ))
-        {
-            ERR_(winediag)("Broken NVIDIA RandR detected, falling back to RandR 1.0. "
-                           "Please consider using the Nouveau driver instead.\n");
-            pXRRFreeScreenResources( screen_resources );
-            return TRUE;
-        }
     }
     pXRRFreeScreenResources( screen_resources );
     return FALSE;
@@ -531,23 +534,134 @@ static void get_screen_size( XRRScreenResources *resources, unsigned int *width,
     }
 }
 
-static unsigned int get_edid( RROutput output, unsigned char **prop )
+static unsigned int get_edid( RROutput output, unsigned char **prop,
+                              XRROutputInfo *output_info, XRRScreenResources *screen_resources )
 {
-    int result, actual_format;
+    unsigned int mwidth, mheight, i;
     unsigned long bytes_after, len;
+    unsigned char *edid, *p, c;
+    int result, actual_format;
+    XRRModeInfo *mode;
     Atom actual_type;
+    char *edid_path;
 
+    *prop = NULL;
     result = pXRRGetOutputProperty( gdi_display, output, x11drv_atom(EDID), 0, 128, FALSE, FALSE,
                                     AnyPropertyType, &actual_type, &actual_format, &len,
-                                    &bytes_after, prop );
-
-    if (result != Success)
+                                    &bytes_after, &edid );
+    if (result == Success && len)
     {
-        WARN("Could not retrieve EDID property for output %#lx.\n", output);
-        *prop = NULL;
+        if (!(*prop = malloc( len )))
+        {
+            XFree( edid );
+            return 0;
+        }
+        memcpy( *prop, edid, len );
+        return len;
+    }
+
+    edid_path = NULL;
+    if ((result = XGetWindowProperty( gdi_display, DefaultRootWindow(gdi_display), x11drv_atom(GAMESCOPE_DISPLAY_EDID_PATH), 0,
+                                      PATH_MAX, False, x11drv_atom(UTF8_STRING), &actual_type, &actual_format,
+                                      &len, &bytes_after, (unsigned char **)&edid_path )) == Success
+        && actual_type == x11drv_atom(UTF8_STRING))
+    {
+        char buffer[4096];
+        FILE *f;
+
+        f = fopen( edid_path, "rb" );
+        if (f)
+        {
+            len = fread( buffer, 1, sizeof(buffer), f );
+            fclose( f );
+            if (len)
+            {
+                XFree( edid_path );
+                if (!(*prop = malloc( len ))) return 0;
+                memcpy( *prop, buffer, len );
+                return len;
+            }
+        }
+    }
+    if (edid_path) XFree( edid_path );
+
+    WARN( "Could not retrieve EDID property for output %#lx.\n", output );
+    if (!output_info->npreferred)
+    {
+        WARN( "No preferred modes for output %#lx.\n", output );
         return 0;
     }
-    return len;
+    if (output_info->npreferred > 1)
+        WARN( "%u preferred modes for output %#lx, using first one.\n", output_info->npreferred, output );
+
+    for (i = 0; i < screen_resources->nmode; ++i)
+        if (screen_resources->modes[i].id == output_info->modes[0]) break;
+
+    if (i == screen_resources->nmode)
+    {
+        ERR("Preferred mode not found for output %#lx.\n", output);
+        return 0;
+    }
+
+    mode = &screen_resources->modes[i];
+
+    mwidth = mode->width / 60;   /* Fake ~150dpi. */
+    mheight = mode->height / 60;
+
+    edid = calloc( 1, 128 );
+    *prop = edid;
+    *(uint64_t *)edid = 0x00ffffffffffff00;
+    edid[18] = 1;
+    edid[19] = 4;
+    edid[20] = 0xa0; /* Digital input, 8 bit depth. */
+    edid[21] = mwidth;
+    edid[22] = mheight;
+    edid[24] = 0x6;
+    for (i = 0; i < 16; ++i) edid[38 + i] = 1;
+
+    p = edid + 54;
+    *(uint16_t *)&p[0] = mode->dotClock / 10000;
+    p[2] = mode->width;
+    p[3] = mode->hTotal - mode->width;
+    p[4] = (((mode->hTotal - mode->width) >> 8) & 0xf) | (((mode->width >> 8) & 0xf) << 4);
+    p[5] = mode->height;
+    p[6] = mode->vTotal - mode->height;
+    p[7] = (((mode->vTotal - mode->height) >> 8) & 0xf) | (((mode->height >> 8) & 0xf) << 4);
+    p[8] = mode->hSyncStart - mode->width;
+    p[9] = mode->hSyncEnd - mode->hSyncStart;
+    p[10] = (((mode->vSyncStart - mode->height) & 0xf) << 4) | ((mode->vSyncEnd - mode->vSyncStart) & 0xf);
+    p[11] = ((((mode->hSyncStart - mode->width) >> 8) & 3) << 6)
+            | ((((mode->hSyncEnd - mode->hSyncStart) >> 8) & 3) << 4)
+            | ((((mode->vSyncStart - mode->height) >> 4) & 3) << 2)
+            | (((mode->vSyncEnd - mode->vSyncStart) >> 4) & 3);
+    p[12] = mwidth;
+    p[13] = mheight;
+    p[14] = (((mwidth >> 8) & 0xf) << 4) | ((mheight >> 8) & 0xf);
+    if (mode->modeFlags & RR_Interlace)
+        p[17] |= 0x80;
+    p[17] |= 3 << 3;
+    if (mode->modeFlags & RR_HSyncPositive)
+        p[17] |= 2;
+    if (mode->modeFlags & RR_VSyncPositive)
+        p[17] |= 4;
+
+    if (mode->modeFlags & (RR_DoubleScan | RR_PixelMultiplex | RR_DoubleClock | RR_ClockDivideBy2))
+        FIXME( "Unsupported flags %#lx.\n", mode->modeFlags );
+
+    p += 18;
+    p[3] = 0xfc;
+    strcpy( (char *)p + 5, "Default" );
+
+    p += 18;
+    p[3] = 0x10;
+    p += 18;
+    p[3] = 0x10;
+
+    c = 0;
+    for (i = 0; i < 127; ++i)
+        c += edid[i];
+    edid[127] = 256 - c;
+    return 128;
 }
 
 static void set_screen_size( int width, int height )
@@ -835,6 +949,7 @@ static BOOL xrandr14_get_gpus( struct x11drv_gpu **new_gpus, int *count, BOOL ge
     if (!provider_resources->nproviders)
     {
         WARN("XRandR implementation doesn't report any providers, faking one.\n");
+        gpus[0].name = strdup( "Wine GPU" );
         *new_gpus = gpus;
         *count = 1;
         ret = TRUE;
@@ -1106,7 +1221,8 @@ static BOOL xrandr14_get_monitors( ULONG_PTR adapter_id, struct gdi_monitor **ne
     /* Inactive but attached monitor, no need to check for mirrored/replica monitors */
     if (!output_info->crtc || !crtc_info->mode)
     {
-        monitors[monitor_count].edid_len = get_edid( adapter_id, &monitors[monitor_count].edid );
+        monitors[monitor_count].edid_len = get_edid( adapter_id, &monitors[monitor_count].edid,
+                                                     output_info, screen_resources );
         monitor_count = 1;
     }
     /* Active monitors, need to find other monitors with the same coordinates as mirrored */
@@ -1157,7 +1273,8 @@ static BOOL xrandr14_get_monitors( ULONG_PTR adapter_id, struct gdi_monitor **ne
                         primary_index = monitor_count;
 
                     monitors[monitor_count].edid_len = get_edid( screen_resources->outputs[i],
-                                                                 &monitors[monitor_count].edid );
+                                                                 &monitors[monitor_count].edid,
+                                                                 enum_output_info, screen_resources );
                     monitor_count++;
                 }
 
@@ -1201,7 +1318,7 @@ done:
         for (i = 0; i < monitor_count; i++)
         {
             if (monitors[i].edid)
-                XFree( monitors[i].edid );
+                free( monitors[i].edid );
         }
         free( monitors );
         ERR("Failed to get monitors\n");
@@ -1216,7 +1333,7 @@ static void xrandr14_free_monitors( struct gdi_monitor *monitors, int count )
     for (i = 0; i < count; i++)
     {
         if (monitors[i].edid)
-            XFree( monitors[i].edid );
+            free( monitors[i].edid );
     }
     free( monitors );
 }
@@ -1319,46 +1436,46 @@ static BOOL xrandr14_get_id( const WCHAR *device_name, BOOL is_primary, x11drv_s
     return TRUE;
 }
 
-static void add_xrandr14_mode( struct x11drv_mode *mode, XRRModeInfo *info, DWORD depth, DWORD frequency,
-                               DWORD orientation )
+static void add_xrandr14_mode( DEVMODEW *mode, XRRModeInfo *info, DWORD depth, DWORD frequency,
+                               DWORD orientation, BOOL full )
 {
-    mode->mode.dmSize = sizeof(*mode);
-    mode->mode.dmDriverExtra = sizeof(*mode) - sizeof(mode->mode);
-    mode->mode.dmFields = DM_DISPLAYORIENTATION | DM_BITSPERPEL | DM_PELSWIDTH |
+    mode->dmSize = sizeof(*mode);
+    mode->dmDriverExtra = full ? sizeof(RRMode) : 0;
+    mode->dmFields = DM_DISPLAYORIENTATION | DM_BITSPERPEL | DM_PELSWIDTH |
                      DM_PELSHEIGHT | DM_DISPLAYFLAGS;
     if (frequency)
     {
-        mode->mode.dmFields |= DM_DISPLAYFREQUENCY;
-        mode->mode.dmDisplayFrequency = frequency;
+        mode->dmFields |= DM_DISPLAYFREQUENCY;
+        mode->dmDisplayFrequency = frequency;
     }
     if (orientation == DMDO_DEFAULT || orientation == DMDO_180)
     {
-        mode->mode.dmPelsWidth = info->width;
-        mode->mode.dmPelsHeight = info->height;
+        mode->dmPelsWidth = info->width;
+        mode->dmPelsHeight = info->height;
     }
     else
     {
-        mode->mode.dmPelsWidth = info->height;
-        mode->mode.dmPelsHeight = info->width;
+        mode->dmPelsWidth = info->height;
+        mode->dmPelsHeight = info->width;
     }
-    mode->mode.dmDisplayOrientation = orientation;
-    mode->mode.dmBitsPerPel = depth;
-    mode->mode.dmDisplayFlags = 0;
-    mode->rr_mode = info->id;
+    mode->dmDisplayOrientation = orientation;
+    mode->dmBitsPerPel = depth;
+    mode->dmDisplayFlags = 0;
+    if (full) memcpy( mode + 1, &info->id, sizeof(info->id) );
 }
 
-static BOOL xrandr14_get_modes( x11drv_settings_id id, DWORD flags, struct x11drv_mode **new_modes, UINT *mode_count )
+static BOOL xrandr14_get_modes( x11drv_settings_id id, DWORD flags, DEVMODEW **new_modes, UINT *mode_count, BOOL full )
 {
     DWORD frequency, orientation, orientation_count;
     XRRScreenResources *screen_resources;
     XRROutputInfo *output_info = NULL;
     RROutput output = (RROutput)id.id;
-    struct x11drv_mode *mode, *modes;
     XRRCrtcInfo *crtc_info = NULL;
+    UINT depth_idx, mode_idx = 0;
     XRRModeInfo *mode_info;
+    DEVMODEW *mode, *modes;
     Rotation rotations;
     BOOL ret = FALSE;
-    UINT depth_idx;
     RRCrtc crtc;
     INT i, j;
 
@@ -1412,7 +1529,12 @@ static BOOL xrandr14_get_modes( x11drv_settings_id id, DWORD flags, struct x11dr
     }
     orientation_count = get_orientation_count( rotations );
 
-    if (!(modes = calloc( output_info->nmode * DEPTH_COUNT * orientation_count, sizeof(*modes) ))) goto done;
+    /* Allocate space for display modes in different color depths and orientations.
+     * Store a RRMode at the end of each DEVMODEW as private driver data */
+    modes = calloc( output_info->nmode * DEPTH_COUNT * orientation_count,
+                    sizeof(*modes) + sizeof(RRMode) );
+    if (!modes)
+        goto done;
 
     for (i = 0, mode = modes; i < output_info->nmode; ++i)
     {
@@ -1428,8 +1550,12 @@ static BOOL xrandr14_get_modes( x11drv_settings_id id, DWORD flags, struct x11dr
             {
                 for (orientation = DMDO_DEFAULT; orientation <= DMDO_270; ++orientation)
                 {
-                    if (!((1 << orientation) & rotations)) continue;
-                    add_xrandr14_mode( mode++, mode_info, depths[depth_idx], frequency, orientation );
+                    if (!((1 << orientation) & rotations))
+                        continue;
+
+                    add_xrandr14_mode( mode, mode_info, depths[depth_idx], frequency, orientation, full );
+                    mode = NEXT_DEVMODEW( mode );
+                    ++mode_idx;
                 }
             }
 
@@ -1439,7 +1565,7 @@ static BOOL xrandr14_get_modes( x11drv_settings_id id, DWORD flags, struct x11dr
 
     ret = TRUE;
     *new_modes = modes;
-    *mode_count = mode - modes;
+    *mode_count = mode_idx;
 done:
     if (crtc_info)
         pXRRFreeCrtcInfo( crtc_info );
@@ -1448,6 +1574,11 @@ done:
     if (screen_resources)
         pXRRFreeScreenResources( screen_resources );
     return ret;
+}
+
+static void xrandr14_free_modes( DEVMODEW *modes )
+{
+    free( modes );
 }
 
 static BOOL xrandr14_get_current_mode( x11drv_settings_id id, DEVMODEW *mode )
@@ -1556,9 +1687,8 @@ done:
     return ret;
 }
 
-static LONG xrandr14_set_current_mode( x11drv_settings_id id, const struct x11drv_mode *full_mode )
+static LONG xrandr14_set_current_mode( x11drv_settings_id id, const DEVMODEW *mode )
 {
-    const DEVMODEW *mode = &full_mode->mode;
     unsigned int screen_width, screen_height;
     RROutput output = (RROutput)id.id, *outputs;
     XRRScreenResources *screen_resources;
@@ -1569,16 +1699,17 @@ static LONG xrandr14_set_current_mode( x11drv_settings_id id, const struct x11dr
     INT output_count;
     RRCrtc crtc = 0;
     Status status;
-
-    assert( sizeof(*full_mode) == sizeof(full_mode->mode) + full_mode->mode.dmDriverExtra );
+    RRMode rrmode;
 
     if (mode->dmFields & DM_BITSPERPEL && mode->dmBitsPerPel != screen_bpp)
         WARN("Cannot change screen color depth from %ubits to %ubits!\n",
-             screen_bpp, mode->dmBitsPerPel);
+             screen_bpp, (int)mode->dmBitsPerPel);
 
     screen_resources = xrandr_get_screen_resources();
     if (!screen_resources)
         return ret;
+
+    XGrabServer( gdi_display );
 
     output_info = pXRRGetOutputInfo( gdi_display, screen_resources, output );
     if (!output_info || output_info->connection != RR_Connected)
@@ -1621,6 +1752,9 @@ static LONG xrandr14_set_current_mode( x11drv_settings_id id, const struct x11dr
     if (!crtc_info)
         goto done;
 
+    assert( mode->dmDriverExtra == sizeof(RRMode) );
+    memcpy( &rrmode, (BYTE *)mode + sizeof(*mode), sizeof(rrmode) );
+
     if (crtc_info->noutput)
     {
         outputs = crtc_info->outputs;
@@ -1648,12 +1782,14 @@ static LONG xrandr14_set_current_mode( x11drv_settings_id id, const struct x11dr
     set_screen_size( screen_width, screen_height );
 
     status = pXRRSetCrtcConfig( gdi_display, screen_resources, crtc, CurrentTime,
-                                mode->dmPosition.x, mode->dmPosition.y, full_mode->rr_mode,
+                                mode->dmPosition.x, mode->dmPosition.y, rrmode,
                                 rotation, outputs, output_count );
     if (status == RRSetConfigSuccess)
         ret = DISP_CHANGE_SUCCESSFUL;
 
 done:
+    XUngrabServer( gdi_display );
+    XFlush( gdi_display );
     if (crtc_info)
         pXRRFreeCrtcInfo( crtc_info );
     if (output_info)
@@ -1689,6 +1825,7 @@ void X11DRV_XRandR_Init(void)
     settings_handler.priority = 200;
     settings_handler.get_id = xrandr10_get_id;
     settings_handler.get_modes = xrandr10_get_modes;
+    settings_handler.free_modes = xrandr10_free_modes;
     settings_handler.get_current_mode = xrandr10_get_current_mode;
     settings_handler.set_current_mode = xrandr10_set_current_mode;
     X11DRV_Settings_SetHandler( &settings_handler );
@@ -1746,6 +1883,7 @@ void X11DRV_XRandR_Init(void)
         settings_handler.priority = 300;
         settings_handler.get_id = xrandr14_get_id;
         settings_handler.get_modes = xrandr14_get_modes;
+        settings_handler.free_modes = xrandr14_free_modes;
         settings_handler.get_current_mode = xrandr14_get_current_mode;
         settings_handler.set_current_mode = xrandr14_set_current_mode;
         X11DRV_Settings_SetHandler( &settings_handler );

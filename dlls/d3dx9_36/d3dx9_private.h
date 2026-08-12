@@ -25,16 +25,12 @@
 #include <stdint.h>
 #include "wine/debug.h"
 #include "wine/rbtree.h"
-
-#define COBJMACROS
-#include "d3dx9.h"
 #include "d3dx_helpers.h"
 
 #define ULONG64_MAX (~(ULONG64)0)
 
 #define FOURCC_TX_1 0x54580100
 
-#define D3DX9_FILTER_INVALID_BITS 0xff80fff8
 static inline HRESULT d3dx9_handle_load_filter(DWORD *filter)
 {
     if (*filter == D3DX_DEFAULT)
@@ -42,8 +38,6 @@ static inline HRESULT d3dx9_handle_load_filter(DWORD *filter)
 
     return d3dx_validate_filter(*filter);
 }
-
-BOOL d3dximage_info_from_d3dx_image(D3DXIMAGE_INFO *info, struct d3dx_image *image);
 
 struct d3dx_include_from_file
 {
@@ -56,23 +50,19 @@ extern const struct ID3DXIncludeVtbl d3dx_include_from_file_vtbl;
 HRESULT map_view_of_file(const WCHAR *filename, void **buffer, DWORD *length);
 HRESULT load_resource_into_memory(HMODULE module, HRSRC resinfo, void **buffer, DWORD *length);
 
-HRESULT write_buffer_to_file(const WCHAR *filename, ID3DXBuffer *buffer);
-
 D3DFORMAT d3dformat_from_d3dx_pixel_format_id(enum d3dx_pixel_format_id format);
 enum d3dx_pixel_format_id d3dx_pixel_format_id_from_d3dformat(D3DFORMAT format);
 enum d3dx_resource_type d3dx_resource_type_from_d3dresourcetype(D3DRESOURCETYPE type);
-enum d3dx_image_file_format d3dx_image_file_format_from_d3dximage_fileformat(D3DXIMAGE_FILEFORMAT iff);
-D3DXIMAGE_FILEFORMAT d3dximage_fileformat_from_d3dx_image_file_format(enum d3dx_image_file_format iff);
-const struct pixel_format_desc *get_d3dx_pixel_format_info(enum d3dx_pixel_format_id format);
 const struct pixel_format_desc *get_format_info(D3DFORMAT format);
 const struct pixel_format_desc *get_format_info_idx(int idx);
-HRESULT d3dx9_save_pixels_to_memory(struct d3dx_pixels *src_pixels, const struct pixel_format_desc *src_fmt_desc,
-        D3DXIMAGE_FILEFORMAT file_format, ID3DXBuffer **dst_buffer);
 
 HRESULT lock_surface(IDirect3DSurface9 *surface, const RECT *surface_rect, D3DLOCKED_RECT *lock,
         IDirect3DSurface9 **temp_surface, BOOL write);
 HRESULT unlock_surface(IDirect3DSurface9 *surface, const RECT *surface_rect,
         IDirect3DSurface9 *temp_surface, BOOL update);
+HRESULT d3dx_get_save_pixel_format_from_image_file_format(const struct pixel_format_desc *src_fmt_desc,
+        D3DXIMAGE_FILEFORMAT file_format, enum d3dx_pixel_format_id *save_fmt);
+void d3dximage_info_from_d3dx_image(D3DXIMAGE_INFO *info, struct d3dx_image *image);
 
 /* debug helpers */
 const char *debug_d3dxparameter_class(D3DXPARAMETER_CLASS c);
@@ -338,8 +328,6 @@ struct d3dx_parameters_store
     char *full_name_tmp;
     unsigned int full_name_tmp_size;
 };
-
-extern const unsigned int d3dx_decltype_size[];
 
 HRESULT d3dx_init_parameters_store(struct d3dx_parameters_store *store, unsigned int count);
 void d3dx_parameters_store_cleanup(struct d3dx_parameters_store *store);

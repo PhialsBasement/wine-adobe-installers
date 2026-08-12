@@ -82,7 +82,10 @@ DWORD	                dbg_curr_pid = 0;
 dbg_ctx_t               dbg_context;
 BOOL    	        dbg_interactiveP = FALSE;
 HANDLE                  dbg_houtput = 0;
-struct list             dbg_process_list = LIST_INIT(dbg_process_list);
+HANDLE                  dbg_crash_report_file = INVALID_HANDLE_VALUE;
+BOOL                    dbg_use_wine_dbg_output = FALSE;
+
+static struct list      dbg_process_list = LIST_INIT(dbg_process_list);
 
 struct dbg_internal_var         dbg_internal_vars[DBG_IV_LAST];
 
@@ -92,6 +95,9 @@ static void dbg_outputA(const char* buffer, int len)
     static unsigned int line_pos;
 
     DWORD w, i;
+
+    if (dbg_use_wine_dbg_output)
+        __wine_dbg_output(buffer);
 
     while (len > 0)
     {
@@ -106,7 +112,10 @@ static void dbg_outputA(const char* buffer, int len)
             if (len > 0) i = line_pos;  /* buffer is full, flush anyway */
             else break;
         }
-        WriteFile(dbg_houtput, line_buff, i, &w, NULL);
+        if (!dbg_use_wine_dbg_output)
+            WriteFile(dbg_houtput, line_buff, i, &w, NULL);
+        if (dbg_crash_report_file != INVALID_HANDLE_VALUE)
+            WriteFile(dbg_crash_report_file, line_buff, i, &w, NULL);
         memmove( line_buff, line_buff + i, line_pos - i );
         line_pos -= i;
     }
@@ -510,23 +519,6 @@ void dbg_del_thread(struct dbg_thread* t)
     list_remove(&t->entry);
     if (t == dbg_curr_thread) dbg_curr_thread = NULL;
     free(t);
-}
-
-WCHAR* dbg_fetch_thread_name(const struct dbg_thread *thread)
-{
-    WCHAR *descr;
-
-    if (thread->process->process_io->fetch_thread_name &&
-        thread->process->process_io->fetch_thread_name(thread, &descr))
-        return descr;
-    if (*thread->name)
-    {
-        DWORD len = MultiByteToWideChar(CP_ACP, 0, thread->name, -1, NULL, 0);
-        if ((descr = malloc(len * sizeof(WCHAR))))
-            MultiByteToWideChar(CP_ACP, 0, thread->name, -1, descr, len);
-        return descr;
-    }
-    return NULL;
 }
 
 void dbg_set_option(const char* option, const char* val)

@@ -63,6 +63,7 @@
  */
 
 #include "ntstatus.h"
+#define WIN32_NO_STATUS
 #include "user_private.h"
 #include "wine/asm.h"
 #include "wine/debug.h"
@@ -380,6 +381,15 @@ HHOOK WINAPI SetWindowsHookExA( INT id, HOOKPROC proc, HINSTANCE inst, DWORD tid
 HHOOK WINAPI SetWindowsHookExW( INT id, HOOKPROC proc, HINSTANCE inst, DWORD tid )
 {
     return set_windows_hook( id, proc, inst, tid, FALSE );
+}
+
+
+/***********************************************************************
+ *		UnhookWindowsHook (USER32.@)
+ */
+BOOL WINAPI UnhookWindowsHook( INT id, HOOKPROC proc )
+{
+    return NtUserUnhookWindowsHook( id, proc );
 }
 
 

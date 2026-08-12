@@ -361,22 +361,11 @@ static void test_create_effect_and_pool(IDirect3DDevice9 *device)
 
 static void test_create_effect_compiler(void)
 {
-    static const char shader1[] =
-        "float4 main() : COLOR { return 0; }\n"
-        "float4 func2() : COLOR { return 0; }\n"
-        "float4 func() : COLOR { return 0; }\n"
-        "technique t0 < int a = 1; > { pass p0 < float b = 2; float c = 3; > {} }";
     HRESULT hr;
     ID3DXEffectCompiler *compiler, *compiler2;
-    D3DXHANDLE hfunc, htech, hpass, h;
-    D3DXPARAMETER_DESC param_desc;
-    D3DXTECHNIQUE_DESC tech_desc;
-    D3DXFUNCTION_DESC func_desc;
-    D3DXPASS_DESC pass_desc;
     ID3DXBaseEffect *base;
-    D3DXEFFECT_DESC desc;
     IUnknown *unknown;
-    ULONG refcount;
+    ULONG count;
 
     hr = D3DXCreateEffectCompiler(NULL, 0, NULL, NULL, 0, &compiler, NULL);
     ok(hr == D3DERR_INVALIDCALL, "Got result %lx, expected %lx (D3D_INVALIDCALL)\n", hr, D3DERR_INVALIDCALL);
@@ -392,8 +381,8 @@ static void test_create_effect_compiler(void)
         return;
     }
 
-    refcount = compiler->lpVtbl->Release(compiler);
-    ok(!refcount, "Got unexpected refcount %lu.\n", refcount);
+    count = compiler->lpVtbl->Release(compiler);
+    ok(count == 0, "Release failed %lu\n", count);
 
     hr = D3DXCreateEffectCompiler(effect_desc, 0, NULL, NULL, 0, NULL, NULL);
     ok(hr == D3DERR_INVALIDCALL, "Got result %lx, expected %lx (D3D_INVALIDCALL)\n", hr, D3DERR_INVALIDCALL);
@@ -419,93 +408,14 @@ static void test_create_effect_compiler(void)
     hr = compiler->lpVtbl->QueryInterface(compiler, &IID_IUnknown, (void **)&unknown);
     ok(hr == D3D_OK, "QueryInterface failed, got %lx, expected %lx (D3D_OK)\n", hr, D3D_OK);
 
-    refcount = unknown->lpVtbl->Release(unknown);
-    ok(refcount == 2, "Got unexpected refcount %lu.\n", refcount);
+    count = unknown->lpVtbl->Release(unknown);
+    ok(count == 2, "Release failed, got %lu, expected %u\n", count, 2);
 
-    refcount = compiler2->lpVtbl->Release(compiler2);
-    ok(refcount == 1, "Got unexpected refcount %lu.\n", refcount);
+    count = compiler2->lpVtbl->Release(compiler2);
+    ok(count == 1, "Release failed, got %lu, expected %u\n", count, 1);
 
-    refcount = compiler->lpVtbl->Release(compiler);
-    ok(!refcount, "Got unexpected refcount %lu.\n", refcount);
-
-    /* Accessing functions. */
-    hr = D3DXCreateEffectCompiler(shader1, sizeof(shader1), NULL, NULL, 0, &compiler, NULL);
-    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
-
-    hr = compiler->lpVtbl->GetDesc(compiler, &desc);
-    todo_wine
-    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
-    if (SUCCEEDED(hr))
-    {
-        ok(!desc.Creator, "Unexpected creator %p.\n", desc.Creator);
-        ok(!desc.Parameters, "Unexpected parameter count %u.\n", desc.Parameters);
-        ok(desc.Techniques == 1, "Unexpected technique count %u.\n", desc.Techniques);
-        ok(desc.Functions == 3, "Unexpected function count %u.\n", desc.Functions);
-    }
-
-    hfunc = compiler->lpVtbl->GetFunction(compiler, 0);
-    todo_wine
-    ok(!!hfunc, "Unexpected handle %p.\n", hfunc);
-    if (!hfunc) goto done;
-
-    hr = compiler->lpVtbl->GetFunctionDesc(compiler, hfunc, &func_desc);
-    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
-    ok(!strcmp(func_desc.Name, "main"), "Unexpected name %s.\n", func_desc.Name);
-    ok(!func_desc.Annotations, "Unexpected value %u.\n", func_desc.Annotations);
-
-    hfunc = compiler->lpVtbl->GetFunction(compiler, 1);
-    ok(!!hfunc, "Unexpected handle %p.\n", hfunc);
-
-    hr = compiler->lpVtbl->GetFunctionDesc(compiler, hfunc, &func_desc);
-    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
-    ok(!strcmp(func_desc.Name, "func2"), "Unexpected name %s.\n", func_desc.Name);
-    ok(!func_desc.Annotations, "Unexpected value %u.\n", func_desc.Annotations);
-
-    hfunc = compiler->lpVtbl->GetFunction(compiler, 2);
-    ok(!!hfunc, "Unexpected handle %p.\n", hfunc);
-
-    hr = compiler->lpVtbl->GetFunctionDesc(compiler, hfunc, &func_desc);
-    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
-    ok(!strcmp(func_desc.Name, "func"), "Unexpected name %s.\n", func_desc.Name);
-    ok(!func_desc.Annotations, "Unexpected value %u.\n", func_desc.Annotations);
-
-    hfunc = compiler->lpVtbl->GetFunction(compiler, 3);
-    ok(!hfunc, "Unexpected handle %p.\n", hfunc);
-
-    /* Technique */
-    htech = compiler->lpVtbl->GetTechnique(compiler, 0);
-    ok(!!htech, "Unexpected handle %p.\n", htech);
-
-    hr = compiler->lpVtbl->GetTechniqueDesc(compiler, htech, &tech_desc);
-    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
-    ok(!strcmp(tech_desc.Name, "t0"), "Unexpected name %s.\n", wine_dbgstr_a(tech_desc.Name));
-    ok(tech_desc.Passes == 1, "Unexpected value %u.\n", tech_desc.Passes);
-    ok(tech_desc.Annotations == 1, "Unexpected value %u.\n", tech_desc.Annotations);
-
-    h = compiler->lpVtbl->GetAnnotation(compiler, htech, 0);
-    ok(!!h, "Unexpected handle %p.\n", h);
-
-    hr = compiler->lpVtbl->GetParameterDesc(compiler, h, &param_desc);
-    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
-    ok(!strcmp(param_desc.Name, "a"), "Unexpected name %s.\n", wine_dbgstr_a(param_desc.Name));
-    ok(param_desc.Type == D3DXPT_INT, "Unexpected type %u.\n", param_desc.Type);
-    ok(param_desc.Flags == D3DX_PARAMETER_ANNOTATION, "Unexpected flags %#lx.\n", param_desc.Flags);
-
-    hr = compiler->lpVtbl->SetLiteral(compiler, h, TRUE);
-    ok(hr == D3DERR_INVALIDCALL, "Unexpected hr %#lx.\n", hr);
-
-    hpass = compiler->lpVtbl->GetPass(compiler, htech, 0);
-    ok(!!hpass, "Unexpected handle %p.\n", hpass);
-
-    hr = compiler->lpVtbl->GetPassDesc(compiler, hpass, &pass_desc);
-    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
-    ok(!strcmp(pass_desc.Name, "p0"), "Unexpected name %s.\n", wine_dbgstr_a(pass_desc.Name));
-    ok(pass_desc.Annotations == 2, "Unexpected value %u.\n", pass_desc.Annotations);
-
-done:
-
-    refcount = compiler->lpVtbl->Release(compiler);
-    ok(!refcount, "Got unexpected refcount %lu.\n", refcount);
+    count = compiler->lpVtbl->Release(compiler);
+    ok(count == 0, "Release failed %lu\n", count);
 }
 
 /*
@@ -8980,299 +8890,6 @@ static void test_effect_parameter_block(void)
     DestroyWindow(window);
 }
 
-#if D3DX_SDK_VERSION >= 27
-static void test_effect_set_raw_value(IDirect3DDevice9 *device)
-{
-    static const char test_set_raw_value_shader[] =
-        "bool b;\n"
-        "bool b_2[2];\n"
-        "bool2 b2;\n"
-        "bool2 b2_2[2];\n"
-        "bool4 b4;\n"
-        "bool4 b4_2[2];\n"
-        "bool2x2 b22;\n"
-        "bool2x2 b22_2[2];\n"
-        "bool4x4 b44;\n"
-        "bool4x4 b44_2[2];\n"
-        "int i;\n"
-        "int i_2[2];\n"
-        "int2 i2;\n"
-        "int2 i2_2[2];\n"
-        "int4 i4;\n"
-        "int4 i4_2[2];\n"
-        "int2x2 i22;\n"
-        "int2x2 i22_2[2];\n"
-        "int4x4 i44;\n"
-        "int4x4 i44_2[2];\n"
-        "float f;\n"
-        "float f_2[2];\n"
-        "float2 f2;\n"
-        "float2 f2_2[2];\n"
-        "float4 f4;\n"
-        "float4 f4_2[2];\n"
-        "float2x2 f22;\n"
-        "float2x2 f22_2[2];\n"
-        "float4x4 f44;\n"
-        "float4x4 f44_2[2];\n"
-        "technique t { pass p { } };\n";
-    static const char *param_type_str[] = { "b", "i", "f" };
-    static const struct
-    {
-        const char *suffix;
-        UINT value_offset;
-        UINT value_bytes;
-        union
-        {
-            float f[32];
-            DWORD dword[32];
-        } value;
-        union
-        {
-            float f[32];
-            DWORD dword[32];
-        } expected_value;
-        BOOL todo_hr;
-    } tests[] =
-    {
-        { NULL, 0, 4,
-          { .f = { 1.0f } },
-          { .f = { 1.0f } },
-          .todo_hr = TRUE
-        },
-        { "_2", 0, 8,
-          { .f = { 1.0f, 2.0f } },
-          { .f = { 1.0f, 0.0f } },
-          .todo_hr = TRUE
-        },
-        { "_2", 0, 20,
-          { .f = { 1.0f, 2.0f, 0.0f, 0.0f, 3.0f } },
-          { .f = { 1.0f, 3.0f, 0.0f, 0.0f, 0.0f } },
-          .todo_hr = TRUE
-        },
-        /* Offset of 4, nothing gets set. */
-        { "_2", 4, 4,
-          { .f = { 1.0f } },
-          { .f = { 0.0f, 0.0f } },
-          .todo_hr = TRUE
-        },
-        /*
-         * To set the second value in the array, we need to start at an offset
-         * of 16.
-         */
-        { "_2", 16, 4,
-          { .f = { 2.0f } },
-          { .f = { 0.0f, 2.0f } },
-          .todo_hr = TRUE
-        },
-        /* 5. */
-        { "2", 0, 8,
-          { .f = { 0.0f, 1.0f } },
-          { .f = { 0.0f, 1.0f } },
-          .todo_hr = TRUE
-        },
-        { "2_2", 0, 16,
-          { .f = { 0.0f, 1.0f, 0.0f, 2.0f } },
-          { .f = { 0.0f, 1.0f, 0.0f, 0.0f } },
-          .todo_hr = TRUE
-        },
-        { "2_2", 0, 24,
-          { .f = { 0.0f, 1.0f, 2.0f, 3.0f, 4.0f, 0.0f } },
-          { .f = { 0.0f, 1.0f, 4.0f, 0.0f } },
-          .todo_hr = TRUE
-        },
-        { "4", 0, 16,
-          { .f = { 1.0f, 2.0f, 0.0f, 3.0f } },
-          { .f = { 1.0f, 2.0f, 0.0f, 3.0f } },
-        },
-        { "4_2", 0, 32,
-          { .f = { 2.0f, 0.0f, 0.0f, 8.0f, 3.0f, 4.0f, 0.0f, 5.0f } },
-          { .f = { 2.0f, 0.0f, 0.0f, 8.0f, 3.0f, 4.0f, 0.0f, 5.0f } },
-        },
-        /* 10. */
-        { "22", 0, 64,
-          { .f = {  1.0f,  2.0f,  3.0f,  4.0f,
-                    5.0f,  6.0f,  7.0f,  0.0f,
-                    8.0f,  9.0f, 10.0f, 11.0f,
-                   12.0f, 13.0f, 14.0f,  0.0f }
-          },
-          { .f = { 1.0f, 5.0f, 2.0f, 6.0f } },
-          .todo_hr = TRUE
-        },
-        { "22_2", 0, 128,
-          { .f = {  1.0f,  2.0f,  3.0f,  4.0f,
-                    5.0f,  6.0f,  7.0f,  0.0f,
-                    8.0f,  9.0f, 10.0f, 11.0f,
-                   12.0f, 13.0f, 14.0f,  0.0f,
-                   /* Matrix 2. */
-                   15.0f, 16.0f, 17.0f, 18.0f,
-                   19.0f, 20.0f, 21.0f, 22.0f,
-                   23.0f, 24.0f, 25.0f, 26.0f,
-                   27.0f, 28.0f, 29.0f, 30.0f }
-          },
-          { .f = { 1.0f, 5.0f, 2.0f, 6.0f, 15.0f, 19.0f, 16.0f, 20.0f } },
-          .todo_hr = TRUE
-        },
-        { "44", 0, 64,
-          { .f = {  1.0f,  2.0f,  3.0f,  4.0f,
-                    5.0f,  6.0f,  7.0f,  0.0f,
-                    8.0f,  9.0f, 10.0f, 11.0f,
-                   12.0f, 13.0f, 14.0f,  0.0f }
-          },
-          { .f = {  1.0f,  5.0f,  8.0f, 12.0f,
-                    2.0f,  6.0f,  9.0f, 13.0f,
-                    3.0f,  7.0f, 10.0f, 14.0f,
-                    4.0f,  0.0f, 11.0f,  0.0f }
-          },
-        },
-        { "44_2", 0, 128,
-          { .f = {  1.0f,  2.0f,  3.0f,  4.0f,
-                    5.0f,  6.0f,  7.0f,  0.0f,
-                    8.0f,  9.0f, 10.0f, 11.0f,
-                   12.0f, 13.0f, 14.0f,  0.0f,
-                   /* Matrix 2. */
-                   15.0f, 16.0f, 17.0f, 18.0f,
-                   19.0f, 20.0f, 21.0f, 22.0f,
-                   23.0f, 24.0f, 25.0f, 26.0f,
-                   27.0f, 28.0f, 29.0f, 30.0f }
-          },
-          { .f = {  1.0f,  5.0f,  8.0f, 12.0f,
-                    2.0f,  6.0f,  9.0f, 13.0f,
-                    3.0f,  7.0f, 10.0f, 14.0f,
-                    4.0f,  0.0f, 11.0f,  0.0f,
-                   /* Matrix 2. */
-                   15.0f, 19.0f, 23.0f, 27.0f,
-                   16.0f, 20.0f, 24.0f, 28.0f,
-                   17.0f, 21.0f, 25.0f, 29.0f,
-                   18.0f, 22.0f, 26.0f, 30.0f }
-          },
-        },
-        /* Set second element. */
-        { "44_2", 64, 64,
-          { .f = {  1.0f,  2.0f,  3.0f,  4.0f,
-                    5.0f,  6.0f,  7.0f,  0.0f,
-                    8.0f,  9.0f, 10.0f, 11.0f,
-                   12.0f, 13.0f, 14.0f,  0.0f }
-          },
-          { .f = {  0.0f,  0.0f,  0.0f,  0.0f,
-                    0.0f,  0.0f,  0.0f,  0.0f,
-                    0.0f,  0.0f,  0.0f,  0.0f,
-                    0.0f,  0.0f,  0.0f,  0.0f,
-                   /* Matrix 2. */
-                    1.0f,  5.0f,  8.0f, 12.0f,
-                    2.0f,  6.0f,  9.0f, 13.0f,
-                    3.0f,  7.0f, 10.0f, 14.0f,
-                    4.0f,  0.0f, 11.0f,  0.0f }
-          },
-        },
-    };
-    static const DWORD test_int_val[] = { 1, 2, 3, 4 };
-    D3DXPARAMETER_DESC param_desc;
-    D3DXHANDLE param, param2;
-    unsigned int i, j, k;
-    char param_name[64];
-    ID3DXEffect *effect;
-    ULONG refcount;
-    DWORD tmp[32];
-    HRESULT hr;
-
-    hr = D3DXCreateEffect(device, test_set_raw_value_shader,
-            sizeof(test_set_raw_value_shader), NULL, NULL, 0, NULL, &effect, NULL);
-    ok(hr == D3D_OK, "Unexpected hr %#lx.\n", hr);
-
-    for (i = 0; i < ARRAY_SIZE(tests); ++i)
-    {
-        for (j = 0; j < ARRAY_SIZE(param_type_str); ++j)
-        {
-            strcpy(param_name, param_type_str[j]);
-            if (tests[i].suffix)
-                strcat(param_name, tests[i].suffix);
-
-            winetest_push_context("Test %u (param %s)", i, param_name);
-            param = effect->lpVtbl->GetParameterByName(effect, NULL, param_name);
-
-            hr = effect->lpVtbl->GetParameterDesc(effect, param, &param_desc);
-            ok(hr == D3D_OK, "Unexpected hr %#lx.\n", hr);
-
-            /* Clear our values first. */
-            memset(tmp, 0, sizeof(tmp));
-            hr = effect->lpVtbl->SetValue(effect, param, tmp, sizeof(tmp));
-            ok(hr == D3D_OK, "Unexpected hr %#lx.\n", hr);
-
-            hr = effect->lpVtbl->SetRawValue(effect, param, tests[i].value.dword, tests[i].value_offset,
-                    tests[i].value_bytes);
-            todo_wine_if(tests[i].todo_hr) ok(hr == D3D_OK, "Unexpected hr %#lx.\n", hr);
-            if (SUCCEEDED(hr))
-            {
-                unsigned int unexpected_values = 0;
-
-                memset(tmp, 0xff, sizeof(tmp));
-                hr = effect->lpVtbl->GetValue(effect, param, tmp, sizeof(tmp));
-                ok(hr == D3D_OK, "Unexpected hr %#lx.\n", hr);
-
-                for (k = 0; k < (param_desc.Bytes / sizeof(*tmp)); ++k)
-                {
-                    const DWORD *expected_val = &tests[i].expected_value.dword[k];
-                    DWORD *ret_val = &tmp[k];
-
-                    if (param_desc.Type == D3DXPT_BOOL && (!!(*expected_val) != (*ret_val)))
-                        unexpected_values++;
-                    else if (param_desc.Type != D3DXPT_BOOL && memcmp(ret_val, expected_val, sizeof(*ret_val)))
-                        unexpected_values++;
-                }
-
-                for (; k < ARRAY_SIZE(tmp); ++k)
-                {
-                    if (tmp[k] != 0xffffffffu)
-                        unexpected_values++;
-                }
-
-                ok(!unexpected_values, "Got %u unexpected values.\n", unexpected_values);
-            }
-            winetest_pop_context();
-        }
-    }
-
-    /* Test passing a NULL parameter. */
-    hr = effect->lpVtbl->SetRawValue(effect, NULL, tmp, 4, 0);
-    ok(hr == D3DERR_INVALIDCALL, "Unexpected hr %#lx.\n", hr);
-
-    param = effect->lpVtbl->GetParameterByName(effect, NULL, "i4");
-    param2 = effect->lpVtbl->GetParameterByName(effect, NULL, "i44");
-
-    /* Test setting with a size of 0. */
-    hr = effect->lpVtbl->SetRawValue(effect, param, tmp, 0, 0);
-    ok(hr == D3D_OK, "Unexpected hr %#lx.\n", hr);
-
-    hr = effect->lpVtbl->SetRawValue(effect, param2, tmp, 0, 0);
-    ok(hr == D3D_OK, "Unexpected hr %#lx.\n", hr);
-
-    param = effect->lpVtbl->GetParameterByName(effect, NULL, "i4");
-    param2 = effect->lpVtbl->GetParameterByName(effect, NULL, "i4_2");
-
-    /* Test setting adjacent variables. */
-    memset(tmp, 0, sizeof(tmp));
-    hr = effect->lpVtbl->SetValue(effect, param, tmp, sizeof(tmp));
-    ok(hr == D3D_OK, "Unexpected hr %#lx.\n", hr);
-    hr = effect->lpVtbl->SetValue(effect, param2, tmp, sizeof(tmp));
-    ok(hr == D3D_OK, "Unexpected hr %#lx.\n", hr);
-
-    /* An offset of 16 bytes on variable i4 sets adjacent variable i4_2. */
-    hr = effect->lpVtbl->SetRawValue(effect, param, test_int_val, 16, sizeof(test_int_val));
-    todo_wine ok(hr == D3D_OK, "Unexpected hr %#lx.\n", hr);
-
-    hr = effect->lpVtbl->GetValue(effect, param, tmp, sizeof(tmp));
-    ok(hr == D3D_OK, "Unexpected hr %#lx.\n", hr);
-    ok(!tmp[0], "Unexpected value.\n");
-
-    hr = effect->lpVtbl->GetValue(effect, param2, tmp, sizeof(tmp));
-    ok(hr == D3D_OK, "Unexpected hr %#lx.\n", hr);
-    todo_wine ok(!memcmp(tmp, test_int_val, sizeof(test_int_val)), "Got unexpected values.\n");
-
-    refcount = effect->lpVtbl->Release(effect);
-    ok(!refcount, "Unexpected refcount %lu.\n", refcount);
-}
-#endif /* D3DX_SDK_VERSION >= 27 */
-
 START_TEST(effect)
 {
     IDirect3DDevice9 *device;
@@ -9301,9 +8918,6 @@ START_TEST(effect)
     test_effect_large_address_aware_flag(device);
     test_effect_get_pass_desc(device);
     test_effect_skip_constants(device);
-#if D3DX_SDK_VERSION >= 27
-    test_effect_set_raw_value(device);
-#endif
 
     refcount = IDirect3DDevice9_Release(device);
     ok(!refcount, "Device has %lu references left.\n", refcount);

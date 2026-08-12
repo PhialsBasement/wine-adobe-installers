@@ -27,6 +27,7 @@
 #include <time.h>
 
 #include "ntstatus.h"
+#define WIN32_NO_STATUS
 #include "winternl.h"
 #include "winbase.h"
 #include "winnls.h"
@@ -59,15 +60,25 @@ SYSTEM_BASIC_INFORMATION system_info = { 0 };
 #define PDB32_FILE_APIS_OEM 0x0040  /* File APIs are OEM */
 #define PDB32_WIN32S_PROC   0x8000  /* Win32s process */
 
-static DWORD (WINAPI *wait_input_idle)( HANDLE process, DWORD timeout );
 
 /***********************************************************************
- *           RegisterWaitForInputIdle   (KERNEL32.@)
+ *           wait_input_idle
+ *
+ * Wrapper to call WaitForInputIdle USER function
  */
-void WINAPI RegisterWaitForInputIdle( void *ptr )
+typedef DWORD (WINAPI *WaitForInputIdle_ptr)( HANDLE hProcess, DWORD dwTimeOut );
+
+static DWORD wait_input_idle( HANDLE process, DWORD timeout )
 {
-    wait_input_idle = ptr;
+    HMODULE mod = GetModuleHandleA( "user32.dll" );
+    if (mod)
+    {
+        WaitForInputIdle_ptr ptr = (WaitForInputIdle_ptr)GetProcAddress( mod, "WaitForInputIdle" );
+        if (ptr) return ptr( process, timeout );
+    }
+    return 0;
 }
+
 
 /***********************************************************************
  *           WinExec   (KERNEL32.@)
@@ -92,7 +103,8 @@ UINT WINAPI DECLSPEC_HOTPATCH WinExec( LPCSTR lpCmdLine, UINT nCmdShow )
                         0, NULL, NULL, &startup, &info ))
     {
         /* Give 30 seconds to the app to come up */
-        if (wait_input_idle) wait_input_idle( info.hProcess, 30000 );
+        if (wait_input_idle( info.hProcess, 30000 ) == WAIT_FAILED)
+            WARN("WaitForInputIdle failed: Error %ld\n", GetLastError() );
         ret = 33;
         /* Close off the handles */
         CloseHandle( info.hThread );
@@ -149,7 +161,8 @@ DWORD WINAPI LoadModule( LPCSTR name, LPVOID paramBlock )
                         params->lpEnvAddress, NULL, &startup, &info ))
     {
         /* Give 30 seconds to the app to come up */
-        if (wait_input_idle) wait_input_idle( info.hProcess, 30000 );
+        if (wait_input_idle( info.hProcess, 30000 ) == WAIT_FAILED)
+            WARN("WaitForInputIdle failed: Error %ld\n", GetLastError() );
         ret = 33;
         /* Close off the handles */
         CloseHandle( info.hThread );

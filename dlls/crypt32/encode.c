@@ -4859,8 +4859,6 @@ static CryptEncodeObjectExFunc CRYPT_GetBuiltinEncoder(DWORD dwCertEncodingType,
         encodeFunc = CRYPT_AsnEncodeCRLDistPoints;
     else if (!strcmp(lpszStructType, szOID_CERT_POLICIES))
         encodeFunc = CRYPT_AsnEncodeCertPolicies;
-    else if (!strcmp(lpszStructType, szOID_APPLICATION_CERT_POLICIES))
-        FIXME("szOID_APPLICATION_CERT_POLICIES\n");
     else if (!strcmp(lpszStructType, szOID_POLICY_MAPPINGS))
         encodeFunc = CRYPT_AsnEncodeCertPolicyMappings;
     else if (!strcmp(lpszStructType, szOID_POLICY_CONSTRAINTS))

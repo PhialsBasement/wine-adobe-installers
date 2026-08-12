@@ -49,7 +49,6 @@
 #define IDS_DISABLED_CC                     0x0406
 #define IDS_EXPECTED_AT                     0x0408
 #define IDS_NOT_FUNC                        0x138A
-#define IDS_NOT_STRING                      0x138D
 #define IDS_NOT_DATE                        0x138E
 #define IDS_NOT_NUM                         0x1389
 #define IDS_OBJECT_EXPECTED                 0x138F
@@ -68,7 +67,6 @@
 #define IDS_URI_INVALID_CODING              0x13A1
 #define IDS_FRACTION_DIGITS_OUT_OF_RANGE    0x13A2
 #define IDS_PRECISION_OUT_OF_RANGE          0x13A3
-#define IDS_ARRAY_OR_ARGS_EXPECTED          0x13A4
 #define IDS_INVALID_LENGTH                  0x13A5
 #define IDS_ARRAY_EXPECTED                  0x13A7
 #define IDS_INVALID_WRITABLE_PROP_DESC      0x13AC

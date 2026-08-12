@@ -442,7 +442,8 @@ static void test_kerberos(void)
     static const ULONG optional_mask =
           SECPKG_FLAG_RESTRICTED_TOKENS
         | SECPKG_FLAG_APPCONTAINER_CHECKS
-        | SECPKG_FLAG_APPLY_LOOPBACK;
+        | 0x02000000; /* not defined in the SDK */
+
 
     status = QuerySecurityPackageInfoA(provider, &info);
     ok(status == SEC_E_OK, "Kerberos package not installed (%08lx), skipping test\n", status);
@@ -452,7 +453,7 @@ static void test_kerberos(void)
     ok( (info->fCapabilities & ~optional_mask) == expected_flags, "got %08lx, expected %08lx\n", info->fCapabilities, expected_flags );
     ok( info->wVersion == 1, "got %u\n", info->wVersion );
     ok( info->wRPCID == RPC_C_AUTHN_GSS_KERBEROS, "got %u\n", info->wRPCID );
-    ok( info->cbMaxToken == 48000 || broken(info->cbMaxToken == 12000) /* Win7 */, "got %lu\n", info->cbMaxToken );
+    ok( info->cbMaxToken >= 12000, "got %lu\n", info->cbMaxToken );
     ok( !lstrcmpA( info->Name, "Kerberos" ), "got %s\n", info->Name );
     ok( !lstrcmpA( info->Comment, "Microsoft Kerberos V1.0" ), "got %s\n", info->Comment );
     FreeContextBuffer( info );

@@ -2363,38 +2363,6 @@ short __cdecl _FExp(float *x, float y, short scale)
     return dclass(*x);
 }
 
-/* ?_Cosh@?$_Ctr@N@std@@SANNN@Z
-   ?_Cosh@?$_Ctraits@N@std@@SANNN@Z
-   ?_Cosh@?$_Ctr@O@std@@SAOOO@Z
-   ?_Cosh@?$_Ctraits@O@std@@SAOOO@Z*/
-double __cdecl _Cosh(double x, double y)
-{
-    return y * cosh(x);
-}
-
-/* ?_Cosh@?$_Ctr@M@std@@SAMMM@Z
-   ?_Cosh@?$_Ctraits@M@std@@SAMMM@Z*/
-float __cdecl _FCosh(float x, float y)
-{
-    return y * cosh(x);
-}
-
-/* ?_Sinh@?$_Ctr@N@std@@SANNN@Z
-   ?_Sinh@?$_Ctraits@N@std@@SANNN@Z
-   ?_Sinh@?$_Ctr@O@std@@SAOOO@Z
-   ?_Sinh@?$_Ctraits@O@std@@SAOOO@Z */
-double __cdecl _Sinh(double x, double y)
-{
-    return y * sinh(x);
-}
-
-/* ?_Sinh@?$_Ctr@M@std@@SAMMM@Z
-   ?_Sinh@?$_Ctraits@M@std@@SAMMM@Z */
-float __cdecl _FSinh(float x, float y)
-{
-    return y * sinh(x);
-}
-
 /* ?_XLgamma@std@@YANN@Z */
 double __cdecl std__XLgamma_double(double z)
 {

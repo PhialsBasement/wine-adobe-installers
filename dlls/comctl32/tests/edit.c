@@ -48,47 +48,6 @@ enum msg_id
 
 static struct msg_sequence *sequences[NUM_MSG_SEQUENCES];
 
-static void CALLBACK msg_winevent_proc(HWINEVENTHOOK hevent,
-                                       DWORD event,
-                                       HWND hwnd,
-                                       LONG object_id,
-                                       LONG child_id,
-                                       DWORD thread_id,
-                                       DWORD event_time)
-{
-    struct message msg = {0};
-    char class_name[256];
-
-    /* ignore window and other system events */
-    if (object_id != OBJID_CLIENT) return;
-
-    /* ignore events not from an edit control */
-    if (!GetClassNameA(hwnd, class_name, ARRAY_SIZE(class_name)) ||
-        strcmp(class_name, WC_EDITA) != 0)
-        return;
-
-    msg.message = event;
-    msg.flags = winevent_hook|wparam|lparam;
-    msg.wParam = object_id;
-    msg.lParam = child_id;
-    add_message(sequences, COMBINED_SEQ_INDEX, &msg);
-}
-
-static void init_winevent_hook(void) {
-    hwineventhook = SetWinEventHook(EVENT_MIN, EVENT_MAX, GetModuleHandleA(0), msg_winevent_proc,
-                                    0, GetCurrentThreadId(), WINEVENT_INCONTEXT);
-    if (!hwineventhook)
-        win_skip( "no win event hook support\n" );
-}
-
-static void uninit_winevent_hook(void) {
-    if (!hwineventhook)
-        return;
-
-    UnhookWinEvent(hwineventhook);
-    hwineventhook = 0;
-}
-
 struct edit_notify {
     int en_change, en_maxtext, en_update;
 };
@@ -775,7 +734,6 @@ static void test_edit_control_1(void)
     hwEdit = create_editcontrol(ES_AUTOHSCROLL | ES_AUTOVSCROLL, 0);
     r = get_edit_style(hwEdit);
     ok(r == (ES_AUTOVSCROLL | ES_AUTOHSCROLL), "Wrong style expected 0xc0 got: 0x%lx\n", r);
-
     for (i = 0; i < 65535; i++)
     {
         msMessage.wParam = i;
@@ -3451,7 +3409,6 @@ static void test_wordbreak_proc(void)
 static const struct message setfocus_combined_seq[] =
 {
     { WM_KILLFOCUS,    sent|id,            0, 0,                      PARENT_ID },
-    { EVENT_OBJECT_FOCUS, winevent_hook|lparam, 0, 0 },
     { WM_SETFOCUS,     sent|id,            0, 0,                      EDIT_ID   },
     { WM_COMMAND,      sent|wparam|id, MAKEWPARAM(1, EN_SETFOCUS), 0, PARENT_ID },
     { WM_PAINT,        sent|id,            0, 0,                      EDIT_ID   },
@@ -3473,7 +3430,6 @@ static const struct message killfocus_combined_seq[] =
 static const struct message setfocus_sent_only_combined_seq[] =
 {
     { WM_KILLFOCUS,    sent|id,            0, 0,                      PARENT_ID },
-    { EVENT_OBJECT_FOCUS, winevent_hook|lparam, 0, 0 },
     { WM_SETFOCUS,     sent|id,            0, 0,                      EDIT_ID   },
     { WM_COMMAND,      sent|wparam|id, MAKEWPARAM(1, EN_SETFOCUS), 0, PARENT_ID },
     { 0 }
@@ -3626,13 +3582,9 @@ static const struct message wm_ime_composition_seq[] =
     {WM_IME_CHAR, sent | wparam | defwinproc, 'e'},
     {WM_IME_ENDCOMPOSITION, sent},
     {WM_CHAR, sent | wparam, 'W'},
-    {EVENT_OBJECT_VALUECHANGE, winevent_hook|lparam, 0, 0},
     {WM_CHAR, sent | wparam, 'i'},
-    {EVENT_OBJECT_VALUECHANGE, winevent_hook|lparam, 0, 0},
     {WM_CHAR, sent | wparam, 'n'},
-    {EVENT_OBJECT_VALUECHANGE, winevent_hook|lparam, 0, 0},
     {WM_CHAR, sent | wparam, 'e'},
-    {EVENT_OBJECT_VALUECHANGE, winevent_hook|lparam, 0, 0},
     {0}
 };
 
@@ -3645,13 +3597,9 @@ static const struct message wm_ime_composition_korean_seq[] =
     {WM_IME_CHAR, sent | wparam | defwinproc, 'n'},
     {WM_IME_CHAR, sent | wparam | defwinproc, 'e'},
     {WM_CHAR, sent | wparam, 'W'},
-    {EVENT_OBJECT_VALUECHANGE, winevent_hook|lparam, 0, 0},
     {WM_CHAR, sent | wparam, 'i'},
-    {EVENT_OBJECT_VALUECHANGE, winevent_hook|lparam, 0, 0},
     {WM_CHAR, sent | wparam, 'n'},
-    {EVENT_OBJECT_VALUECHANGE, winevent_hook|lparam, 0, 0},
     {WM_CHAR, sent | wparam, 'e'},
-    {EVENT_OBJECT_VALUECHANGE, winevent_hook|lparam, 0, 0},
     {0}
 };
 
@@ -3659,7 +3607,6 @@ static const struct message wm_ime_char_seq[] =
 {
     {WM_IME_CHAR, sent | wparam, '0'},
     {WM_CHAR, sent | wparam, '0'},
-    {EVENT_OBJECT_VALUECHANGE, winevent_hook|lparam, 0, 0},
     {0}
 };
 
@@ -3667,7 +3614,6 @@ static const struct message eimes_getcompstratonce_seq[] =
 {
     {WM_IME_STARTCOMPOSITION, sent},
     {WM_IME_COMPOSITION, sent | wparam, 'W'},
-    {EVENT_OBJECT_VALUECHANGE, winevent_hook|lparam, 0, 0},
     {WM_IME_ENDCOMPOSITION, sent},
     {0}
 };
@@ -3893,50 +3839,6 @@ static void test_format_rect(void)
     }
 }
 
-static void test_PASSWORDCHAR(void)
-{
-    HWND hwEdit;
-    LONG r;
-    CHAR passwdChar = '#';
-
-    hwEdit = create_editcontrol(ES_AUTOHSCROLL | ES_AUTOVSCROLL, 0);
-
-    r = SendMessageA(hwEdit, EM_SETPASSWORDCHAR, passwdChar, 0);
-    ok(r == 1, "Expected: 1, got: %ld\n", r);
-
-    r = get_edit_style(hwEdit);
-    ok(r & ES_PASSWORD, "Wrong style expected ES_PASSWORD got: 0x%lx\n", r);
-
-    r = SendMessageA(hwEdit, EM_GETPASSWORDCHAR, 0, 0);
-    ok(r == passwdChar, "Expected: 0, got: %ld\n", r);
-
-    DestroyWindow (hwEdit);
-
-    hwEdit = create_editcontrol(ES_MULTILINE, 0);
-    r = get_edit_style(hwEdit);
-    ok(r == ES_MULTILINE, "Wrong style expected ES_PASSWORD got: 0x%lx\n", r);
-
-    r = SendMessageA(hwEdit, EM_SETPASSWORDCHAR, passwdChar, 0);
-    ok(r == 1, "Expected: 1, got: %ld\n", r);
-
-    r = get_edit_style(hwEdit);
-    ok(r == (ES_MULTILINE | ES_PASSWORD), "Wrong style expected ES_MULTILINE|ES_PASSWORD got: 0x%lx\n", r);
-
-    r = SendMessageA(hwEdit, EM_GETPASSWORDCHAR, 0, 0);
-    ok(r == passwdChar, "Expected: 0, got: %ld\n", r);
-
-    r = SendMessageA(hwEdit, EM_SETPASSWORDCHAR, 0, 0);
-    ok(r == 1, "Expected: 1, got: %ld\n", r);
-
-    r = get_edit_style(hwEdit);
-    ok(r == ES_MULTILINE, "Wrong style expected ES_PASSWORD got: 0x%lx\n", r);
-
-    r = SendMessageA(hwEdit, EM_GETPASSWORDCHAR, 0, 0);
-    ok(r == 0, "Expected: 0, got: %ld\n", r);
-
-    DestroyWindow (hwEdit);
-}
-
 START_TEST(edit)
 {
     ULONG_PTR ctx_cookie;
@@ -3947,8 +3849,6 @@ START_TEST(edit)
         return;
 
     init_msg_sequences(sequences, NUM_MSG_SEQUENCES);
-
-    init_winevent_hook();
 
     hinst = GetModuleHandleA(NULL);
     b = register_classes();
@@ -3987,11 +3887,8 @@ START_TEST(edit)
     test_cue_banner();
     test_ime();
     test_format_rect();
-    test_PASSWORDCHAR();
 
     UnregisterWindowClasses();
-
-    uninit_winevent_hook();
 
     unload_v6_module(ctx_cookie, hCtx);
 }

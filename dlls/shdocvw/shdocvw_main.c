@@ -28,6 +28,7 @@
 #include "shdocvw.h"
 
 #include "winreg.h"
+#include "shlwapi.h"
 #include "wininet.h"
 #include "isguids.h"
 
@@ -140,6 +141,22 @@ BOOL WINAPI DllMain(HINSTANCE hinst, DWORD fdwReason, LPVOID fImpLoad)
 HRESULT WINAPI DllCanUnloadNow(void)
 {
     return SHDOCVW_refCount ? S_FALSE : S_OK;
+}
+
+/***********************************************************************
+ *              DllGetVersion (SHDOCVW.@)
+ */
+HRESULT WINAPI DllGetVersion(DLLVERSIONINFO *info)
+{
+    if (info->cbSize != sizeof(DLLVERSIONINFO)) FIXME("support DLLVERSIONINFO2\n");
+
+    /* this is what IE6 on Windows 98 reports */
+    info->dwMajorVersion = 6;
+    info->dwMinorVersion = 0;
+    info->dwBuildNumber = 2600;
+    info->dwPlatformID = DLLVER_PLATFORM_WINDOWS;
+
+    return NOERROR;
 }
 
 /*************************************************************************
@@ -289,6 +306,126 @@ DWORD WINAPI StopWatchWFORWARD(DWORD dwClass, LPCWSTR lpszStr, DWORD dwUnknown,
     if (p || (p = fetch_shlwapi_ordinal(244)))
         return p(dwClass, lpszStr, dwUnknown, dwMode, dwTimeStamp);
     return ERROR_CALL_NOT_IMPLEMENTED;
+}
+
+/******************************************************************
+ *  URLSubRegQueryA (SHDOCVW.151)
+ */
+HRESULT WINAPI URLSubRegQueryA(LPCSTR regpath, LPCSTR name, DWORD type,
+                               LPSTR out, DWORD outlen, DWORD unknown)
+{
+    CHAR buffer[INTERNET_MAX_URL_LENGTH];
+    DWORD len;
+    LONG res;
+
+    TRACE("(%s, %s, %ld, %p, %ld, %ld)\n", debugstr_a(regpath), debugstr_a(name),
+            type, out, outlen, unknown);
+
+    if (!out) return S_OK;
+
+    len = sizeof(buffer);
+    res = SHRegGetUSValueA(regpath, name, NULL, buffer,  &len, FALSE, NULL, 0);
+    if (!res) {
+        lstrcpynA(out, buffer, outlen);
+        return S_OK;
+    }
+
+    return E_FAIL;
+}
+
+/******************************************************************
+ *  ParseURLFromOutsideSourceW (SHDOCVW.170)
+ */
+DWORD WINAPI ParseURLFromOutsideSourceW(LPCWSTR url, LPWSTR out, LPDWORD plen, LPDWORD unknown)
+{
+    WCHAR buffer_in[INTERNET_MAX_URL_LENGTH];
+    WCHAR buffer_out[INTERNET_MAX_URL_LENGTH];
+    LPCWSTR ptr = url;
+    HRESULT hr;
+    DWORD needed;
+    DWORD len;
+    DWORD res = 0;
+
+
+    TRACE("(%s, %p, %p, %p) len: %ld, unknown: 0x%lx\n", debugstr_w(url), out, plen, unknown,
+            plen ? *plen : 0, unknown ? *unknown : 0);
+
+    if (!PathIsURLW(ptr)) {
+        len = ARRAY_SIZE(buffer_in);
+        buffer_in[0] = 0;
+        hr = UrlApplySchemeW(ptr, buffer_in, &len, URL_APPLY_GUESSSCHEME | URL_APPLY_DEFAULT);
+        TRACE("got 0x%lx with %s\n", hr, debugstr_w(buffer_in));
+        if (hr == S_OK) {
+            /* we parsed the url to buffer_in */
+            ptr = buffer_in;
+        }
+        else
+        {
+            FIXME("call search hook for %s\n", debugstr_w(ptr));
+        }
+    }
+
+    len = ARRAY_SIZE(buffer_out);
+    buffer_out[0] = '\0';
+    hr = UrlCanonicalizeW(ptr, buffer_out, &len, URL_ESCAPE_SPACES_ONLY);
+    needed = lstrlenW(buffer_out)+1;
+    TRACE("got 0x%lx with %s (need %ld)\n", hr, debugstr_w(buffer_out), needed);
+
+    if (*plen >= needed) {
+        if (out != NULL) {
+            lstrcpyW(out, buffer_out);
+            res++;
+        }
+        needed--;
+    }
+
+    *plen = needed;
+
+    TRACE("=> %ld\n", res);
+    return res;
+}
+
+/******************************************************************
+ *  ParseURLFromOutsideSourceA (SHDOCVW.169)
+ *
+ * See ParseURLFromOutsideSourceW
+ */
+DWORD WINAPI ParseURLFromOutsideSourceA(LPCSTR url, LPSTR out, LPDWORD plen, LPDWORD unknown)
+{
+    WCHAR buffer[INTERNET_MAX_URL_LENGTH];
+    LPWSTR urlW = NULL;
+    DWORD needed;
+    DWORD res;
+    DWORD len;
+
+    TRACE("(%s, %p, %p, %p) len: %ld, unknown: 0x%lx\n", debugstr_a(url), out, plen, unknown,
+            plen ? *plen : 0, unknown ? *unknown : 0);
+
+    if (url) {
+        len = MultiByteToWideChar(CP_ACP, 0, url, -1, NULL, 0);
+        urlW = malloc(len * sizeof(WCHAR));
+        MultiByteToWideChar(CP_ACP, 0, url, -1, urlW, len);
+    }
+
+    len = ARRAY_SIZE(buffer);
+    ParseURLFromOutsideSourceW(urlW, buffer, &len, unknown);
+    free(urlW);
+
+    needed = WideCharToMultiByte(CP_ACP, 0, buffer, -1, NULL, 0, NULL, NULL);
+
+    res = 0;
+    if (*plen >= needed) {
+        if (out != NULL) {
+            WideCharToMultiByte(CP_ACP, 0, buffer, -1, out, *plen, NULL, NULL);
+            res = needed;
+        }
+        needed--;
+    }
+
+    *plen = needed;
+
+    TRACE("=> %ld\n", res);
+    return res;
 }
 
 /******************************************************************

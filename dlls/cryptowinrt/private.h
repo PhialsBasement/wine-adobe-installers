@@ -37,10 +37,11 @@
 #define WIDL_using_Windows_Security_Credentials
 #include "windows.security.credentials.h"
 
-#include "async_private.h"
+#include "provider.h"
 
 extern IActivationFactory *credentials_activation_factory;
 
+typedef HRESULT (WINAPI *async_operation_callback)( IUnknown *invoker, IUnknown *param, PROPVARIANT *result );
 extern HRESULT async_operation_boolean_create( IUnknown *invoker, IUnknown *param, async_operation_callback callback,
                                                IAsyncOperation_boolean **out );
 

@@ -236,7 +236,7 @@ typedef struct _IP4_ARRAY
 #define DNS_RCODE_NAME_ERROR       DNS_RCODE_NXDOMAIN
 #define DNS_RCODE_NOT_IMPLEMENTED  DNS_RCODE_NOTIMPL
 
-#pragma pack(push,1)
+#include <pshpack1.h>
 typedef struct _DNS_HEADER
 {
     WORD Xid;
@@ -255,7 +255,7 @@ typedef struct _DNS_HEADER
     WORD NameServerCount;
     WORD AdditionalCount;
 } DNS_HEADER, *PDNS_HEADER;
-#pragma pack(pop)
+#include <poppack.h>
 
 typedef struct _DNS_MESSAGE_BUFFER
 {
@@ -680,7 +680,7 @@ typedef struct _DnsRRSet
 {                                      \
     PDNS_RRSET  _prrset = &(rrset);    \
     PDNS_RECORD _prrnew = (pnewRR);    \
-    *(PDNS_RECORD *)_prrset->pLastRR = _prrnew; \
+    _prrset->pLastRR->pNext = _prrnew; \
     _prrset->pLastRR = _prrnew;        \
 }
 
@@ -692,7 +692,7 @@ typedef struct _DnsRRSet
 
 #define DNS_ADDR_MAX_SOCKADDR_LENGTH 32
 
-#pragma pack(push,1)
+#include <pshpack1.h>
 
 typedef struct _DnsAddr
 {
@@ -716,7 +716,7 @@ typedef struct _DnsAddrArray
     DNS_ADDR AddrArray[1];
 } DNS_ADDR_ARRAY, *PDNS_ADDR_ARRAY;
 
-#pragma pack(pop)
+#include <poppack.h>
 
 #define DNS_QUERY_RESULTS_VERSION1  0x1
 

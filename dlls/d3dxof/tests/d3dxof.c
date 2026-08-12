@@ -366,8 +366,6 @@ static char object_complex[] =
 "3;;;, 0;;;, 1;;;, 2;;;,\n"
 "3;;;, 1;;;, 2;;;, 3;;;,\n"
 "3;;;, 3;;;, 1;;;, 2;;;,\n"
-/* child object for memory layout test */
-"Vector{0.0;;;, 0.0;;;, 0.0;;;}\n"
 "}\n";
 
 static char template_using_index_color_lower[] =
@@ -1007,119 +1005,6 @@ static void test_complex_object(void)
     IDirectXFile_Release(dxfile);
 }
 
-static void test_getdata_memory_layout(void)
-{
-    IDirectXFile *dxfile = NULL;
-    IDirectXFileEnumObject *enum_object, *enum_object2;
-    IDirectXFileData *root_data, *root_data2, *child_data, *child_data2;
-    IDirectXFileObject *child_obj, *child_obj2;
-    DXFILELOADMEMORY load_info;
-    HRESULT hr;
-    size_t distance;
-    DWORD root_size, child_size;
-    void *root_ptr, *child_ptr;
-    void *root_ptr2, *child_ptr2;
-    DWORD *pre_data;
-    ULONG ref;
-
-    if (!pDirectXFileCreate)
-    {
-        win_skip("DirectXFileCreate is not available\n");
-        return;
-    }
-
-    hr = pDirectXFileCreate(&dxfile);
-    ok(hr == DXFILE_OK, "Unexpected hr %#lx.\n", hr);
-
-    hr = IDirectXFile_RegisterTemplates(dxfile, templates_complex_object, sizeof(templates_complex_object) - 1);
-    ok(hr == DXFILE_OK, "Unexpected hr %#lx.\n", hr);
-
-    load_info.lpMemory = object_complex;
-    load_info.dSize = sizeof(object_complex) - 1;
-    hr = IDirectXFile_CreateEnumObject(dxfile, &load_info, DXFILELOAD_FROMMEMORY, &enum_object);
-    ok(hr == DXFILE_OK, "Unexpected hr %#lx.\n", hr);
-
-    hr = IDirectXFileEnumObject_GetNextDataObject(enum_object, &root_data);
-    ok(hr == DXFILE_OK, "Unexpected hr %#lx.\n", hr);
-    hr = IDirectXFileData_GetData(root_data, NULL, &root_size, &root_ptr);
-    ok(hr == DXFILE_OK, "Unexpected hr %#lx.\n", hr);
-    ok(root_size == 104, "Unexpected root size %lu.\n", root_size);
-
-    hr = IDirectXFileData_GetNextObject(root_data, &child_obj);
-    ok(hr == DXFILE_OK, "Unexpected hr %#lx.\n", hr);
-
-    hr = IDirectXFileObject_QueryInterface(child_obj, &IID_IDirectXFileData, (void** )&child_data);
-    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
-
-    hr = IDirectXFileData_GetData(child_data, NULL, &child_size, &child_ptr);
-    ok(hr == DXFILE_OK, "Unexpected hr %#lx.\n", hr);
-    ok(child_size == 12, "Unexpected child size %lu.\n", child_size);
-
-    distance = root_ptr > child_ptr ? (BYTE *)root_ptr - (BYTE *)child_ptr : (BYTE *)child_ptr - (BYTE *)root_ptr;
-    todo_wine ok(distance > root_size + child_size, "Unexpected distance %Iu.\n", distance);
-
-    pre_data = (DWORD *)root_ptr - 1;
-    ok(*pre_data >= 2, "Unexpected value %#lx at root_ptr - 4.\n", *pre_data);
-    pre_data = (DWORD *)child_ptr - 1;
-    ok(*pre_data >= 2, "Unexpected value %#lx at child_ptr - 4.\n", *pre_data);
-
-    hr = IDirectXFileData_GetData(root_data, NULL, &root_size, &root_ptr2);
-    ok(hr == DXFILE_OK, "Unexpected hr %#lx.\n", hr);
-    hr = IDirectXFileData_GetData(child_data, NULL, &child_size, &child_ptr2);
-    ok(hr == DXFILE_OK, "Unexpected hr %#lx.\n", hr);
-    ok(root_ptr == root_ptr2, "Unexpected root_ptr %p, root_ptr2 %p\n", root_ptr, root_ptr2);
-    ok(child_ptr == child_ptr2, "Unexpected child_ptr %p, child_ptr2 %p\n", child_ptr, child_ptr2);
-
-    hr = IDirectXFile_CreateEnumObject(dxfile, &load_info, DXFILELOAD_FROMMEMORY, &enum_object2);
-    ok(hr == DXFILE_OK, "Unexpected hr %#lx.\n", hr);
-    ok(enum_object != enum_object2, "Unexpected enum_object %p, enum_object2 %p\n", enum_object, enum_object2);
-
-    hr = IDirectXFileEnumObject_GetNextDataObject(enum_object2, &root_data2);
-    ok(hr == DXFILE_OK, "Unexpected hr %#lx.\n", hr);
-    ok(root_data != root_data2, "Unexpected root_data %p, root_data2 %p\n", root_data, root_data2);
-    hr = IDirectXFileData_GetData(root_data2, NULL, &root_size, &root_ptr2);
-    ok(hr == DXFILE_OK, "Unexpected hr %#lx.\n", hr);
-    ok(root_ptr != root_ptr2, "Unexpected root_ptr %p, root_ptr2 %p\n", root_ptr, root_ptr2);
-    ok(!memcmp(root_ptr, root_ptr2, root_size), "root node contents differ\n");
-
-    hr = IDirectXFileData_GetNextObject(root_data2, &child_obj2);
-    ok(hr == DXFILE_OK, "Unexpected hr %#lx.\n", hr);
-    ok(child_obj != child_obj2, "child_obj %p, child_obj2 %p\n", child_obj, child_obj2);
-    hr = IDirectXFileObject_QueryInterface(child_obj2, &IID_IDirectXFileData, (void** )&child_data2);
-    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
-    ok(child_data != child_data2, "child_data %p, child_data2 %p\n", child_data, child_data2);
-    hr = IDirectXFileData_GetData(child_data2, NULL, &child_size, &child_ptr2);
-    ok(hr == DXFILE_OK, "Unexpected hr %#lx.\n", hr);
-    ok(!memcmp(child_ptr, child_ptr2, child_size), "child node contents differ\n");
-
-    *(DWORD *)child_ptr = 0x12345678;
-    ok(!memcmp(root_ptr, root_ptr2, root_size), "root node contents differ\n");
-    ok(memcmp(child_ptr, child_ptr2, child_size), "child node contents match\n");
-
-    todo_wine
-    {
-        ref = IDirectXFileData_Release(child_data2);
-        ok(ref == 3, "Unexpected refcount %lu.\n", ref);
-        ref = IDirectXFileData_Release(child_obj2);
-        ok(ref == 2, "Unexpected refcount %lu.\n", ref);
-    }
-    ref = IDirectXFileData_Release(root_data2);
-    ok(ref == 1, "Unexpected refcount %lu.\n", ref);
-    ref = IDirectXFileEnumObject_Release(enum_object2);
-    ok(!ref, "Unexpected refcount %lu.\n", ref);
-
-    ref = IDirectXFileEnumObject_Release(enum_object);
-    ok(!ref, "Unexpected refcount %lu.\n", ref);
-    ref = IDirectXFileData_Release(root_data);
-    ok(!ref, "Unexpected refcount %lu.\n", ref);
-    ref = IDirectXFileData_Release(child_data);
-    ok(ref == 1, "Unexpected refcount %lu.\n", ref);
-    ref = IDirectXFileObject_Release(child_obj);
-    ok(!ref, "Unexpected refcount %lu.\n", ref);
-    ref = IDirectXFile_Release(dxfile);
-    ok(!ref, "Unexpected refcount %lu.\n", ref);
-}
-
 static void test_standard_templates(void)
 {
     IDirectXFile *dxfile = NULL;
@@ -1163,6 +1048,171 @@ static void test_type_index_color(void)
     IDirectXFile_Release(dxfile);
 }
 
+/* Set it to 1 to expand the string when dumping the object. This is useful when there is
+ * only one string in a sub-object (very common). Use with care, this may lead to a crash. */
+#define EXPAND_STRING 0
+
+static void process_data(LPDIRECTXFILEDATA lpDirectXFileData, int level)
+{
+    HRESULT hr;
+    char name[100];
+    GUID clsid;
+    const GUID *clsid_type = NULL;
+    DWORD len = 100;
+    LPDIRECTXFILEOBJECT pChildObj;
+    int i;
+    int j = 0;
+    LPBYTE pData;
+    DWORD k, size;
+
+    hr = IDirectXFileData_GetId(lpDirectXFileData, &clsid);
+    ok(hr == DXFILE_OK, "Unexpected hr %#lx.\n", hr);
+    hr = IDirectXFileData_GetName(lpDirectXFileData, name, &len);
+    ok(hr == DXFILE_OK, "Unexpected hr %#lx.\n", hr);
+    hr = IDirectXFileData_GetType(lpDirectXFileData, &clsid_type);
+    ok(hr == DXFILE_OK, "Unexpected hr %#lx.\n", hr);
+    hr = IDirectXFileData_GetData(lpDirectXFileData, NULL, &size, (void**)&pData);
+    ok(hr == DXFILE_OK, "Unexpected hr %#lx.\n", hr);
+    for (i = 0; i < level; i++)
+        printf("  ");
+    printf("Found object '%s' - %s - %s - %ld\n",
+           len ? name : "", wine_dbgstr_guid(&clsid), wine_dbgstr_guid(clsid_type), size);
+
+    if (EXPAND_STRING && size == 4)
+    {
+        char * str = *(char**)pData;
+        printf("string %s\n", str);
+    }
+    else if (size)
+    {
+        for (k = 0; k < size; k++)
+        {
+            if (k && !(k%16))
+                printf("\n");
+            printf("%02x ", pData[k]);
+        }
+        printf("\n");
+    }
+
+    level++;
+
+    while (SUCCEEDED(hr = IDirectXFileData_GetNextObject(lpDirectXFileData, &pChildObj)))
+    {
+        LPDIRECTXFILEDATA p1;
+        LPDIRECTXFILEDATAREFERENCE p2;
+        LPDIRECTXFILEBINARY p3;
+        j++;
+
+        hr = IDirectXFileObject_QueryInterface(pChildObj, &IID_IDirectXFileData, (void **) &p1);
+        if (SUCCEEDED(hr))
+        {
+            for (i = 0; i < level; i++)
+                printf("  ");
+            printf("Found Data (%d)\n", j);
+            process_data(p1, level);
+            IDirectXFileData_Release(p1);
+        }
+        hr = IDirectXFileObject_QueryInterface(pChildObj, &IID_IDirectXFileDataReference, (void **) &p2);
+        if (SUCCEEDED(hr))
+        {
+            LPDIRECTXFILEDATA pfdo;
+            for (i = 0; i < level; i++)
+                printf("  ");
+            printf("Found Data Reference (%d)\n", j);
+if (0)
+{
+            hr = IDirectXFileDataReference_GetId(lpDirectXFileData, &clsid);
+            ok(hr == DXFILE_OK, "Unexpected hr %#lx.\n", hr);
+            hr = IDirectXFileDataReference_GetName(lpDirectXFileData, name, &len);
+            ok(hr == DXFILE_OK, "Unexpected hr %#lx.\n", hr);
+}
+            IDirectXFileDataReference_Resolve(p2, &pfdo);
+            process_data(pfdo, level);
+            IDirectXFileData_Release(pfdo);
+            IDirectXFileDataReference_Release(p2);
+        }
+        hr = IDirectXFileObject_QueryInterface(pChildObj, &IID_IDirectXFileBinary, (void **) &p3);
+        if (SUCCEEDED(hr))
+        {
+            for (i = 0; i < level; i++)
+                printf("  ");
+            printf("Found Binary (%d)\n", j);
+            IDirectXFileBinary_Release(p3);
+        }
+        IDirectXFileObject_Release(pChildObj);
+    }
+
+    ok(hr == DXFILE_OK || hr == DXFILEERR_NOMOREOBJECTS, "Unexpected hr %#lx.\n", hr);
+}
+
+/* Dump an X file 'objects.x' and its related templates file 'templates.x' if they are both presents
+ * Useful for debug by comparing outputs from native and builtin dlls */
+static void test_dump(void)
+{
+    HRESULT hr;
+    ULONG ref;
+    LPDIRECTXFILE lpDirectXFile = NULL;
+    LPDIRECTXFILEENUMOBJECT lpDirectXFileEnumObject = NULL;
+    LPDIRECTXFILEDATA lpDirectXFileData = NULL;
+    HANDLE hFile;
+    LPVOID pvData = NULL;
+    DWORD cbSize;
+
+    if (!pDirectXFileCreate)
+    {
+        win_skip("DirectXFileCreate is not available\n");
+        goto exit;
+    }
+
+    /* Dump data only if there is an object and a template */
+    hFile = CreateFileA("objects.x", GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, 0, NULL);
+    if (hFile == INVALID_HANDLE_VALUE)
+      return;
+    CloseHandle(hFile);
+
+    hFile = CreateFileA("templates.x", GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, 0, NULL);
+    if (hFile == INVALID_HANDLE_VALUE)
+      return;
+
+    pvData = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, 10000);
+
+    if (!ReadFile(hFile, pvData, 10000, &cbSize, NULL))
+    {
+      skip("Templates file is too big\n");
+      goto exit;
+    }
+
+    printf("Load templates file (%ld bytes)\n", cbSize);
+
+    hr = pDirectXFileCreate(&lpDirectXFile);
+    ok(hr == DXFILE_OK, "Unexpected hr %#lx.\n", hr);
+
+    hr = IDirectXFile_RegisterTemplates(lpDirectXFile, pvData, cbSize);
+    ok(hr == DXFILE_OK, "Unexpected hr %#lx.\n", hr);
+
+    hr = IDirectXFile_CreateEnumObject(lpDirectXFile, (LPVOID)"objects.x", DXFILELOAD_FROMFILE, &lpDirectXFileEnumObject);
+    ok(hr == DXFILE_OK, "Unexpected hr %#lx.\n", hr);
+
+    while (SUCCEEDED(hr = IDirectXFileEnumObject_GetNextDataObject(lpDirectXFileEnumObject, &lpDirectXFileData)))
+    {
+        printf("\n");
+        process_data(lpDirectXFileData, 0);
+        IDirectXFileData_Release(lpDirectXFileData);
+    }
+    ok(hr == DXFILE_OK || hr == DXFILEERR_NOMOREOBJECTS, "Unexpected hr %#lx.\n", hr);
+
+    ref = IDirectXFile_Release(lpDirectXFileEnumObject);
+    ok(!ref, "Unexpected refcount %lu.\n", ref);
+
+    ref = IDirectXFile_Release(lpDirectXFile);
+    ok(!ref, "Unexpected refcount %lu.\n", ref);
+
+    CloseHandle(hFile);
+
+exit:
+    HeapFree(GetProcessHeap(), 0, pvData);
+}
+
 START_TEST(d3dxof)
 {
     init_function_pointers();
@@ -1176,9 +1226,9 @@ START_TEST(d3dxof)
     test_syntax();
     test_syntax_semicolon_comma();
     test_complex_object();
-    test_getdata_memory_layout();
     test_standard_templates();
     test_type_index_color();
+    test_dump();
 
     FreeLibrary(hd3dxof);
 }

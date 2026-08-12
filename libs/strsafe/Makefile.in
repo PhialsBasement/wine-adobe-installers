@@ -1,4 +1,0 @@
-STATICLIB = libstrsafe.a
-
-SOURCES = \
-	strsafe.c

@@ -20,6 +20,7 @@
 #include <stdarg.h>
 
 #include "ntstatus.h"
+#define WIN32_NO_STATUS
 #include "windef.h"
 #include "winbase.h"
 #include "wincrypt.h"
@@ -304,7 +305,6 @@ BOOL WINAPI CPAcquireContext( HCRYPTPROV *ret_prov, LPSTR container, DWORD flags
 
     case CRYPT_VERIFYCONTEXT:
     case CRYPT_VERIFYCONTEXT | CRYPT_MACHINE_KEYSET:
-    case CRYPT_VERIFYCONTEXT | CRYPT_NEWKEYSET:
         ret = create_key_container( "", flags, vtable->dwProvType );
         break;
 

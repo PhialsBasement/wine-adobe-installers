@@ -30,6 +30,7 @@
 #include "evntprov.h"
 #include "ddk/csq.h"
 #include "wine/server.h"
+#include "wine/heap.h"
 #include "wine/svcctl.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(ntoskrnl);
@@ -257,6 +258,15 @@ POBJECT_TYPE WINAPI ObGetObjectType( void *object )
     return header->type;
 }
 
+static const WCHAR section_type_name[] = {'S','e','c','t','i','o','n',0};
+
+static struct _OBJECT_TYPE section_type =
+{
+    section_type_name
+};
+
+static POBJECT_TYPE p_section_type = &section_type;
+
 static const POBJECT_TYPE *known_types[] =
 {
     &ExEventObjectType,
@@ -266,7 +276,8 @@ static const POBJECT_TYPE *known_types[] =
     &IoFileObjectType,
     &PsProcessType,
     &PsThreadType,
-    &SeTokenObjectType
+    &SeTokenObjectType,
+    &p_section_type,
 };
 
 DECLARE_CRITICAL_SECTION(handle_map_cs);
@@ -510,10 +521,6 @@ struct dispatch_context
     struct irp_data *irp_data;
     ULONG  in_size;
     void  *in_buff;
-    /* These output fields are only for special IRPs handled by ntoskrnl itself,
-     * for which we do not actually allocate an IRP structure nor irp_data. */
-    void *out_buff;
-    ULONG_PTR out_size;
 };
 
 static NTSTATUS dispatch_irp( DEVICE_OBJECT *device, IRP *irp, struct dispatch_context *context )
@@ -811,21 +818,6 @@ static NTSTATUS dispatch_volume( struct dispatch_context *context )
 
     if (!(out_buff = HeapAlloc( GetProcessHeap(), 0, out_size ))) return STATUS_NO_MEMORY;
 
-    if (context->params.volume.info_class == FileFsDeviceInformation)
-    {
-        /* Handled by ntoskrnl; never passed to the driver. */
-        FILE_FS_DEVICE_INFORMATION *info = out_buff;
-
-        if (out_size < sizeof(FILE_FS_DEVICE_INFORMATION))
-            return STATUS_INFO_LENGTH_MISMATCH;
-
-        info->DeviceType = file->DeviceObject->DeviceType;
-        info->Characteristics = file->DeviceObject->Characteristics;
-        context->out_buff = out_buff;
-        context->out_size = sizeof(FILE_FS_DEVICE_INFORMATION);
-        return STATUS_SUCCESS;
-    }
-
     irp = IoAllocateIrp( device->StackSize, FALSE );
     if (!irp)
     {
@@ -1000,12 +992,8 @@ NTSTATUS CDECL wine_ntoskrnl_main_loop( HANDLE stop_event )
             }
             else
             {
-                req->user_ptr    = 0;
-                req->status      = status;
-                req->pending     = 0;
-                req->iosb_status = status;
-                req->result      = context.out_size;
-                if (context.out_size) wine_server_add_data( req, context.out_buff, context.out_size );
+                req->user_ptr = 0;
+                req->status   = status;
             }
 
             wine_server_set_reply( req, context.in_buff, context.in_size );
@@ -1038,12 +1026,6 @@ NTSTATUS CDECL wine_ntoskrnl_main_loop( HANDLE stop_event )
             {
                 context.irp_data->async = TRUE;
             }
-        }
-        else
-        {
-            free( context.out_buff );
-            context.out_buff = NULL;
-            context.out_size = 0;
         }
 
         LeaveCriticalSection( &irp_completion_cs );
@@ -1675,7 +1657,6 @@ NTSTATUS WINAPI IoCreateDevice( DRIVER_OBJECT *driver, ULONG ext_size,
     device = &wine_device->device_obj;
 
     device->DriverObject    = driver;
-    device->Characteristics = characteristics;
     device->DeviceExtension = wine_device + 1;
     device->DeviceType      = type;
     device->StackSize       = 1;
@@ -2151,7 +2132,7 @@ BOOLEAN WINAPI IoCancelIrp( IRP *irp )
     irp->Cancel = TRUE;
     if (!(cancel_routine = IoSetCancelRoutine( irp, NULL )))
     {
-        IoReleaseCancelSpinLock( irql );
+        IoReleaseCancelSpinLock( irp->CancelIrql );
         return FALSE;
     }
 
@@ -2458,31 +2439,6 @@ NTSTATUS WINAPI ExInitializeZone(PZONE_HEADER Zone,
 {
     FIXME( "stub: %p, %lu, %p, %lu\n", Zone, BlockSize, InitialSegment, InitialSegmentSize );
     return STATUS_NOT_IMPLEMENTED;
-}
-
-/***********************************************************************
- *           FsRtlGetFileSize   (NTOSKRNL.EXE.@)
- */
-NTSTATUS WINAPI FsRtlGetFileSize( PFILE_OBJECT file_obj, PLARGE_INTEGER file_size )
-{
-    FILE_STANDARD_INFORMATION info;
-    IO_STATUS_BLOCK iosb;
-    NTSTATUS status;
-    HANDLE handle;
-
-    TRACE( "file_obj %p, file_size %p\n", file_obj, file_size );
-
-    status = ObOpenObjectByPointer( file_obj, 0, NULL, 0, IoFileObjectType, KernelMode, &handle );
-    if (status) return status;
-
-    status = NtQueryInformationFile( handle, &iosb, &info, sizeof(info), FileStandardInformation );
-    NtClose( handle );
-    if (!status)
-    {
-        if (info.Directory) return STATUS_FILE_IS_A_DIRECTORY;
-        file_size->QuadPart = info.EndOfFile.QuadPart;
-    }
-    return status;
 }
 
 /***********************************************************************
@@ -3005,18 +2961,6 @@ PVOID WINAPI MmMapIoSpace( PHYSICAL_ADDRESS PhysicalAddress, DWORD NumberOfBytes
 VOID WINAPI MmLockPagableSectionByHandle(PVOID ImageSectionHandle)
 {
     FIXME("stub %p\n", ImageSectionHandle);
-}
-
-/***********************************************************************
- *           MmMapLockedPages   (NTOSKRNL.EXE.@)
- */
-PVOID WINAPI MmMapLockedPages( MDL *mdl, KPROCESSOR_MODE mode )
-{
-    TRACE( "%p %u\n", mdl, mode );
-
-    mdl->MdlFlags |= MDL_MAPPED_TO_SYSTEM_VA;
-    mdl->MappedSystemVa = (char *)mdl->StartVa + mdl->ByteOffset;
-    return mdl->MappedSystemVa;
 }
 
 /***********************************************************************
@@ -3891,51 +3835,6 @@ error:
     return STATUS_UNSUCCESSFUL;
 }
 
-
-#ifdef _WIN64
-#define DEFAULT_SECURITY_COOKIE_64  0x00002b992ddfa232ull
-#endif
-#define DEFAULT_SECURITY_COOKIE_32  0xbb40e64e
-#define DEFAULT_SECURITY_COOKIE_16  (DEFAULT_SECURITY_COOKIE_32 >> 16)
-
-static void update_security_cookie( void *module, IMAGE_NT_HEADERS *nt )
-{
-    IMAGE_LOAD_CONFIG_DIRECTORY *cfg;
-    ULONG size;
-
-    cfg = RtlImageDirectoryEntryToData( module, TRUE, IMAGE_DIRECTORY_ENTRY_LOAD_CONFIG, &size );
-    if (!cfg) return;
-    size = min( size, cfg->Size );
-    if (size > offsetof( IMAGE_LOAD_CONFIG_DIRECTORY, SecurityCookie ) &&
-        cfg->SecurityCookie > (ULONG_PTR)module &&
-        cfg->SecurityCookie < (ULONG_PTR)module + nt->OptionalHeader.SizeOfImage)
-    {
-        static ULONG seed;
-        ULONG_PTR *cookie = (ULONG_PTR *)cfg->SecurityCookie;
-
-        TRACE( "initializing security cookie %p\n", cookie );
-
-        if (!seed) seed = NtGetTickCount() ^ GetCurrentProcessId();
-        for (;;)
-        {
-            if (*cookie == DEFAULT_SECURITY_COOKIE_16)
-                *cookie = RtlRandom( &seed ) >> 16; /* leave the high word clear */
-            else if (*cookie == DEFAULT_SECURITY_COOKIE_32)
-                *cookie = RtlRandom( &seed );
-#ifdef DEFAULT_SECURITY_COOKIE_64
-            else if (*cookie == DEFAULT_SECURITY_COOKIE_64)
-            {
-                *cookie = RtlRandom( &seed );
-                /* fill up, but keep the highest word clear */
-                *cookie ^= (ULONG_PTR)RtlRandom( &seed ) << 16;
-            }
-#endif
-            else break;
-        }
-    }
-}
-
-
 /* find the LDR_DATA_TABLE_ENTRY corresponding to the driver module */
 static LDR_DATA_TABLE_ENTRY *find_ldr_module( HMODULE module )
 {
@@ -4024,8 +3923,6 @@ static void WINAPI ldr_notify_callback(ULONG reason, LDR_DLL_NOTIFICATION_DATA *
             return;
         }
     }
-
-    update_security_cookie( module, nt );
 }
 
 static WCHAR *get_windir_path( const WCHAR *path )
@@ -4081,7 +3978,7 @@ static HMODULE load_driver( const WCHAR *driver_name, const UNICODE_STRING *keyn
             HeapFree( GetProcessHeap(), 0, path );
             path = str;
         }
-        else if (RtlDetermineDosPathNameType_U( path ) == RtlPathTypeRelative)
+        else if (RtlDetermineDosPathNameType_U( path ) == RELATIVE_PATH)
         {
             str = get_windir_path( path );
             HeapFree( GetProcessHeap(), 0, path );
@@ -4187,7 +4084,7 @@ static BOOLEAN get_drv_name( UNICODE_STRING *drv_name, const UNICODE_STRING *ser
     static const WCHAR driverW[] = {'\\','D','r','i','v','e','r','\\',0};
     WCHAR *str;
 
-    if (!(str = HeapAlloc( GetProcessHeap(), 0, sizeof(driverW) + service_name->Length - lstrlenW(servicesW)*sizeof(WCHAR) )))
+    if (!(str = heap_alloc( sizeof(driverW) + service_name->Length - lstrlenW(servicesW)*sizeof(WCHAR) )))
         return FALSE;
 
     lstrcpyW( str, driverW );
@@ -4611,18 +4508,27 @@ void WINAPI KeGenericCallDpc(PKDEFERRED_ROUTINE routine, void *context)
     reverse_barrier.TotalProcessors = cpu_count;
     cpu_count_barrier = cpu_count;
 
-    if (last_cpu_count < cpu_count)
+    if (contexts)
     {
-        struct generic_call_dpc_context *new_contexts;
-        if (!(new_contexts = realloc(contexts, sizeof(*contexts) * cpu_count)))
+        if (last_cpu_count < cpu_count)
         {
-            ERR("No memory.\n");
-            LeaveCriticalSection(&dpc_call_cs);
-            return;
+            static struct generic_call_dpc_context *new_contexts;
+            if (!(new_contexts = heap_realloc(contexts, sizeof(*contexts) * cpu_count)))
+            {
+                ERR("No memory.\n");
+                LeaveCriticalSection(&dpc_call_cs);
+                return;
+            }
+            contexts = new_contexts;
+            SetThreadpoolThreadMinimum(dpc_call_tp, cpu_count);
+            SetThreadpoolThreadMaximum(dpc_call_tp, cpu_count);
         }
-        contexts = new_contexts;
-        SetThreadpoolThreadMinimum(dpc_call_tp, cpu_count);
-        SetThreadpoolThreadMaximum(dpc_call_tp, cpu_count);
+    }
+    else if (!(contexts = heap_alloc(sizeof(*contexts) * cpu_count)))
+    {
+        ERR("No memory.\n");
+        LeaveCriticalSection(&dpc_call_cs);
+        return;
     }
 
     memset(contexts, 0, sizeof(*contexts) * cpu_count);
@@ -4727,13 +4633,6 @@ void WINAPI KeStackAttachProcess(KPROCESS *process, KAPC_STATE *apc_state)
 void WINAPI KeUnstackDetachProcess(KAPC_STATE *apc_state)
 {
     FIXME("apc_state %p stub.\n", apc_state);
-}
-
-NTSTATUS WINAPI KdChangeOption(ULONG option, ULONG in_size, PVOID in_buffer,
-                               ULONG out_size, PVOID out_buffer, PULONG ret_size)
-{
-    FIXME( "stub: %lu %lu %p %lu %p %p\n", option, in_size, in_buffer, out_size, out_buffer, ret_size );
-    return STATUS_DEBUGGER_INACTIVE;
 }
 
 NTSTATUS WINAPI KdDisableDebugger(void)

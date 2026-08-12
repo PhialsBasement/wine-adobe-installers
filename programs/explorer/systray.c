@@ -271,7 +271,7 @@ static void balloon_create_timer( struct icon *icon )
 
 static BOOL show_balloon( struct icon *icon )
 {
-    if (!enable_taskbar && !show_systray) return FALSE;  /* systray has been hidden */
+    if (!show_systray) return FALSE;  /* systray has been hidden */
     if (icon->display == ICON_DISPLAY_HIDDEN) return FALSE;  /* not displayed */
     if (!icon->info_text[0]) return FALSE;  /* no balloon */
     balloon_icon = icon;
@@ -1105,7 +1105,8 @@ static LRESULT WINAPI shell_traywnd_proc( HWND hwnd, UINT msg, WPARAM wparam, LP
         return handle_incoming((HWND)wparam, (COPYDATASTRUCT *)lparam);
 
     case WM_DISPLAYCHANGE:
-        if (!enable_taskbar && (!show_systray || !nb_displayed)) do_hide_systray();
+        if (!show_systray) do_hide_systray();
+        else if (!nb_displayed && !enable_taskbar) do_hide_systray();
         else do_show_systray();
         break;
 
@@ -1252,7 +1253,7 @@ void initialize_systray( BOOL arg_using_root, BOOL arg_enable_shell, BOOL arg_sh
     else
     {
         SIZE size = get_window_size();
-        tray_window = CreateWindowExW( 0, shell_traywnd_class.lpszClassName, L"", WS_CAPTION | WS_SYSMENU,
+        tray_window = CreateWindowExW( WS_EX_NOACTIVATE, shell_traywnd_class.lpszClassName, L"", WS_CAPTION | WS_SYSMENU,
                                        CW_USEDEFAULT, CW_USEDEFAULT, size.cx, size.cy, 0, 0, 0, 0 );
         NtUserMessageCall( tray_window, WINE_SYSTRAY_DOCK_INIT, 0, 0, NULL, NtUserSystemTrayCall, FALSE );
     }

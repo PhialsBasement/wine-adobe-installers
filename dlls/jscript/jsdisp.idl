@@ -27,7 +27,7 @@ struct property_info
     UINT32 flags;
     const WCHAR *name;
     UINT32 index;
-    UINT32 iid;
+    INT32 prototype_id;
 };
 
 const unsigned int PROPF_METHOD       = 0x0100;
@@ -40,8 +40,36 @@ const unsigned int PROPF_CONFIGURABLE = 0x1000;
 const unsigned int PROPF_PUBLIC_MASK = PROPF_ENUMERABLE | PROPF_WRITABLE | PROPF_CONFIGURABLE;
 
 const unsigned int HOSTOBJ_CONSTRUCTOR    = 0x0001;
-const unsigned int HOSTOBJ_VOLATILE_FILL  = 0x0002;
-const unsigned int HOSTOBJ_VOLATILE_PROPS = 0x0004;
+const unsigned int HOSTOBJ_VOLATILE_PROPS = 0x0002;
+
+cpp_quote("DEFINE_GUID(IID_nsCycleCollectionISupports, 0xc61eac14,0x5f7a,0x4481,0x96,0x5e,0x7e,0xaa,0x6e,0xff,0xa8,0x5f);")
+cpp_quote("DEFINE_GUID(IID_nsXPCOMCycleCollectionParticipant, 0x9674489b,0x1f6f,0x4550,0xa7,0x30, 0xcc,0xae,0xdd,0x10,0x4c,0xf9);")
+
+typedef struct {
+    void *vtbl;
+    int ref_flags;
+    void *callbacks;
+} ExternalCycleCollectionParticipant;
+
+typedef struct nsCycleCollectionTraversalCallback nsCycleCollectionTraversalCallback;
+
+typedef struct {
+    HRESULT (__stdcall *traverse)(void*,void*,nsCycleCollectionTraversalCallback*);
+    HRESULT (__stdcall *unlink)(void*);
+    void (__stdcall *delete_cycle_collectable)(void*);
+} CCObjCallback;
+
+typedef void (__cdecl *note_edge_t)(IUnknown*,const char*,nsCycleCollectionTraversalCallback*);
+
+struct jshost_cc_api
+{
+    ExternalCycleCollectionParticipant participant;
+    BOOL (__cdecl *is_full_cc)(void);
+    void (__cdecl *collect)(void);
+    void (__cdecl *describe_node)(ULONG ref, const char *obj_name, nsCycleCollectionTraversalCallback *cb);
+    note_edge_t note_edge;
+    struct list entry;
+};
 
 interface IWineJSDispatchHost;
 
@@ -53,11 +81,12 @@ interface IWineJSDispatchHost;
 interface IWineJSDispatch : IDispatchEx
 {
     void Free();
+    void Traverse(nsCycleCollectionTraversalCallback *cb);
+    void Unlink();
     HRESULT GetPropertyFlags(DISPID id, UINT32 *ret);
-    HRESULT DefineProperty(const WCHAR *name, unsigned int flags, VARIANT *v);
     HRESULT UpdateProperty(struct property_info *desc);
     HRESULT GetScriptGlobal(IWineJSDispatchHost **ret);
-    HRESULT GetRandomValues();
+    HRESULT GetRandomValues(IDispatch *typedarr);
 }
 
 [
@@ -69,21 +98,18 @@ interface IWineJSDispatchHost : IDispatchEx
 {
     HRESULT GetJSDispatch(IWineJSDispatch **ret);
     HRESULT LookupProperty(const WCHAR *name, DWORD flags, struct property_info *desc);
+    HRESULT OverrideProperty(const WCHAR *name, struct property_info *get_desc, VARIANT *get_value);
     HRESULT GetProperty(DISPID id, LCID lcid, VARIANT *r, EXCEPINFO *ei, IServiceProvider *caller);
     HRESULT SetProperty(DISPID id, LCID lcid, VARIANT *v, EXCEPINFO *ei, IServiceProvider *caller);
     HRESULT DeleteProperty(DISPID id);
     HRESULT ConfigureProperty(DISPID id, UINT32 flags);
-    HRESULT CallFunction(DISPID id, UINT32 iid, DWORD flags, DISPPARAMS *dp, VARIANT *ret, EXCEPINFO *ei, IServiceProvider *caller);
+    HRESULT CallFunction(DISPID id, INT32 prototype_id, DWORD flags, DISPPARAMS *dp, VARIANT *ret, EXCEPINFO *ei, IServiceProvider *caller);
     HRESULT Construct(LCID lcid, DWORD flags, DISPPARAMS *dp, VARIANT *ret, EXCEPINFO *ei, IServiceProvider *caller);
     HRESULT FillProperties();
     HRESULT GetOuterDispatch(IWineJSDispatchHost **ret);
     HRESULT ToString(BSTR *str);
+    void InitCC(struct jshost_cc_api *cc_api, const CCObjCallback *callback);
 }
-
-const unsigned int SCRIPTLANGUAGEVERSION_HTML  = 0x400;
-const unsigned int SCRIPTLANGUAGEVERSION_ES5   = 0x102;
-const unsigned int SCRIPTLANGUAGEVERSION_ES5_1 = 0x103;
-const unsigned int SCRIPTLANGUAGEVERSION_ES6   = 0x104;
 
 [
     object,
@@ -93,7 +119,7 @@ const unsigned int SCRIPTLANGUAGEVERSION_ES6   = 0x104;
 interface IWineJScript : IUnknown
 {
     HRESULT InitHostObject(IWineJSDispatchHost *host_obj, IWineJSDispatch *prototype, UINT32 flags, IWineJSDispatch **ret);
-    HRESULT InitHostConstructor(IWineJSDispatchHost *constr, const WCHAR *method_name, IWineJSDispatch **ret);
+    HRESULT InitHostConstructor(IWineJSDispatchHost *constr, IWineJSDispatch *prototype, IWineJSDispatch **ret);
     HRESULT CreateObject(IWineJSDispatch **ret);
     HRESULT CreateArrayBuffer(DWORD size, IWineJSDispatch **ret, void **data);
     HRESULT FillGlobals(IWineJSDispatchHost *script_global);

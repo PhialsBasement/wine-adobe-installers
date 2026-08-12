@@ -403,7 +403,7 @@ static void test_SpatialAnchorExporter(void)
     check_interface( factory, &IID_IUnknown, FALSE );
     check_interface( factory, &IID_IInspectable, FALSE );
     check_interface( factory, &IID_IAgileObject, FALSE );
-    check_interface( factory, &IID_ISpatialAnchorExporterStatics, FALSE );
+    check_interface( factory, &IID_ISpatialAnchorExporterStatics, TRUE /* broken on Testbot Win1607 */ );
 
     hr = IActivationFactory_QueryInterface( factory, &IID_ISpatialAnchorExporterStatics, (void **)&statics );
     ok( hr == S_OK, "got hr %#lx.\n", hr );
@@ -445,9 +445,11 @@ static void test_SpatialAnchorExporter(void)
     hr = IAsyncInfo_get_Status( info, &astatus );
     ok( hr == S_OK, "got hr %#lx.\n", hr );
     ok( astatus == Completed, "got %u.\n", id );
-    IAsyncInfo_Release( info );
+    ref = IAsyncInfo_Release( info );
+    ok( ref == 1, "got ref %ld.\n", ref );
 
-    IAsyncOperation_SpatialPerceptionAccessStatus_Release( access_status );
+    ref = IAsyncOperation_SpatialPerceptionAccessStatus_Release( access_status );
+    ok( !ref, "got %ld.\n", ref );
 
     ISpatialAnchorExporterStatics_Release( statics );
     ref = IActivationFactory_Release( factory );

@@ -128,7 +128,7 @@ struct hid_report_descriptor
     BYTE next_report_id[3];
 };
 
-#pragma pack(push,1)
+#include "pshpack1.h"
 struct hid_haptics_feature
 {
     WORD waveform;
@@ -143,7 +143,7 @@ struct hid_haptics_features
     struct hid_haptics_feature left;
     struct hid_haptics_feature right;
 };
-#pragma pack(pop)
+#include "poppack.h"
 
 struct hid_haptics
 {
@@ -190,10 +190,10 @@ struct hid_physical
 struct hid_device_state
 {
     ULONG bit_size;
-    USHORT axis_byte_offsets[64];
-    BYTE axis_sizes[64];
     USAGE_AND_PAGE abs_axis_usages[32];
+    USHORT abs_axis_start;
     USHORT abs_axis_count;
+    USHORT rel_axis_start;
     USHORT rel_axis_count;
     USHORT hatswitch_start;
     USHORT hatswitch_count;
@@ -268,5 +268,7 @@ extern BOOL hid_device_sync_report(struct unix_device *iface);
 extern void hid_device_drop_report(struct unix_device *iface);
 
 extern void hid_device_set_effect_state(struct unix_device *iface, BYTE index, BYTE flags);
+
+extern BOOL is_sdl_ignored_device(WORD vid, WORD pid);
 
 #endif /* __WINEBUS_UNIX_PRIVATE_H */

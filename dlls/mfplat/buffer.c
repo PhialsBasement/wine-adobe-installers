@@ -58,6 +58,7 @@ struct buffer
         unsigned int locks;
         MF2DBuffer_LockFlags lock_flags;
         p_copy_image_func copy_image;
+        BOOL performance_hack_enabled;
     } _2d;
     struct
     {
@@ -290,10 +291,14 @@ static HRESULT WINAPI memory_1d_2d_buffer_QueryInterface(IMFMediaBuffer *iface, 
     return S_OK;
 }
 
+static HRESULT memory_2d_buffer_lock(struct buffer *buffer, BYTE **scanline0, LONG *pitch,
+        BYTE **buffer_start, DWORD *buffer_length);
+
 static HRESULT WINAPI memory_1d_2d_buffer_Lock(IMFMediaBuffer *iface, BYTE **data, DWORD *max_length, DWORD *current_length)
 {
     struct buffer *buffer = impl_from_IMFMediaBuffer(iface);
     HRESULT hr = S_OK;
+    const char *sgi;
 
     TRACE("%p, %p, %p, %p.\n", iface, data, max_length, current_length);
 
@@ -305,8 +310,25 @@ static HRESULT WINAPI memory_1d_2d_buffer_Lock(IMFMediaBuffer *iface, BYTE **dat
 
     EnterCriticalSection(&buffer->cs);
 
-    if (!buffer->_2d.linear_buffer && buffer->_2d.locks)
+    if (buffer->_2d.performance_hack_enabled
+            || (!buffer->_2d.linear_buffer && buffer->_2d.width == buffer->_2d.pitch
+            && (sgi = getenv("SteamGameId")) && (!strcmp(sgi, "418370") || !strcmp(sgi, "287700") || !strcmp(sgi, "462780"))))
+    {
+        BYTE *scanline;
+        LONG pitch;
+
+        /* width and pitch are the same, so this avoids a potentially expensive copy
+         * this is a HACK as it does not match Windows behaviour (Windows will copy the buffer)
+         * this fixes performance regressions for Resident Evil 7 Biohazard (418370),
+         * Metal Gear Solid V (287700) and Darksiders Warmastered Edition (462780).
+         */
+        hr = memory_2d_buffer_lock(buffer, &scanline, &pitch, data, NULL);
+        buffer->_2d.performance_hack_enabled = TRUE;
+    }
+    else if (!buffer->_2d.linear_buffer && buffer->_2d.locks)
+    {
         hr = MF_E_INVALIDREQUEST;
+    }
     else if (!buffer->_2d.linear_buffer)
     {
         if (!(buffer->_2d.linear_buffer = malloc(buffer->_2d.plane_size)))
@@ -323,10 +345,14 @@ static HRESULT WINAPI memory_1d_2d_buffer_Lock(IMFMediaBuffer *iface, BYTE **dat
         }
     }
 
-    if (SUCCEEDED(hr))
+    if (SUCCEEDED(hr) && buffer->_2d.linear_buffer)
     {
         ++buffer->_2d.locks;
         *data = buffer->_2d.linear_buffer;
+    }
+
+    if (SUCCEEDED(hr))
+    {
         if (max_length)
             *max_length = buffer->_2d.plane_size;
         if (current_length)
@@ -341,12 +367,20 @@ static HRESULT WINAPI memory_1d_2d_buffer_Lock(IMFMediaBuffer *iface, BYTE **dat
 static HRESULT WINAPI memory_1d_2d_buffer_Unlock(IMFMediaBuffer *iface)
 {
     struct buffer *buffer = impl_from_IMFMediaBuffer(iface);
+    HRESULT hr = S_OK;
 
     TRACE("%p.\n", iface);
 
     EnterCriticalSection(&buffer->cs);
 
-    if (buffer->_2d.linear_buffer && !--buffer->_2d.locks)
+    if (buffer->_2d.performance_hack_enabled)
+    {
+        if (buffer->_2d.locks)
+            --buffer->_2d.locks;
+        else
+            hr = HRESULT_FROM_WIN32(ERROR_WAS_UNLOCKED);
+    }
+    else if (buffer->_2d.linear_buffer && !--buffer->_2d.locks)
     {
         int pitch = buffer->_2d.pitch;
 
@@ -361,7 +395,7 @@ static HRESULT WINAPI memory_1d_2d_buffer_Unlock(IMFMediaBuffer *iface)
 
     LeaveCriticalSection(&buffer->cs);
 
-    return S_OK;
+    return hr;
 }
 
 static const IMFMediaBufferVtbl memory_1d_2d_buffer_vtbl =
@@ -1004,6 +1038,7 @@ static void dxgi_surface_buffer_unmap(struct buffer *buffer, MF2DBuffer_LockFlag
     {
         ID3D11DeviceContext_CopySubresourceRegion(immediate_context, (ID3D11Resource *)buffer->dxgi_surface.texture,
                 buffer->dxgi_surface.sub_resource_idx, 0, 0, 0, (ID3D11Resource *)buffer->dxgi_surface.rb_texture, 0, NULL);
+        ID3D11DeviceContext_Flush(immediate_context);
     }
 
     ID3D11DeviceContext_Release(immediate_context);
@@ -1352,7 +1387,6 @@ static HRESULT memory_buffer_init(struct buffer *buffer, DWORD max_length, DWORD
 
     if (!(buffer->data = _aligned_malloc(max_length, alignment)))
         return E_OUTOFMEMORY;
-    memset(buffer->data, 0, max_length);
 
     buffer->IMFMediaBuffer_iface.lpVtbl = vtbl;
     buffer->refcount = 1;
@@ -1405,7 +1439,6 @@ static p_copy_image_func get_2d_buffer_copy_func(DWORD fourcc)
             return copy_image_imc2;
 
         case MAKEFOURCC('N','V','1','2'):
-        case MAKEFOURCC('P','0','1','0'):
             return copy_image_nv12;
 
         default:
@@ -1455,9 +1488,6 @@ static HRESULT create_2d_buffer(DWORD width, DWORD height, DWORD fourcc, BOOL bo
         case MAKEFOURCC('N','V','1','2'):
             plane_size = stride * height * 3 / 2;
             break;
-        case MAKEFOURCC('P','0','1','0'):
-            plane_size = width * height * 3;
-            break;
         default:
             plane_size = stride * height;
     }
@@ -1496,7 +1526,6 @@ static HRESULT create_2d_buffer(DWORD width, DWORD height, DWORD fourcc, BOOL bo
         case MAKEFOURCC('N','V','1','1'):
         case MAKEFOURCC('I','4','2','0'):
         case MAKEFOURCC('I','Y','U','V'):
-        case MAKEFOURCC('P','0','1','0'):
             max_length = pitch * height * 3 / 2;
             break;
         default:

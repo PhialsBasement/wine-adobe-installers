@@ -30,6 +30,7 @@
 #include <stdint.h>
 
 #include "wine/wgl.h"
+#include "wine/wgl_driver.h"
 
 struct wined3d_swapchain_gl;
 struct wined3d_texture_gl;
@@ -131,7 +132,6 @@ enum wined3d_gl_extension
     ARB_TEXTURE_ENV_COMBINE,
     ARB_TEXTURE_ENV_DOT3,
     ARB_TEXTURE_FILTER_ANISOTROPIC,
-    ARB_TEXTURE_FILTER_MINMAX,
     ARB_TEXTURE_FLOAT,
     ARB_TEXTURE_GATHER,
     ARB_TEXTURE_MIRRORED_REPEAT,
@@ -337,25 +337,6 @@ struct wined3d_ffp_attrib_ops
     wined3d_generic_attrib_func generic[WINED3D_FFP_EMIT_COUNT];
 };
 
-struct wined3d_gl_funcs
-{
-#define USE_GL_FUNC(x) PFN_##x p_##x;
-    struct
-    {
-        ALL_WGL_FUNCS
-    } wgl;
-    struct
-    {
-        ALL_GL_FUNCS
-    } gl;
-    struct
-    {
-        ALL_WGL_EXT_FUNCS
-        ALL_GL_EXT_FUNCS
-    } ext;
-#undef USE_GL_FUNC
-};
-
 struct wined3d_gl_info
 {
     unsigned int selected_gl_version;
@@ -369,7 +350,7 @@ struct wined3d_gl_info
 
     HGLRC (WINAPI *p_wglCreateContextAttribsARB)(HDC dc, HGLRC share, const GLint *attribs);
     struct wined3d_ffp_attrib_ops ffp_attrib_ops;
-    struct wined3d_gl_funcs gl_ops;
+    struct opengl_funcs gl_ops;
     struct wined3d_fbo_ops fbo_ops;
 
     void (WINE_GLAPI *p_glDisableWINE)(GLenum cap);
@@ -405,7 +386,6 @@ static inline GLenum wined3d_gl_min_mip_filter(enum wined3d_texture_filter_type 
 }
 
 GLenum wined3d_gl_compare_func(enum wined3d_cmp_func f);
-GLenum wined3d_gl_filter_reduction_mode(enum wined3d_filter_reduction_mode m);
 
 const char *debug_fboattachment(GLenum attachment);
 const char *debug_fbostatus(GLenum status);
@@ -646,6 +626,8 @@ struct wined3d_context_gl
     unsigned int level;
     HGLRC restore_ctx;
     HDC restore_dc;
+    int restore_pf;
+    HWND restore_pf_win;
     HGLRC gl_ctx;
     HDC dc;
     int pixel_format;
@@ -790,6 +772,8 @@ void wined3d_ffp_blitter_create(struct wined3d_blitter **next, const struct wine
 struct wined3d_blitter *wined3d_glsl_blitter_create(struct wined3d_blitter **next, const struct wined3d_device *device);
 void wined3d_raw_blitter_create(struct wined3d_blitter **next, const struct wined3d_gl_info *gl_info);
 
+void ffp_vertex_update_clip_plane_constants(const struct wined3d_gl_info *gl_info, const struct wined3d_state *state);
+
 struct wined3d_caps_gl_ctx
 {
     HDC dc;
@@ -815,7 +799,6 @@ struct wined3d_adapter_gl
 
     struct wined3d_gl_info gl_info;
 
-    /* Indexed by the WGL pixel format index minus 1. */
     struct wined3d_pixel_format *pixel_formats;
     unsigned int pixel_format_count;
 };
@@ -921,7 +904,6 @@ void wined3d_device_gl_create_primary_opengl_context_cs(void *object);
 void wined3d_device_gl_delete_opengl_contexts_cs(void *object);
 HDC wined3d_device_gl_get_backup_dc(struct wined3d_device_gl *device_gl);
 GLbitfield wined3d_device_gl_get_memory_type_flags(unsigned int memory_type_idx);
-GLenum wined3d_device_gl_get_memory_type_binding(unsigned int memory_type_idx);
 
 GLbitfield wined3d_resource_gl_map_flags(const struct wined3d_bo_gl *bo, DWORD d3d_flags);
 GLenum wined3d_resource_gl_legacy_map_flags(DWORD d3d_flags);
@@ -1038,7 +1020,7 @@ HRESULT wined3d_texture_gl_init(struct wined3d_texture_gl *texture_gl, struct wi
         const struct wined3d_resource_desc *desc, unsigned int layer_count, unsigned int level_count,
         uint32_t flags, void *parent, const struct wined3d_parent_ops *parent_ops);
 void wined3d_texture_gl_prepare_texture(struct wined3d_texture_gl *texture_gl,
-        struct wined3d_context_gl *context_gl, bool srgb);
+        struct wined3d_context_gl *context_gl, BOOL srgb);
 void wined3d_texture_gl_set_compatible_renderbuffer(struct wined3d_texture_gl *texture_gl,
         struct wined3d_context_gl *context_gl, unsigned int level, const struct wined3d_rendertarget_info *rt);
 

@@ -31,11 +31,11 @@
 #include "windef.h"
 #include "winbase.h"
 #include "winerror.h"
-#include "winioctl.h"
 #include "winternl.h"
 #include "winnls.h"
 #include "fileapi.h"
-#include "ddk/ntifs.h"
+
+#undef DeleteFile  /* needed for FILE_DISPOSITION_INFO */
 
 static HANDLE (WINAPI *pFindFirstFileExA)(LPCSTR,FINDEX_INFO_LEVELS,LPVOID,FINDEX_SEARCH_OPS,LPVOID,DWORD);
 static BOOL (WINAPI *pGetOverlappedResultEx)(HANDLE, OVERLAPPED *, DWORD *, DWORD, BOOL);
@@ -1281,19 +1281,19 @@ static void test_CreateFileA(void)
     DWORD i, ret, len;
     static const struct test_list p[] =
     {
-        {"", ERROR_PATH_NOT_FOUND, -1, FILE_ATTRIBUTE_NORMAL, FALSE }, /* dir as file w \ */
+        {"", ERROR_PATH_NOT_FOUND, -1, FILE_ATTRIBUTE_NORMAL, TRUE }, /* dir as file w \ */
         {"", ERROR_SUCCESS, ERROR_PATH_NOT_FOUND, FILE_FLAG_BACKUP_SEMANTICS, FALSE }, /* dir as dir w \ */
         {"a", ERROR_FILE_NOT_FOUND, -1, FILE_ATTRIBUTE_NORMAL, FALSE }, /* non-exist file */
         {"a\\", ERROR_FILE_NOT_FOUND, ERROR_PATH_NOT_FOUND, FILE_ATTRIBUTE_NORMAL, FALSE }, /* non-exist dir */
         {"removeme", ERROR_ACCESS_DENIED, -1, FILE_ATTRIBUTE_NORMAL, FALSE }, /* exist dir w/o \ */
-        {"removeme\\", ERROR_PATH_NOT_FOUND, -1, FILE_ATTRIBUTE_NORMAL, FALSE }, /* exist dir w \ */
+        {"removeme\\", ERROR_PATH_NOT_FOUND, -1, FILE_ATTRIBUTE_NORMAL, TRUE }, /* exst dir w \ */
         {"c:", ERROR_ACCESS_DENIED, ERROR_PATH_NOT_FOUND, FILE_ATTRIBUTE_NORMAL, FALSE }, /* device in file namespace */
         {"c:", ERROR_SUCCESS, ERROR_PATH_NOT_FOUND, FILE_FLAG_BACKUP_SEMANTICS, FALSE }, /* device in file namespace as dir */
-        {"c:\\", ERROR_PATH_NOT_FOUND, ERROR_ACCESS_DENIED, FILE_ATTRIBUTE_NORMAL, FALSE }, /* root dir w \ */
+        {"c:\\", ERROR_PATH_NOT_FOUND, ERROR_ACCESS_DENIED, FILE_ATTRIBUTE_NORMAL, TRUE }, /* root dir w \ */
         {"c:\\", ERROR_SUCCESS, ERROR_ACCESS_DENIED, FILE_FLAG_BACKUP_SEMANTICS, FALSE }, /* root dir w \ as dir */
         {"c:c:\\windows", ERROR_INVALID_NAME, -1, FILE_ATTRIBUTE_NORMAL, TRUE }, /* invalid path */
         {"\\\\?\\c:", ERROR_SUCCESS, ERROR_BAD_NETPATH, FILE_ATTRIBUTE_NORMAL,FALSE }, /* dev namespace drive */
-        {"\\\\?\\c:\\", ERROR_PATH_NOT_FOUND, ERROR_BAD_NETPATH, FILE_ATTRIBUTE_NORMAL, FALSE }, /* dev namespace drive w \ */
+        {"\\\\?\\c:\\", ERROR_PATH_NOT_FOUND, ERROR_BAD_NETPATH, FILE_ATTRIBUTE_NORMAL, TRUE }, /* dev namespace drive w \ */
         {NULL, 0, -1, 0, FALSE}
     };
     BY_HANDLE_FILE_INFORMATION  Finfo;
@@ -1367,15 +1367,14 @@ static void test_CreateFileA(void)
     i = 0;
     while (p[i].file)
     {
-        BOOL need_device_access = TRUE;
         filename[0] = 0;
         /* update the drive id in the table entry with the current one */
-        if (strlen(p[i].file) > 1 && p[i].file[1] == ':')
+        if (p[i].file[1] == ':')
         {
             strcpy(filename, p[i].file);
             filename[0] = windowsdir[0];
         }
-        else if (strlen(p[i].file) > 5 && p[i].file[0] == '\\' && p[i].file[5] == ':')
+        else if (p[i].file[0] == '\\' && p[i].file[5] == ':')
         {
             strcpy(filename, p[i].file);
             filename[4] = windowsdir[0];
@@ -1385,7 +1384,6 @@ static void test_CreateFileA(void)
             /* prefix the table entry with the current temp directory */
             strcpy(filename, temp_path);
             strcat(filename, p[i].file);
-            need_device_access = FALSE;
         }
         hFile = CreateFileA( filename, GENERIC_READ | GENERIC_WRITE,
                         FILE_SHARE_READ | FILE_SHARE_WRITE,
@@ -1394,13 +1392,14 @@ static void test_CreateFileA(void)
         /* if we get ACCESS_DENIED when we do not expect it, assume
          * no access to the volume
          */
-        if (need_device_access && hFile == INVALID_HANDLE_VALUE &&
+        if (hFile == INVALID_HANDLE_VALUE &&
             GetLastError() == ERROR_ACCESS_DENIED &&
-            p[i].err != ERROR_ACCESS_DENIED &&
-            p[i].err2 != ERROR_ACCESS_DENIED)
+            p[i].err != ERROR_ACCESS_DENIED)
         {
-            todo_wine_if (p[i].todo_flag)
-            win_skip("Do not have authority to access volumes. Test for %s skipped\n", filename);
+            if (p[i].todo_flag)
+                skip("Either no authority to volume, or is todo_wine for %s err=%ld should be %ld\n", filename, GetLastError(), p[i].err);
+            else
+                skip("Do not have authority to access volumes. Test for %s skipped\n", filename);
         }
         /* otherwise validate results with expectations */
         else
@@ -1490,6 +1489,7 @@ static void test_CreateFileA(void)
                         FILE_SHARE_READ | FILE_SHARE_WRITE,
                         NULL, OPEN_EXISTING,
                         FILE_ATTRIBUTE_NORMAL | FILE_FLAG_NO_BUFFERING, NULL );
+        todo_wine
         ok(hFile == INVALID_HANDLE_VALUE && GetLastError() == ERROR_PATH_NOT_FOUND,
             "CreateFileA should have returned ERROR_PATH_NOT_FOUND on %s, but got %lu\n",
             filename, GetLastError());
@@ -3371,8 +3371,6 @@ static void test_async_file_errors(void)
     HANDLE hFile;
     LPVOID lpBuffer = HeapAlloc(GetProcessHeap(), 0, 4096);
     OVERLAPPED ovl;
-    BOOL res;
-
     ovl.Offset = 0;
     ovl.OffsetHigh = 0;
     ovl.hEvent = hSem;
@@ -3388,6 +3386,7 @@ static void test_async_file_errors(void)
     ok(hFile != INVALID_HANDLE_VALUE, "CreateFileA(%s ...) failed\n", szFile);
     while (TRUE)
     {
+        BOOL res;
         DWORD count;
         while (WaitForSingleObjectEx(hSem, INFINITE, TRUE) == WAIT_IO_COMPLETION)
             ;
@@ -3405,12 +3404,6 @@ static void test_async_file_errors(void)
     }
     ok(completion_count == 0, "completion routine should only be called when ReadFileEx succeeds (this rule was violated %d times)\n", completion_count);
     /*printf("Error = %ld\n", GetLastError());*/
-
-    SleepEx(0, TRUE); /* Flush pending APCs */
-    res = CloseHandle(hFile);
-    ok(res, "CloseHandle: error %ld\n", GetLastError());
-    res = CloseHandle(hSem);
-    ok(res, "CloseHandle: error %ld\n", GetLastError());
     HeapFree(GetProcessHeap(), 0, lpBuffer);
 }
 
@@ -4466,18 +4459,6 @@ static void test_ReplaceFileW(void)
         "ReplaceFileW: unexpected error %ld\n", GetLastError());
     DeleteFileW( replacement );
 
-    ret = GetTempFileNameW(temp_path, prefix, 0, replacement);
-    ok(ret, "GetTempFileNameW error (replacement) %ld\n", GetLastError());
-    ret = CreateDirectoryW(replaced, NULL);
-    ok(ret, "CreateDirectoryW error %ld\n", GetLastError());
-    SetLastError(0xdeadbeef);
-    ret = pReplaceFileW(replaced, replacement, NULL, 0, 0, 0);
-    ok(!ret, "expected failure\n");
-    ok(GetLastError() == ERROR_ACCESS_DENIED, "got error %lu\n", GetLastError());
-    ret = RemoveDirectoryW(replaced);
-    ok(ret, "RemoveDirectoryW error %ld\n", GetLastError());
-    DeleteFileW(replacement);
-
     if (removeBackup)
     {
         ret = DeleteFileW(backup);
@@ -4485,26 +4466,6 @@ static void test_ReplaceFileW(void)
            broken(GetLastError() == ERROR_ACCESS_DENIED), /* win2k */
            "DeleteFileW: error (backup) %ld\n", GetLastError());
     }
-
-    /* test with forward slashes in the destination and use
-     * Z:/tmp in Wine to ensure the root is not writable
-     */
-    ret = GetFileAttributesW(L"Z:/tmp");
-    if (ret != INVALID_FILE_ATTRIBUTES && (ret & FILE_ATTRIBUTE_DIRECTORY))
-        wcscpy(temp_path, L"Z:/tmp");
-
-    ret = GetTempFileNameW(temp_path, prefix, 0, replaced);
-    ok(ret, "GetTempFileNameW error (replaced) %ld\n", GetLastError());
-    for (int i = 0; i < wcslen(replaced); i++)
-        if (replaced[i] == L'\\') replaced[i] = L'/';
-
-    ret = GetTempFileNameW(temp_path, prefix, 0, replacement);
-    ok(ret, "GetTempFileNameW error (replacement) %ld\n", GetLastError());
-    ret = pReplaceFileW(replaced, replacement, NULL, 0, 0, 0);
-    ok(ret, "ReplaceFileW: error %ld\n", GetLastError());
-
-    DeleteFileW(replaced);
-    DeleteFileW(replacement);
 }
 
 static void test_CreateFile(void)
@@ -5125,21 +5086,6 @@ static void test_ReOpenFile(void)
     ret = DeleteFileA(filename);
     ok(ret, "failed to delete file, error %lu\n", GetLastError());
 
-    /* FILE_FLAG_BACKUP_SEMANTICS is allowed, but unlike with CreateFile(),
-     * it cannot be used to open a directory. */
-
-    ret = CreateDirectoryA(filename, NULL);
-    ok(ret == TRUE, "got error %lu\n", GetLastError());
-    file = CreateFileA(filename, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, 0);
-    ok(file != INVALID_HANDLE_VALUE, "got error %lu\n", GetLastError());
-    new = pReOpenFile(file, GENERIC_READ, FILE_SHARE_READ, FILE_FLAG_BACKUP_SEMANTICS);
-    ok(new == INVALID_HANDLE_VALUE, "expected failure\n");
-    ok(GetLastError() == ERROR_ACCESS_DENIED, "got error %lu\n", GetLastError());
-    CloseHandle(file);
-
-    ret = RemoveDirectoryA(filename);
-    ok(ret == TRUE, "got error %lu\n", GetLastError());
-
     file = CreateNamedPipeA("\\\\.\\pipe\\test_pipe", PIPE_ACCESS_DUPLEX, 0, 1, 1000, 1000, 1000, NULL);
     ok(file != INVALID_HANDLE_VALUE, "failed to create pipe, error %lu\n", GetLastError());
 
@@ -5594,8 +5540,8 @@ static void test_GetFinalPathNameByHandleW(void)
     static WCHAR prefix[] = {'G','e','t','F','i','n','a','l','P','a','t','h',
                              'N','a','m','e','B','y','H','a','n','d','l','e','W','\0'};
     static WCHAR dos_prefix[] = {'\\','\\','?','\\','\0'};
-    WCHAR temp_path[MAX_PATH], test_path[MAX_PATH * 2];
-    WCHAR long_path[MAX_PATH], result_path[MAX_PATH * 2];
+    WCHAR temp_path[MAX_PATH], test_path[MAX_PATH];
+    WCHAR long_path[MAX_PATH], result_path[MAX_PATH];
     WCHAR dos_path[MAX_PATH + sizeof(dos_prefix)];
     WCHAR drive_part[MAX_PATH];
     WCHAR *file_part;
@@ -5604,7 +5550,7 @@ static void test_GetFinalPathNameByHandleW(void)
     BOOL success;
     HANDLE file;
     DWORD count;
-    UINT i, ret;
+    UINT ret;
 
     if (!pGetFinalPathNameByHandleW)
     {
@@ -5709,47 +5655,6 @@ static void test_GetFinalPathNameByHandleW(void)
     ok(lstrcmpiW(nt_path, result_path) == 0, "Expected %s, got %s\n",
        wine_dbgstr_w(nt_path), wine_dbgstr_w(result_path));
 
-    CloseHandle(file);
-
-    /* Roots of drives should come back with a trailing slash. */
-    file = CreateFileW(L"C:\\", GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, NULL,
-                       OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, 0);
-    ok(file != INVALID_HANDLE_VALUE, "CreateFileW error %lu\n", GetLastError());
-    memset(result_path, 0x11, sizeof(result_path));
-    count = pGetFinalPathNameByHandleW(file, result_path, MAX_PATH, FILE_NAME_NORMALIZED | VOLUME_NAME_DOS);
-    lstrcpyW(dos_path, L"\\\\?\\C:\\");
-    ok(count == lstrlenW(dos_path), "Expected length %u, got %lu\n", lstrlenW(dos_path), count);
-    ok(lstrcmpiW(dos_path, result_path) == 0, "Expected %s, got %s\n",
-       wine_dbgstr_w(dos_path), wine_dbgstr_w(result_path));
-    CloseHandle(file);
-
-    /* Other directories should not have a trailing slash. */
-    file = CreateFileW(L"C:\\windows\\", GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, NULL,
-                       OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, 0);
-    ok(file != INVALID_HANDLE_VALUE, "CreateFileW error %lu\n", GetLastError());
-    memset(result_path, 0x11, sizeof(result_path));
-    count = pGetFinalPathNameByHandleW(file, result_path, MAX_PATH, FILE_NAME_NORMALIZED | VOLUME_NAME_DOS);
-    lstrcpyW(dos_path, L"\\\\?\\C:\\windows");
-    ok(count == lstrlenW(dos_path), "Expected length %u, got %lu\n", lstrlenW(dos_path), count);
-    ok(lstrcmpiW(dos_path, result_path) == 0, "Expected %s, got %s\n",
-       wine_dbgstr_w(dos_path), wine_dbgstr_w(result_path));
-    CloseHandle(file);
-
-    lstrcpyW(test_path, L"\\\\?\\");
-    lstrcatW(test_path, temp_path);
-    for (i = 0; i < ARRAY_SIZE(long_path) - 5; i++) long_path[i] = 'a';
-    long_path[i] = 0;
-    lstrcatW(test_path, long_path);
-
-    file = CreateFileW(test_path, GENERIC_READ | GENERIC_WRITE, 0, NULL,
-                       CREATE_ALWAYS, FILE_FLAG_DELETE_ON_CLOSE, 0);
-    ok(file != INVALID_HANDLE_VALUE, "CreateFileW error %lu\n", GetLastError());
-
-    memset(result_path, 0xcb, sizeof(result_path));
-    count = pGetFinalPathNameByHandleW(file, result_path, ARRAY_SIZE(result_path), FILE_NAME_NORMALIZED);
-    ok(count == lstrlenW(test_path), "Expected length %u, got %lu\n", lstrlenW(test_path), count);
-    ok(lstrcmpiW(test_path, result_path) == 0, "Expected %s, got %s\n",
-       wine_dbgstr_w(test_path), wine_dbgstr_w(result_path));
     CloseHandle(file);
 }
 
@@ -5931,48 +5836,6 @@ static void test_SetFileRenameInfo(void)
     ok(!ret && GetLastError() == ERROR_ACCESS_DENIED, "FileRenameInfo unexpected result %ld\n", GetLastError());
     CloseHandle(file);
 
-    DeleteFileW(tempFileFrom);
-    DeleteFileW(tempFileTo1);
-    DeleteFileW(tempFileTo2);
-
-    /* repeat test again with FileRenameInfoEx */
-
-    ret = GetTempFileNameW(tempPath, L"abc", 0, tempFileTo1);
-    ok(ret, "GetTempFileNameW failed, got error %lu.\n", GetLastError());
-
-    ret = GetTempFileNameW(tempPath, L"abc", 1, tempFileTo2);
-    ok(ret, "GetTempFileNameW failed, got error %lu.\n", GetLastError());
-
-    file = CreateFileW(tempFileFrom, GENERIC_READ | GENERIC_WRITE | DELETE, 0, 0, CREATE_ALWAYS, 0, 0);
-    ok(file != INVALID_HANDLE_VALUE, "failed to create temp file, error %lu.\n", GetLastError());
-
-    fri->Flags = 0;
-    fri->RootDirectory = NULL;
-    fri->FileNameLength = wcslen(tempFileTo1) * sizeof(WCHAR);
-    memcpy(fri->FileName, tempFileTo1, fri->FileNameLength + sizeof(WCHAR));
-    ret = pSetFileInformationByHandle(file, FileRenameInfoEx, fri, size);
-    ok(!ret && (GetLastError() == ERROR_ALREADY_EXISTS || GetLastError() == ERROR_INVALID_PARAMETER),
-        "FileRenameInfoEx unexpected result %ld\n", GetLastError());
-    if (GetLastError() != ERROR_INVALID_PARAMETER)
-    {
-        fri->Flags = FILE_RENAME_REPLACE_IF_EXISTS;
-        ret = pSetFileInformationByHandle(file, FileRenameInfoEx, fri, size);
-        ok(ret, "FileRenameInfoEx failed, error %ld\n", GetLastError());
-
-        fri->Flags = 0;
-        fri->FileNameLength = wcslen(tempFileTo2) * sizeof(WCHAR);
-        memcpy(fri->FileName, tempFileTo2, fri->FileNameLength + sizeof(WCHAR));
-        ret = pSetFileInformationByHandle(file, FileRenameInfoEx, fri, size);
-        ok(ret, "FileRenameInfoEx failed, error %ld\n", GetLastError());
-
-        CloseHandle(file);
-
-        file = CreateFileW(tempFileTo2, GENERIC_READ | GENERIC_WRITE, 0, 0, OPEN_EXISTING, 0, 0);
-        ok(file != INVALID_HANDLE_VALUE, "file not renamed, error %ld\n", GetLastError());
-    }
-    else win_skip( "FileRenameInfoEx not supported\n" );
-
-    CloseHandle(file);
     HeapFree(GetProcessHeap(), 0, fri);
     DeleteFileW(tempFileFrom);
     DeleteFileW(tempFileTo1);
@@ -6520,7 +6383,7 @@ static void test_eof(void)
     ok(ret, "failed to get size, error %lu\n", GetLastError());
     ok(!file_size.QuadPart, "got size %I64d\n", file_size.QuadPart);
 
-    SetFilePointer(file, 2, NULL, FILE_BEGIN);
+    SetFilePointer(file, 2, NULL, SEEK_SET);
 
     ret = GetFileSizeEx(file, &file_size);
     ok(ret, "failed to get size, error %lu\n", GetLastError());
@@ -6532,7 +6395,7 @@ static void test_eof(void)
     ok(!size, "got size %lu\n", size);
     ok(GetLastError() == 0xdeadbeef, "got error %lu\n", GetLastError());
 
-    SetFilePointer(file, 2, NULL, FILE_BEGIN);
+    SetFilePointer(file, 2, NULL, SEEK_SET);
 
     SetLastError(0xdeadbeef);
     size = 0xdeadbeef;
@@ -6545,7 +6408,7 @@ static void test_eof(void)
        "got status %#lx\n", (NTSTATUS)overlapped.Internal);
     ok(!overlapped.InternalHigh, "got size %Iu\n", overlapped.InternalHigh);
 
-    SetFilePointer(file, 2, NULL, FILE_BEGIN);
+    SetFilePointer(file, 2, NULL, SEEK_SET);
 
     ret = SetEndOfFile(file);
     ok(ret, "failed to set EOF, error %lu\n", GetLastError());
@@ -6562,7 +6425,7 @@ static void test_eof(void)
     ok(ret, "failed to get size, error %lu\n", GetLastError());
     ok(file_size.QuadPart == 6, "got size %I64d\n", file_size.QuadPart);
 
-    SetFilePointer(file, 4, NULL, FILE_BEGIN);
+    SetFilePointer(file, 4, NULL, SEEK_SET);
     ret = SetEndOfFile(file);
     ok(ret, "failed to set EOF, error %lu\n", GetLastError());
 
@@ -6570,13 +6433,13 @@ static void test_eof(void)
     ok(ret, "failed to get size, error %lu\n", GetLastError());
     ok(file_size.QuadPart == 4, "got size %I64d\n", file_size.QuadPart);
 
-    SetFilePointer(file, 0, NULL, FILE_BEGIN);
+    SetFilePointer(file, 0, NULL, SEEK_SET);
     ret = ReadFile(file, buffer, sizeof(buffer), &size, NULL);
     ok(ret, "failed to read, error %lu\n", GetLastError());
     ok(size == 4, "got size %lu\n", size);
     ok(!memcmp(buffer, "\0\0da", 4), "wrong data\n");
 
-    SetFilePointer(file, 6, NULL, FILE_BEGIN);
+    SetFilePointer(file, 6, NULL, SEEK_SET);
     ret = SetEndOfFile(file);
     ok(ret, "failed to set EOF, error %lu\n", GetLastError());
 
@@ -6584,7 +6447,7 @@ static void test_eof(void)
     ok(ret, "failed to get size, error %lu\n", GetLastError());
     ok(file_size.QuadPart == 6, "got size %I64d\n", file_size.QuadPart);
 
-    SetFilePointer(file, 0, NULL, FILE_BEGIN);
+    SetFilePointer(file, 0, NULL, SEEK_SET);
     ret = ReadFile(file, buffer, sizeof(buffer), &size, NULL);
     ok(ret, "failed to read, error %lu\n", GetLastError());
     ok(size == 6, "got size %lu\n", size);
@@ -6593,7 +6456,7 @@ static void test_eof(void)
     ret = SetEndOfFile(file);
     ok(ret, "failed to set EOF, error %lu\n", GetLastError());
 
-    SetFilePointer(file, 2, NULL, FILE_BEGIN);
+    SetFilePointer(file, 2, NULL, SEEK_SET);
     ret = WriteFile(file, "data", 4, &size, NULL);
     ok(ret, "failed to write, error %lu\n", GetLastError());
     ok(size == 4, "got size %lu\n", size);
@@ -6602,7 +6465,7 @@ static void test_eof(void)
     ok(ret, "failed to get size, error %lu\n", GetLastError());
     ok(file_size.QuadPart == 6, "got size %I64d\n", file_size.QuadPart);
 
-    SetFilePointer(file, 0, NULL, FILE_BEGIN);
+    SetFilePointer(file, 0, NULL, SEEK_SET);
     ret = ReadFile(file, buffer, sizeof(buffer), &size, NULL);
     ok(ret, "failed to read, error %lu\n", GetLastError());
     ok(size == 6, "got size %lu\n", size);
@@ -6617,14 +6480,14 @@ static void test_eof(void)
         ok(ret, "failed to get size, error %lu\n", GetLastError());
         ok(file_size.QuadPart == 6, "got size %I64d\n", file_size.QuadPart);
 
-        SetFilePointer(file, 6, NULL, FILE_BEGIN);
+        SetFilePointer(file, 6, NULL, SEEK_SET);
         ret = SetEndOfFile(file);
         ok(ret, "failed to set EOF, error %lu\n", GetLastError());
         ret = GetFileSizeEx(file, &file_size);
         ok(ret, "failed to get size, error %lu\n", GetLastError());
         ok(file_size.QuadPart == 6, "got size %I64d\n", file_size.QuadPart);
 
-        SetFilePointer(file, 8, NULL, FILE_BEGIN);
+        SetFilePointer(file, 8, NULL, SEEK_SET);
         ret = SetEndOfFile(file);
         ok(ret, "failed to set EOF, error %lu\n", GetLastError());
         ret = GetFileSizeEx(file, &file_size);
@@ -6632,7 +6495,7 @@ static void test_eof(void)
         ok(file_size.QuadPart == 8, "got size %I64d\n", file_size.QuadPart);
 
         SetLastError(0xdeadbeef);
-        SetFilePointer(file, 6, NULL, FILE_BEGIN);
+        SetFilePointer(file, 6, NULL, SEEK_SET);
         ret = SetEndOfFile(file);
         ok(!ret, "expected failure\n");
         ok(GetLastError() == ERROR_USER_MAPPED_FILE, "got error %lu\n", GetLastError());
@@ -6640,14 +6503,14 @@ static void test_eof(void)
         ok(ret, "failed to get size, error %lu\n", GetLastError());
         ok(file_size.QuadPart == 8, "got size %I64d\n", file_size.QuadPart);
 
-        SetFilePointer(file, 8192, NULL, FILE_BEGIN);
+        SetFilePointer(file, 8192, NULL, SEEK_SET);
         ret = SetEndOfFile(file);
         ok(ret, "failed to set EOF, error %lu\n", GetLastError());
         ret = GetFileSizeEx(file, &file_size);
         ok(ret, "failed to get size, error %lu\n", GetLastError());
         ok(file_size.QuadPart == 8192, "got size %I64d\n", file_size.QuadPart);
 
-        SetFilePointer(file, 8191, NULL, FILE_BEGIN);
+        SetFilePointer(file, 8191, NULL, SEEK_SET);
         ret = SetEndOfFile(file);
         ok(!ret, "expected failure\n");
         ok(GetLastError() == ERROR_USER_MAPPED_FILE, "got error %lu\n", GetLastError());
@@ -6660,14 +6523,14 @@ static void test_eof(void)
 
         CloseHandle(mapping);
 
-        SetFilePointer(file, 16384, NULL, FILE_BEGIN);
+        SetFilePointer(file, 16384, NULL, SEEK_SET);
         ret = SetEndOfFile(file);
         ok(ret, "failed to set EOF, error %lu\n", GetLastError());
         ret = GetFileSizeEx(file, &file_size);
         ok(ret, "failed to get size, error %lu\n", GetLastError());
         ok(file_size.QuadPart == 16384, "got size %I64d\n", file_size.QuadPart);
 
-        SetFilePointer(file, 16383, NULL, FILE_BEGIN);
+        SetFilePointer(file, 16383, NULL, SEEK_SET);
         ret = SetEndOfFile(file);
         ok(!ret, "expected failure\n");
         ok(GetLastError() == ERROR_USER_MAPPED_FILE, "got error %lu\n", GetLastError());
@@ -6678,7 +6541,7 @@ static void test_eof(void)
         ret = UnmapViewOfFile(view);
         ok(ret, "failed to unmap view, error %lu\n", GetLastError());
 
-        SetFilePointer(file, 6, NULL, FILE_BEGIN);
+        SetFilePointer(file, 6, NULL, SEEK_SET);
         ret = SetEndOfFile(file);
         ok(ret, "failed to set EOF, error %lu\n", GetLastError());
         ret = GetFileSizeEx(file, &file_size);
@@ -6689,222 +6552,6 @@ static void test_eof(void)
     CloseHandle(file);
     ret = DeleteFileA(filename);
     ok(ret, "failed to delete %s, error %lu\n", debugstr_a(filename), GetLastError());
-}
-
-static void test_symbolic_link(void)
-{
-    WCHAR temp_path[MAX_PATH], path[MAX_PATH], path2[MAX_PATH], expect_path[MAX_PATH];
-    char buffer[1024];
-    const REPARSE_DATA_BUFFER *data = (void *)buffer;
-    TOKEN_PRIVILEGES privs;
-    const WCHAR *ret_path;
-    IO_STATUS_BLOCK io;
-    HANDLE file, token;
-    LUID luid;
-    BOOL ret;
-
-    ret = OpenProcessToken( GetCurrentProcess(), TOKEN_ALL_ACCESS, &token );
-    ok( ret == TRUE, "got error %lu\n", GetLastError() );
-    ret = LookupPrivilegeValueA( NULL, "SeCreateSymbolicLinkPrivilege", &luid );
-    todo_wine ok( ret == TRUE, "got error %lu\n", GetLastError() );
-    if (ret)
-    {
-        privs.PrivilegeCount = 1;
-        privs.Privileges[0].Luid = luid;
-        privs.Privileges[0].Attributes = SE_PRIVILEGE_ENABLED;
-        ret = AdjustTokenPrivileges( token, FALSE, &privs, 0, NULL, NULL );
-        ok( ret == TRUE, "got error %lu\n", GetLastError() );
-        if (GetLastError() == ERROR_NOT_ALL_ASSIGNED)
-        {
-            win_skip( "Insufficient permissions to perform symlink tests.\n" );
-            CloseHandle( token );
-            return;
-        }
-        CloseHandle( token );
-    }
-
-    GetTempPathW( ARRAY_SIZE( temp_path ), temp_path );
-
-    swprintf( path, ARRAY_SIZE(path), L"%s/testsymlink\\", temp_path );
-    swprintf( path2, ARRAY_SIZE(path2), L"%s/target\\", temp_path );
-
-    SetLastError( 0xdeadbeef );
-    ret = CreateSymbolicLinkW( path, path2, TRUE );
-    ok( ret == TRUE, "got %d\n", ret );
-    todo_wine ok( !GetLastError(), "got error %lu\n", GetLastError() );
-
-    ret = GetFileAttributesW( path );
-    ok( (ret & 0xfff) == (FILE_ATTRIBUTE_DIRECTORY | FILE_ATTRIBUTE_REPARSE_POINT), "got attrs %#x\n", ret );
-
-    file = CreateFileW( path, FILE_READ_DATA, 0, NULL, OPEN_EXISTING,
-                        FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT, NULL );
-    ok( file != INVALID_HANDLE_VALUE, "got error %lu\n", GetLastError() );
-
-    ret = NtFsControlFile( file, NULL, NULL, NULL, &io, FSCTL_GET_REPARSE_POINT, NULL, 0, buffer, sizeof(buffer) );
-    ok( !ret, "got %#x\n", ret );
-    ok( data->ReparseTag == IO_REPARSE_TAG_SYMLINK, "got tag %#lx\n", data->ReparseTag );
-    ok( !data->Reserved, "got reserved %#x\n", data->Reserved );
-    ok( data->ReparseDataLength == io.Information - offsetof( REPARSE_DATA_BUFFER, SymbolicLinkReparseBuffer ),
-        "got information %Iu, length %u\n", io.Information, data->ReparseDataLength );
-    ok( !data->SymbolicLinkReparseBuffer.Flags, "got flags %#lx\n", data->SymbolicLinkReparseBuffer.Flags );
-    ret_path = data->SymbolicLinkReparseBuffer.PathBuffer + (data->SymbolicLinkReparseBuffer.SubstituteNameOffset / sizeof(WCHAR));
-    swprintf( expect_path, ARRAY_SIZE(expect_path), L"\\??\\%starget\\", temp_path );
-    ok( data->SymbolicLinkReparseBuffer.SubstituteNameLength == wcslen( expect_path ) * 2,
-        "got length %u\n", data->SymbolicLinkReparseBuffer.SubstituteNameLength );
-    ok( !memcmp( ret_path, expect_path, data->SymbolicLinkReparseBuffer.SubstituteNameLength ),
-        "expected %s, got %s\n", debugstr_w( expect_path ),
-        debugstr_wn( ret_path, data->SymbolicLinkReparseBuffer.SubstituteNameLength ));
-    ret_path = data->SymbolicLinkReparseBuffer.PathBuffer + (data->SymbolicLinkReparseBuffer.PrintNameOffset / sizeof(WCHAR));
-    ok( data->SymbolicLinkReparseBuffer.PrintNameLength == wcslen( path2 ) * 2,
-        "got length %u\n", data->SymbolicLinkReparseBuffer.PrintNameLength );
-    ok( !memcmp( ret_path, path2, data->SymbolicLinkReparseBuffer.PrintNameLength ),
-        "expected %s, got %s\n", debugstr_w( path2 ),
-        debugstr_wn( ret_path, data->SymbolicLinkReparseBuffer.PrintNameLength ));
-    CloseHandle( file );
-
-    SetLastError( 0xdeadbeef );
-    ret = CreateSymbolicLinkW( path, L"target", TRUE );
-    ok( ret == FALSE, "got %d\n", ret );
-    ok( GetLastError() == ERROR_ALREADY_EXISTS, "got error %lu\n", GetLastError() );
-
-    ret = RemoveDirectoryW( path );
-    ok( ret == TRUE, "got error %lu\n", GetLastError() );
-
-    SetLastError( 0xdeadbeef );
-    ret = CreateSymbolicLinkW( path, L".\\target", TRUE );
-    ok( ret == TRUE, "got %d\n", ret );
-    todo_wine ok( !GetLastError(), "got error %lu\n", GetLastError() );
-
-    ret = GetFileAttributesW( path );
-    ok( (ret & 0xfff) == (FILE_ATTRIBUTE_DIRECTORY | FILE_ATTRIBUTE_REPARSE_POINT), "got attrs %#x\n", ret );
-
-    file = CreateFileW( path, FILE_READ_DATA, 0, NULL, OPEN_EXISTING,
-                        FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT, NULL );
-    ok( file != INVALID_HANDLE_VALUE, "got error %lu\n", GetLastError() );
-
-    ret = NtFsControlFile( file, NULL, NULL, NULL, &io, FSCTL_GET_REPARSE_POINT, NULL, 0, buffer, sizeof(buffer) );
-    ok( !ret, "got %#x\n", ret );
-    ok( data->ReparseTag == IO_REPARSE_TAG_SYMLINK, "got tag %#lx\n", data->ReparseTag );
-    ok( !data->Reserved, "got reserved %#x\n", data->Reserved );
-    ok( data->ReparseDataLength == io.Information - offsetof( REPARSE_DATA_BUFFER, SymbolicLinkReparseBuffer ),
-        "got information %Iu, length %u\n", io.Information, data->ReparseDataLength );
-    ok( data->SymbolicLinkReparseBuffer.Flags == SYMLINK_FLAG_RELATIVE, "got flags %#lx\n", data->SymbolicLinkReparseBuffer.Flags );
-    ret_path = data->SymbolicLinkReparseBuffer.PathBuffer + (data->SymbolicLinkReparseBuffer.SubstituteNameOffset / sizeof(WCHAR));
-    ok( data->SymbolicLinkReparseBuffer.SubstituteNameLength == wcslen( L".\\target" ) * 2,
-        "got length %u\n", data->SymbolicLinkReparseBuffer.SubstituteNameLength );
-    ok( !memcmp( ret_path, L".\\target", data->SymbolicLinkReparseBuffer.SubstituteNameLength ),
-        "expected %s, got %s\n", debugstr_w( L".\\target" ),
-        debugstr_wn( ret_path, data->SymbolicLinkReparseBuffer.SubstituteNameLength ));
-    ret_path = data->SymbolicLinkReparseBuffer.PathBuffer + (data->SymbolicLinkReparseBuffer.PrintNameOffset / sizeof(WCHAR));
-    ok( data->SymbolicLinkReparseBuffer.PrintNameLength == wcslen( L".\\target" ) * 2,
-        "got length %u\n", data->SymbolicLinkReparseBuffer.PrintNameLength );
-    ok( !memcmp( ret_path, L".\\target", data->SymbolicLinkReparseBuffer.PrintNameLength ),
-        "expected %s, got %s\n", debugstr_w( L".\\target" ),
-        debugstr_wn( ret_path, data->SymbolicLinkReparseBuffer.PrintNameLength ));
-    CloseHandle( file );
-
-    ret = RemoveDirectoryW( path );
-    ok( ret == TRUE, "got error %lu\n", GetLastError() );
-
-    SetLastError( 0xdeadbeef );
-    ret = CreateSymbolicLinkW( path, L".\\target\\", FALSE );
-    ok( !ret, "got %d\n", ret );
-    ok( GetLastError() == ERROR_INVALID_NAME, "got error %lu\n", GetLastError() );
-
-    SetLastError( 0xdeadbeef );
-    swprintf( path, ARRAY_SIZE(path), L"%s/testsymlink", temp_path );
-    ret = CreateSymbolicLinkW( path, L".\\target\\", FALSE );
-    ok( ret == TRUE, "got %d\n", ret );
-    todo_wine ok( !GetLastError(), "got error %lu\n", GetLastError() );
-
-    ret = GetFileAttributesW( path );
-    ok( (ret & 0xfff) == (FILE_ATTRIBUTE_ARCHIVE | FILE_ATTRIBUTE_REPARSE_POINT), "got attrs %#x\n", ret );
-
-    file = CreateFileW( path, FILE_READ_DATA, 0, NULL, OPEN_EXISTING,
-                        FILE_FLAG_OPEN_REPARSE_POINT, NULL );
-    ok( file != INVALID_HANDLE_VALUE, "got error %lu\n", GetLastError() );
-
-    ret = NtFsControlFile( file, NULL, NULL, NULL, &io, FSCTL_GET_REPARSE_POINT, NULL, 0, buffer, sizeof(buffer) );
-    ok( !ret, "got %#x\n", ret );
-    ok( data->ReparseTag == IO_REPARSE_TAG_SYMLINK, "got tag %#lx\n", data->ReparseTag );
-    ok( !data->Reserved, "got reserved %#x\n", data->Reserved );
-    ok( data->ReparseDataLength == io.Information - offsetof( REPARSE_DATA_BUFFER, SymbolicLinkReparseBuffer ),
-        "got information %Iu, length %u\n", io.Information, data->ReparseDataLength );
-    ok( data->SymbolicLinkReparseBuffer.Flags == SYMLINK_FLAG_RELATIVE, "got flags %#lx\n", data->SymbolicLinkReparseBuffer.Flags );
-    ret_path = data->SymbolicLinkReparseBuffer.PathBuffer + (data->SymbolicLinkReparseBuffer.SubstituteNameOffset / sizeof(WCHAR));
-    ok( data->SymbolicLinkReparseBuffer.SubstituteNameLength == wcslen( L".\\target\\" ) * 2,
-        "got length %u\n", data->SymbolicLinkReparseBuffer.SubstituteNameLength );
-    ok( !memcmp( ret_path, L".\\target\\", data->SymbolicLinkReparseBuffer.SubstituteNameLength ),
-        "expected %s, got %s\n", debugstr_w( L".\\target\\" ),
-        debugstr_wn( ret_path, data->SymbolicLinkReparseBuffer.SubstituteNameLength ));
-    ret_path = data->SymbolicLinkReparseBuffer.PathBuffer + (data->SymbolicLinkReparseBuffer.PrintNameOffset / sizeof(WCHAR));
-    ok( data->SymbolicLinkReparseBuffer.PrintNameLength == wcslen( L".\\target\\" ) * 2,
-        "got length %u\n", data->SymbolicLinkReparseBuffer.PrintNameLength );
-    ok( !memcmp( ret_path, L".\\target\\", data->SymbolicLinkReparseBuffer.PrintNameLength ),
-        "expected %s, got %s\n", debugstr_w( L".\\target\\" ),
-        debugstr_wn( ret_path, data->SymbolicLinkReparseBuffer.PrintNameLength ));
-    CloseHandle( file );
-
-    ret = DeleteFileW( path );
-    ok( ret == TRUE, "got error %lu\n", GetLastError() );
-}
-
-static void test_posix_semantics(void)
-{
-    static const DWORD flags[] = { FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_BACKUP_SEMANTICS | FILE_ATTRIBUTE_DIRECTORY,
-                                   FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_POSIX_SEMANTICS | FILE_ATTRIBUTE_DIRECTORY,
-                                   FILE_FLAG_POSIX_SEMANTICS | FILE_ATTRIBUTE_DIRECTORY };
-    static const struct
-    {
-        DWORD disposition, cleanup;
-    } td[] =
-    {
-        { CREATE_NEW, 1 },
-        { OPEN_ALWAYS, 0 },
-        { TRUNCATE_EXISTING, 0 },
-        { CREATE_ALWAYS, 1 }
-    };
-    HANDLE hFile, hFile2;
-    WCHAR temp_path[MAX_PATH];
-    WCHAR filename[MAX_PATH];
-    DWORD ret, i, j;
-    BY_HANDLE_FILE_INFORMATION info;
-
-    GetTempPathW(MAX_PATH, temp_path);
-    GetTempFileNameW(temp_path, L"psx", 0, filename);
-    DeleteFileW(filename);
-
-    for (i = 0; i < ARRAY_SIZE(td); i++)
-    {
-        for (j = 0; j < ARRAY_SIZE(flags); j++)
-        {
-            winetest_push_context("%lu/%lu", i, j);
-
-            hFile = CreateFileW(filename, GENERIC_WRITE, FILE_SHARE_WRITE, NULL, td[i].disposition, flags[j], NULL);
-            ok(hFile != INVALID_HANDLE_VALUE, "CreateFileW error %lu\n", GetLastError());
-            ret = GetFileInformationByHandle(hFile, &info);
-            ok(ret, "GetFileInformationByHandle error %lu\n", GetLastError());
-            if (td[i].disposition == CREATE_NEW && flags[j] == (FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_POSIX_SEMANTICS | FILE_ATTRIBUTE_DIRECTORY))
-                ok(info.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY, "created file is not a directory\n");
-            else
-                ok(!(info.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY), "created file is a directory\n");
-
-            hFile2 = CreateFileW(filename, GENERIC_WRITE, FILE_SHARE_WRITE, NULL, OPEN_EXISTING, flags[j], NULL);
-            ok(hFile2 != INVALID_HANDLE_VALUE, "CreateFileW error %lu\n", GetLastError());
-            CloseHandle(hFile2);
-            CloseHandle(hFile);
-
-            if (td[i].cleanup)
-            {
-                if (info.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)
-                    RemoveDirectoryW(filename);
-                else
-                    DeleteFileW(filename);
-            }
-
-            winetest_pop_context();
-        }
-    }
 }
 
 START_TEST(file)
@@ -6985,6 +6632,4 @@ START_TEST(file)
     test_hard_link();
     test_move_file();
     test_eof();
-    test_symbolic_link();
-    test_posix_semantics();
 }

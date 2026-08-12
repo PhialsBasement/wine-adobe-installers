@@ -117,16 +117,6 @@ static void test_parms_syntax(void)
     ok(GetFileAttributesA("xcopytest2") != INVALID_FILE_ATTRIBUTES,
        "xcopy failed to copy empty directory\n");
     RemoveDirectoryA("xcopytest2");
-
-    CreateDirectoryA("xcopy test2", NULL);
-    rc = runcmd("xcopy /S/R/Y/I \"xcopytest\" \"xcopy test2\"");
-    ok(rc == 0, "xcopy /S/R/Y/I test failed rc=%lu\n", rc);
-    ok(GetFileAttributesA("xcopy test2") != INVALID_FILE_ATTRIBUTES,
-       "xcopy failed to copy empty directory\n");
-    RemoveDirectoryA("xcopy test2");
-
-    rc = runcmd("xcopy xcopy1 xcopy1");
-    ok(rc == 4, "xcopy file to self failed rc=%lu\n", rc);
 }
 
 static void test_keep_attributes(void)

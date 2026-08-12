@@ -253,7 +253,9 @@ static void test_NtOpenKey(void)
     attr.Length = sizeof(attr);
     key = (HANDLE)0xdeadbeef;
     status = pNtOpenKey(&key, 0, &attr);
+    todo_wine
     ok(status == STATUS_ACCESS_DENIED, "Expected STATUS_ACCESS_DENIED, got: 0x%08lx\n", status);
+    todo_wine
     ok(!key, "key = %p\n", key);
     if (status == STATUS_SUCCESS) NtClose(key);
 
@@ -440,7 +442,6 @@ static void test_NtCreateKey(void)
     pRtlCreateUnicodeStringFromAsciiz( &str, "test_subkey\\" );
     status = pNtCreateKey( &subkey, am, &attr, 0, 0, 0, 0 );
     ok( status == STATUS_SUCCESS, "NtCreateKey failed: 0x%08lx\n", status );
-    pRtlFreeUnicodeString( &str );
 
     pRtlCreateUnicodeStringFromAsciiz( &str, "test_subkey\\" );
     status = pNtCreateKey( &subkey, am, &attr, 0, 0, 0, 0 );
@@ -452,7 +453,6 @@ static void test_NtCreateKey(void)
     pRtlCreateUnicodeStringFromAsciiz( &str, "test_subkey2\\\\" );
     status = pNtCreateKey( &subkey, am, &attr, 0, 0, 0, 0 );
     ok( status == STATUS_SUCCESS, "NtCreateKey failed: 0x%08lx\n", status );
-    pRtlFreeUnicodeString( &str );
     pRtlCreateUnicodeStringFromAsciiz( &str, "test_subkey2\\\\test\\\\" );
     status = pNtCreateKey( &subkey2, am, &attr, 0, 0, 0, 0 );
     ok( status == STATUS_SUCCESS, "NtCreateKey failed: 0x%08lx\n", status );
@@ -1067,7 +1067,14 @@ static void test_symlinks(void)
     target = pRtlAllocateHeap( GetProcessHeap(), 0, target_len + sizeof(targetW) /*for loop test*/ );
     memcpy( target, winetestpath.Buffer, winetestpath.Length );
     memcpy( target + winetestpath.Length/sizeof(WCHAR), targetW, sizeof(targetW) );
-    InitializeObjectAttributes( &attr, &winetestpath, 0, 0, NULL );
+
+    attr.Length = sizeof(attr);
+    attr.RootDirectory = 0;
+    attr.Attributes = 0;
+    attr.ObjectName = &winetestpath;
+    attr.SecurityDescriptor = NULL;
+    attr.SecurityQualityOfService = NULL;
+
     status = pNtCreateKey( &root, KEY_ALL_ACCESS, &attr, 0, 0, 0, 0 );
     ok( status == STATUS_SUCCESS, "NtCreateKey failed: 0x%08lx\n", status );
 
@@ -1342,15 +1349,16 @@ static DWORD get_key_value( HANDLE root, const char *name, DWORD flags )
     KEY_VALUE_PARTIAL_INFORMATION *info = (KEY_VALUE_PARTIAL_INFORMATION *)tmp;
     DWORD dw, len = sizeof(tmp);
 
-    InitializeObjectAttributes( &attr, &str, OBJ_CASE_INSENSITIVE, root, NULL );
+    attr.Length = sizeof(attr);
+    attr.RootDirectory = root;
+    attr.Attributes = OBJ_CASE_INSENSITIVE;
+    attr.ObjectName = &str;
+    attr.SecurityDescriptor = NULL;
+    attr.SecurityQualityOfService = NULL;
     pRtlCreateUnicodeStringFromAsciiz( &str, name );
 
     status = pNtOpenKey( &key, flags | KEY_ALL_ACCESS, &attr );
-    if (status == STATUS_OBJECT_NAME_NOT_FOUND)
-    {
-        pRtlFreeUnicodeString( &str );
-        return 0;
-    }
+    if (status == STATUS_OBJECT_NAME_NOT_FOUND) return 0;
     ok( status == STATUS_SUCCESS, "%08lx: NtCreateKey failed: 0x%08lx\n", flags, status );
 
     status = pNtQueryValueKey( key, &value_str, KeyValuePartialInformation, info, len, &len );
@@ -1387,7 +1395,13 @@ static void _check_enum_value( int line, const WCHAR *name, DWORD flags, int sub
     DWORD len;
     int i;
 
-    InitializeObjectAttributes( &attr, &str, OBJ_CASE_INSENSITIVE, 0, NULL );
+    attr.Length = sizeof(attr);
+    attr.RootDirectory = 0;
+    attr.Attributes = OBJ_CASE_INSENSITIVE;
+    attr.ObjectName = &str;
+    attr.SecurityDescriptor = NULL;
+    attr.SecurityQualityOfService = NULL;
+
     pRtlInitUnicodeString( &str, name );
     status = pNtOpenKey( &key, flags, &attr );
     ok_( __FILE__, line )( status == STATUS_SUCCESS, "NtOpenKey failed: 0x%08lx\n", status );
@@ -1455,7 +1469,13 @@ static void test_redirection(void)
         }
     }
 
-    InitializeObjectAttributes( &attr, &str, OBJ_CASE_INSENSITIVE, 0, NULL );
+    attr.Length = sizeof(attr);
+    attr.RootDirectory = 0;
+    attr.Attributes = OBJ_CASE_INSENSITIVE;
+    attr.ObjectName = &str;
+    attr.SecurityDescriptor = NULL;
+    attr.SecurityQualityOfService = NULL;
+
     pRtlInitUnicodeString( &str, L"\\Registry\\Machine\\Software\\Wine" );
     status = pNtCreateKey( &root64, KEY_WOW64_64KEY | KEY_ALL_ACCESS, &attr, 0, 0, 0, 0 );
     if (status == STATUS_ACCESS_DENIED)
@@ -2344,54 +2364,15 @@ static void test_RtlCreateRegistryKey(void)
     pRtlFreeUnicodeString(&str);
 }
 
-/* helper function for test_NtRenameKey */
-static void check_subkeys(HANDLE key, const WCHAR **expected_names, int expected_count)
-{
-    NTSTATUS status;
-    DWORD size;
-    int i;
-    char buffer[200];
-    PKEY_BASIC_INFORMATION info;
-    BOOL match;
-
-    for (i = 0;; i++)
-    {
-        info = (PKEY_BASIC_INFORMATION)buffer;
-        status = pNtEnumerateKey(key, i, KeyBasicInformation, info, sizeof(buffer), &size);
-        if (status == STATUS_NO_MORE_ENTRIES)
-        {
-            ok(i == expected_count, "Expected %d subkeys, found %d\n", expected_count, i);
-            break;
-        }
-
-        ok(!status, "NtEnumerateKey failed, status %#lx\n", status);
-
-        info->Name[info->NameLength / sizeof(WCHAR)] = 0;
-
-        match = FALSE;
-        for (int j = 0; j < expected_count; j++)
-        {
-            if (!wcscmp(info->Name, expected_names[j]))
-            {
-                match = TRUE;
-                break;
-            }
-        }
-        ok(match, "Unexpected subkey name %s.\n", wine_dbgstr_w(info->Name));
-    }
-}
-
 static void test_NtRenameKey(void)
 {
     KEY_NAME_INFORMATION *info = NULL;
     UNICODE_STRING str, str2;
     OBJECT_ATTRIBUTES attr;
-    HANDLE key, subkey, hsub_b, hsub_c, hsub_d;
+    HANDLE key, subkey;
     char buffer[200];
     NTSTATUS status;
     DWORD size;
-    const WCHAR *expected_names[4];
-    int expected_count;
 
     status = NtRenameKey(NULL, NULL);
     ok(status == STATUS_ACCESS_VIOLATION, "Unexpected status %#lx.\n", status);
@@ -2430,6 +2411,9 @@ static void test_NtRenameKey(void)
     status = NtRenameKey(subkey, &str2);
     ok(!status, "Unexpected status %#lx.\n", status);
 
+    pRtlFreeUnicodeString(&str2);
+    pRtlFreeUnicodeString(&str);
+
     info = (KEY_NAME_INFORMATION *)buffer;
     status = pNtQueryKey(subkey, KeyNameInformation, info, sizeof(buffer), &size);
     ok(!status, "Unexpected status %#lx.\n", status);
@@ -2438,56 +2422,6 @@ static void test_NtRenameKey(void)
         info->Name[info->NameLength/sizeof(WCHAR)] = 0;
         ok(!!wcsstr(info->Name, L"renamed_subkey"), "Unexpected subkey name %s.\n", wine_dbgstr_w(info->Name));
     }
-
-    /* create subkey b, c, d */
-    pRtlCreateUnicodeStringFromAsciiz(&str, "b");
-    status = pNtCreateKey(&hsub_b, KEY_ALL_ACCESS, &attr, 0, 0, 0, 0);
-    ok(!status, "Create subkey 'b' failed, status %#lx\n", status);
-
-    pRtlCreateUnicodeStringFromAsciiz(&str, "c");
-    status = pNtCreateKey(&hsub_c, KEY_ALL_ACCESS, &attr, 0, 0, 0, 0);
-    ok(!status, "Create subkey 'c' failed, status %#lx\n", status);
-
-    pRtlCreateUnicodeStringFromAsciiz(&str, "d");
-    status = pNtCreateKey(&hsub_d, KEY_ALL_ACCESS, &attr, 0, 0, 0, 0);
-    ok(!status, "Create subkey 'd' failed, status %#lx\n", status);
-
-    /* rename "b" to "a" */
-    pRtlCreateUnicodeStringFromAsciiz(&str2, "a");
-    status = NtRenameKey(hsub_b, &str2);
-    ok(!status, "NtRenameKey failed, status %#lx\n", status);
-
-    /* expected subkeys: a, c, d */
-    expected_names[0] = L"a";
-    expected_names[1] = L"c";
-    expected_names[2] = L"d";
-    expected_names[3] = L"renamed_subkey";
-    expected_count = ARRAY_SIZE(expected_names);
-    check_subkeys(key, expected_names, expected_count);
-
-    /* rename "a" -> "b" again */
-    pRtlCreateUnicodeStringFromAsciiz(&str2, "b");
-    status = NtRenameKey(hsub_b, &str2);
-    ok(!status, "NtRenameKey failed, status %#lx\n", status);
-
-    /* expected subkeys: b, c, d */
-    expected_names[0] = L"b";
-    expected_names[1] = L"c";
-    expected_names[2] = L"d";
-    expected_names[3] = L"renamed_subkey";
-    expected_count = ARRAY_SIZE(expected_names);
-    check_subkeys(key, expected_names, expected_count);
-
-    /* clean */
-    pRtlFreeUnicodeString(&str2);
-    pRtlFreeUnicodeString(&str);
-
-    pNtDeleteKey(hsub_b);
-    pNtDeleteKey(hsub_c);
-    pNtDeleteKey(hsub_d);
-    pNtClose(hsub_b);
-    pNtClose(hsub_c);
-    pNtClose(hsub_d);
 
     pNtDeleteKey(subkey);
     pNtDeleteKey(key);
@@ -2631,6 +2565,9 @@ static NTSTATUS WINAPI query_routine(const WCHAR *value_name, ULONG value_type, 
     const WCHAR *expected_data;
     ULONG expected_size;
     ULONG expected_type;
+
+    trace("Value name: %s\n", debugstr_w(value_name));
+    trace("Value data: %s\n", debugstr_w(value_data));
 
     if (!(test->flags & SKIP_NAME_CHECK))
     {

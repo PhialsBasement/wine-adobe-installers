@@ -69,74 +69,39 @@ typedef struct _SspiData {
     ULONG max_token, req_attr;
 } SspiData;
 
-enum negotiate_flags
-{
-    NTLMSSP_NEGOTIATE_UNICODE                   = 0x00000001,
-    NTLM_NEGOTIATE_OEM                          = 0x00000002,
-    NTLMSSP_REQUEST_TARGET                      = 0x00000004,
-    NTLMSSP_NEGOTIATE_SIGN                      = 0x00000010,
-    NTLMSSP_NEGOTIATE_SEAL                      = 0x00000020,
-    NTLMSSP_NEGOTIATE_DATAGRAM                  = 0x00000040,
-    NTLMSSP_NEGOTIATE_LM_KEY                    = 0x00000080,
-    NTLMSSP_NEGOTIATE_NETWARE                   = 0x00000100,
-    NTLMSSP_NEGOTIATE_NTLM                      = 0x00000200,
-    NTLMSSP_NEGOTIATE_ANONYMOUS                 = 0x00000800,
-    NTLMSSP_NEGOTIATE_OEM_DOMAIN_SUPPLIED       = 0x00001000,
-    NTLMSSP_NEGOTIATE_OEM_WORKSTATION_SUPPLIED  = 0x00002000,
-    NTLMSSP_NEGOTIATE_LOCAL_CALL                = 0x00004000,
-    NTLMSSP_NEGOTIATE_ALWAYS_SIGN               = 0x00008000,
-    NTLMSSP_TARGET_TYPE_DOMAIN                  = 0x00010000,
-    NTLMSSP_TARGET_TYPE_SERVER                  = 0x00020000,
-    NTLMSSP_TARGET_TYPE_SHARE                   = 0x00040000,
-    NTLMSSP_NEGOTIATE_EXTENDED_SESSIONSECURITY  = 0x00080000,
-    NTLMSSP_NEGOTIATE_IDENTIFY                  = 0x00100000,
-    NTLMSSP_REQUEST_NON_NT_SESSION_KEY          = 0x00400000,
-    NTLMSSP_NEGOTIATE_TARGET_INFO               = 0x00800000,
-    NTLMSSP_NEGOTIATE_VERSION                   = 0x02000000,
-    NTLMSSP_NEGOTIATE_128                       = 0x20000000,
-    NTLMSSP_NEGOTIATE_KEY_EXCH                  = 0x40000000,
-    NTLMSSP_NEGOTIATE_56                        = 0x80000000,
-};
+static BYTE network_challenge[] = 
+   {0x4e, 0x54, 0x4c, 0x4d, 0x53, 0x53, 0x50, 0x00, 0x02, 0x00,
+    0x00, 0x00, 0x10, 0x00, 0x10, 0x00, 0x30, 0x00, 0x00, 0x00,
+    0x05, 0x82, 0x82, 0xa0, 0xe9, 0x58, 0x7f, 0x14, 0xa2, 0x86,
+    0x3b, 0x63, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x54, 0x00, 0x54, 0x00, 0x40, 0x00, 0x00, 0x00, 0x43, 0x00,
+    0x41, 0x00, 0x53, 0x00, 0x49, 0x00, 0x4e, 0x00, 0x4f, 0x00,
+    0x30, 0x00, 0x31, 0x00, 0x02, 0x00, 0x10, 0x00, 0x43, 0x00,
+    0x41, 0x00, 0x53, 0x00, 0x49, 0x00, 0x4e, 0x00, 0x4f, 0x00,
+    0x30, 0x00, 0x31, 0x00, 0x01, 0x00, 0x10, 0x00, 0x43, 0x00,
+    0x41, 0x00, 0x53, 0x00, 0x49, 0x00, 0x4e, 0x00, 0x4f, 0x00,
+    0x30, 0x00, 0x31, 0x00, 0x04, 0x00, 0x10, 0x00, 0x63, 0x00,
+    0x61, 0x00, 0x73, 0x00, 0x69, 0x00, 0x6e, 0x00, 0x6f, 0x00,
+    0x30, 0x00, 0x31, 0x00, 0x03, 0x00, 0x10, 0x00, 0x63, 0x00,
+    0x61, 0x00, 0x73, 0x00, 0x69, 0x00, 0x6e, 0x00, 0x6f, 0x00,
+    0x30, 0x00, 0x31, 0x00, 0x00, 0x00, 0x00, 0x00};
 
-struct ntlm_server_challenge
-{
-    char signature[8];
-    int message_type;
-    unsigned short target_name_len;
-    unsigned short target_name_max_len;
-    unsigned int target_name_off;
-    enum negotiate_flags negotiate_flags;
-    BYTE challenge[8];
-    BYTE reserved[8];
-    unsigned short target_info_len;
-    unsigned short target_info_max_len;
-    unsigned int target_info_off;
-};
-
-struct server_challenge
-{
-    struct ntlm_server_challenge challenge;
-    WCHAR name[8];
-    WCHAR info[42];
-
-} server_challenge =
-{
-    {
-        "NTLMSSP", 2,
-        sizeof(server_challenge.name), sizeof(server_challenge.name),
-        offsetof(struct server_challenge, name),
-        NTLMSSP_NEGOTIATE_UNICODE | NTLMSSP_REQUEST_TARGET | NTLMSSP_NEGOTIATE_NTLM |
-            NTLMSSP_NEGOTIATE_ALWAYS_SIGN | NTLMSSP_TARGET_TYPE_SERVER |
-            NTLMSSP_NEGOTIATE_EXTENDED_SESSIONSECURITY | NTLMSSP_NEGOTIATE_TARGET_INFO |
-            NTLMSSP_NEGOTIATE_128 | NTLMSSP_NEGOTIATE_56,
-        { 0xb5, 0x60, 0x8e, 0x95, 0xb5, 0x3c, 0xee, 0x03 },
-        { 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00 },
-        sizeof(server_challenge.info), sizeof(server_challenge.info),
-        offsetof(struct server_challenge, info)
-    },
-    L"CASINO01",
-    L"\002\020CASINO01\001\020CASINO01\004\020casino01\003\020casino01\0"
-};
+static BYTE native_challenge[] = 
+   {0x4e, 0x54, 0x4c, 0x4d, 0x53, 0x53, 0x50, 0x00, 0x02, 0x00,
+    0x00, 0x00, 0x10, 0x00, 0x10, 0x00, 0x30, 0x00, 0x00, 0x00,
+    0x05, 0x82, 0x82, 0xa0, 0xb5, 0x60, 0x8e, 0x95, 0xb5, 0x3c,
+    0xee, 0x03, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x54, 0x00, 0x54, 0x00, 0x40, 0x00, 0x00, 0x00, 0x43, 0x00,
+    0x41, 0x00, 0x53, 0x00, 0x49, 0x00, 0x4e, 0x00, 0x4f, 0x00,
+    0x30, 0x00, 0x31, 0x00, 0x02, 0x00, 0x10, 0x00, 0x43, 0x00,
+    0x41, 0x00, 0x53, 0x00, 0x49, 0x00, 0x4e, 0x00, 0x4f, 0x00,
+    0x30, 0x00, 0x31, 0x00, 0x01, 0x00, 0x10, 0x00, 0x43, 0x00,
+    0x41, 0x00, 0x53, 0x00, 0x49, 0x00, 0x4e, 0x00, 0x4f, 0x00,
+    0x30, 0x00, 0x31, 0x00, 0x04, 0x00, 0x10, 0x00, 0x63, 0x00,
+    0x61, 0x00, 0x73, 0x00, 0x69, 0x00, 0x6e, 0x00, 0x6f, 0x00,
+    0x30, 0x00, 0x31, 0x00, 0x03, 0x00, 0x10, 0x00, 0x63, 0x00,
+    0x61, 0x00, 0x73, 0x00, 0x69, 0x00, 0x6e, 0x00, 0x6f, 0x00,
+    0x30, 0x00, 0x31, 0x00, 0x00, 0x00, 0x00, 0x00};
 
 static BYTE message_signature[] =
    {0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
@@ -499,9 +464,19 @@ static SECURITY_STATUS runFakeServer(SspiData *sspi_data, BOOL first, ULONG data
         return SEC_E_OK;
     }
     
-    sspi_data->out_buf->pBuffers[0].cbBuffer = sizeof(server_challenge);
-    memcpy(sspi_data->out_buf->pBuffers[0].pvBuffer, &server_challenge,
-            sspi_data->out_buf->pBuffers[0].cbBuffer);
+    if(data_rep == SECURITY_NATIVE_DREP)
+    {
+        sspi_data->out_buf->pBuffers[0].cbBuffer = sizeof(native_challenge);
+        memcpy(sspi_data->out_buf->pBuffers[0].pvBuffer, native_challenge, 
+                sspi_data->out_buf->pBuffers[0].cbBuffer);
+    }
+    else
+    {
+        sspi_data->out_buf->pBuffers[0].cbBuffer = sizeof(network_challenge);
+        memcpy(sspi_data->out_buf->pBuffers[0].pvBuffer, network_challenge, 
+                sspi_data->out_buf->pBuffers[0].cbBuffer);
+    }
+
     return SEC_I_CONTINUE_NEEDED;
 }
 
@@ -849,11 +824,9 @@ static void testAuth(ULONG data_rep, BOOL fake)
     ok( sec_status == SEC_E_OK, "QueryContextAttributesA returned %08lx\n", sec_status );
     if (fake)
     {
-        todo_wine ok( broken(!strcmp(key.sSignatureAlgorithmName, "RSADSI RC4-CRC32")) ||
-                !strcmp(key.sSignatureAlgorithmName, "HMAC-MD5"), "got '%s'\n", key.sSignatureAlgorithmName );
+        ok( !strcmp(key.sSignatureAlgorithmName, "RSADSI RC4-CRC32"), "got '%s'\n", key.sSignatureAlgorithmName );
         ok( !strcmp(key.sEncryptAlgorithmName, "RSADSI RC4"), "got '%s'\n", key.sEncryptAlgorithmName );
-        todo_wine ok( broken(key.SignatureAlgorithm == 0xffffff7c) || key.SignatureAlgorithm == 0xffffff76,
-                "got %#lx\n", key.SignatureAlgorithm );
+        ok( key.SignatureAlgorithm == 0xffffff7c, "got %#lx\n", key.SignatureAlgorithm );
     }
     else
     {
@@ -947,7 +920,6 @@ static void test_Signature(void)
     SecBuffer               data[2], fake_data[2], complex_data[4];
     ULONG                   qop = 0xdeadbeef;
     SecPkgContext_Sizes     ctxt_sizes;
-    SEC_WINNT_AUTH_IDENTITY_A id;
 
     complex_data[1].pvBuffer = complex_data[3].pvBuffer = NULL;
 
@@ -962,15 +934,6 @@ static void test_Signature(void)
     }
 
     FreeContextBuffer(pkg_info);
-
-    id.User = (unsigned char *)test_user;
-    id.UserLength = strlen((char *)id.User);
-    id.Domain = (unsigned char *)workgroup;
-    id.DomainLength = strlen((char *)id.Domain);
-    id.Password = (unsigned char *)test_pass;
-    id.PasswordLength = strlen((char *)id.Password);
-    id.Flags = SEC_WINNT_AUTH_IDENTITY_ANSI;
-    client.id = &id;
 
     sec_status = setupClient(&client, sec_pkg_name);
 
@@ -989,6 +952,7 @@ static void test_Signature(void)
     {
         client_stat = runClient(&client, first, SECURITY_NETWORK_DREP);
 
+        todo_wine_if(client_stat != SEC_I_CONTINUE_NEEDED)
         ok(client_stat == SEC_E_OK || client_stat == SEC_I_CONTINUE_NEEDED,
                 "Running the client returned %s, more tests will fail.\n",
                 getSecError(client_stat));
@@ -1348,7 +1312,6 @@ static void testAcquireCredentialsHandleW(void)
     SECURITY_STATUS ret;
     SEC_WINNT_AUTH_IDENTITY_A idA;
     SEC_WINNT_AUTH_IDENTITY_W id;
-    SEC_WINNT_AUTH_IDENTITY_EXW ex;
     PSecPkgInfoA pkg_info = NULL;
 
     if(QuerySecurityPackageInfoA(sec_pkg_name, &pkg_info) != SEC_E_OK)
@@ -1420,37 +1383,6 @@ static void testAcquireCredentialsHandleW(void)
     ok(ret == SEC_E_OK, "AcquireCredentialsHandeW() returned %s\n",
             getSecError(ret));
     FreeCredentialsHandle(&cred);
-
-    memset( &ex, 0, sizeof(ex) );
-    ex.Version = SEC_WINNT_AUTH_IDENTITY_VERSION;
-    ex.Length = sizeof(id);
-    ex.User = (USHORT *)L"winetest";
-    ex.UserLength = ARRAY_SIZE( L"winetest" ) - 1;
-    ex.Domain = (USHORT *)L"winetest";
-    ex.DomainLength = ARRAY_SIZE( L"winetest" ) - 1;
-    ex.Password = (USHORT *)L"winetest";
-    ex.PasswordLength = ARRAY_SIZE( L"winetest" ) - 1;
-    ex.Flags = SEC_WINNT_AUTH_IDENTITY_UNICODE;
-    ex.PackageList = (USHORT *)L"ntlm,!kerberos";
-    ex.PackageListLength = ARRAY_SIZE( L"ntlm,!kerberos" ) - 1;
-
-    ret = AcquireCredentialsHandleW( NULL, sec_pkg_nameW, SECPKG_CRED_OUTBOUND,
-                                     NULL, &ex, NULL, NULL, &cred, NULL );
-    ok( ret == SEC_E_OK, "got %#lx\n", ret );
-    FreeCredentialsHandle( &cred );
-
-    ex.PackageList = (USHORT *)L"nosuch";
-    ex.PackageListLength = ARRAY_SIZE( L"nosuch" );
-    ret = AcquireCredentialsHandleW( NULL, sec_pkg_nameW, SECPKG_CRED_OUTBOUND,
-                                     NULL, &ex, NULL, NULL, &cred, NULL );
-    ok( ret == SEC_E_OK, "got %#lx\n", ret );
-    FreeCredentialsHandle( &cred );
-
-    ex.Length = 0;
-    ret = AcquireCredentialsHandleW( NULL, sec_pkg_nameW, SECPKG_CRED_OUTBOUND,
-                                     NULL, &ex, NULL, NULL, &cred, NULL );
-    ok( ret == SEC_E_OK, "got %#lx\n", ret );
-    FreeCredentialsHandle( &cred );
 }
 
 static void test_cred_multiple_use(void)

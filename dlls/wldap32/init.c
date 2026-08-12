@@ -26,9 +26,6 @@
 #include "winternl.h"
 #include "schannel.h"
 #include "sspi.h"
-#include "dsgetdc.h"
-#include "lmcons.h"
-#include "lmapibuf.h"
 
 #include "wine/debug.h"
 #include "winldap_private.h"
@@ -202,7 +199,7 @@ static LDAP *create_context( const char *url )
     if (!(ld = calloc( 1, sizeof( *ld )))) return NULL;
     if (map_error( ldap_initialize( &CTX(ld), url ) ) == WLDAP32_LDAP_SUCCESS)
     {
-        ldap_set_option( CTX(ld), LDAP_OPT_PROTOCOL_VERSION, &version );
+        ldap_set_option( CTX(ld), WLDAP32_LDAP_OPT_PROTOCOL_VERSION, &version );
         return ld;
     }
     free( ld );
@@ -234,20 +231,15 @@ LDAP * CDECL cldap_openW( WCHAR *hostname, ULONG portnumber )
 {
     LDAP *ld = NULL;
     char *hostnameU, *url = NULL;
-    WCHAR *hostnameW;
 
     TRACE( "(%s, %lu)\n", debugstr_w(hostname), portnumber );
 
-    if (!(hostnameW = wcsdup( hostname ? hostname : L"localhost" ))) return NULL;
-    if (!(hostnameU = strWtoU( hostnameW ))) goto exit;
+    if (!(hostnameU = strWtoU( hostname ? hostname : L"localhost" ))) return NULL;
     if (!(url = urlify_hostnames( "cldap://", hostnameU, portnumber ))) goto exit;
 
     ld = create_context( url );
+
 exit:
-    if (ld)
-        ld->ld_host = hostnameW;
-    else
-        free( hostnameW );
     free( hostnameU );
     free( url );
     return ld;
@@ -260,7 +252,6 @@ ULONG CDECL WLDAP32_ldap_connect( LDAP *ld, struct l_timeval *timeout )
 {
     QUERYCLIENTCERT *client_cert_callback = CLIENT_CERT_CALLBACK(ld);
     VERIFYSERVERCERT *server_cert_callback = SERVER_CERT_CALLBACK(ld);
-    DOMAIN_CONTROLLER_INFOW *dcinfo;
     int ret;
 
     TRACE( "(%p, %p)\n", ld, timeout );
@@ -272,16 +263,6 @@ ULONG CDECL WLDAP32_ldap_connect( LDAP *ld, struct l_timeval *timeout )
         FIXME( "mTLS is not implemented\n" );
 
     if (timeout && (timeout->tv_sec || timeout->tv_usec)) FIXME( "ignoring timeout\n" );
-
-    if (DsGetDcNameW( NULL, ld->ld_host, NULL, NULL, DS_RETURN_DNS_NAME, &dcinfo ) == ERROR_SUCCESS)
-    {
-        WCHAR *dc_name;
-        TRACE( "ld_host %s resolved to DC %s\n", debugstr_w( ld->ld_host ), debugstr_w( dcinfo->DomainControllerName ) );
-        dc_name = dcinfo->DomainControllerName + 2;
-        ldap_set_optionW( ld, WLDAP32_LDAP_OPT_HOST_NAME, &dc_name );
-        NetApiBufferFree( dcinfo );
-    }
-
     if ((ret = ldap_connect( CTX(ld) ))) return map_error( ret );
 
     if (server_cert_callback)
@@ -334,23 +315,16 @@ LDAP *  CDECL ldap_initA( const PCHAR hostname, ULONG portnumber )
 LDAP * CDECL ldap_initW( const PWCHAR hostname, ULONG portnumber )
 {
     LDAP *ld = NULL;
-    char *hostnameU = NULL, *url = NULL;
-    WCHAR *hostnameW = NULL;
+    char *hostnameU, *url = NULL;
 
     TRACE( "(%s, %lu)\n", debugstr_w(hostname), portnumber );
 
-    if (hostname)
-    {
-        if (!(hostnameW = wcsdup( hostname ))) return NULL;
-        if (!(hostnameU = strWtoU( hostnameW ))) goto exit;
-        if (!(url = urlify_hostnames( "ldap://", hostnameU, portnumber ))) goto exit;
-    }
+    if (!(hostnameU = strWtoU( hostname ? hostname : L"localhost" ))) return NULL;
+    if (!(url = urlify_hostnames( "ldap://", hostnameU, portnumber ))) goto exit;
+
     ld = create_context( url );
+
 exit:
-    if (ld)
-        ld->ld_host = hostnameW;
-    else
-        free( hostnameW );
     free( hostnameU );
     free( url );
     return ld;
@@ -380,23 +354,16 @@ LDAP * CDECL ldap_openA( char *hostname, ULONG portnumber )
 LDAP * CDECL ldap_openW( WCHAR *hostname, ULONG portnumber )
 {
     LDAP *ld = NULL;
-    char *hostnameU = NULL, *url = NULL;
-    WCHAR *hostnameW = NULL;
+    char *hostnameU, *url = NULL;
 
     TRACE( "(%s, %lu)\n", debugstr_w(hostname), portnumber );
 
-    if (hostname)
-    {
-        if (!(hostnameW = wcsdup( hostname ))) return NULL;
-        if (!(hostnameU = strWtoU( hostnameW ))) goto exit;
-        if (!(url = urlify_hostnames( "ldap://", hostnameU, portnumber ))) goto exit;
-    }
+    if (!(hostnameU = strWtoU( hostname ? hostname : L"localhost" ))) return NULL;
+    if (!(url = urlify_hostnames( "ldap://", hostnameU, portnumber ))) goto exit;
+
     ld = create_context( url );
+
 exit:
-    if (ld)
-        ld->ld_host = hostnameW;
-    else
-        free( hostnameW );
     free( hostnameU );
     free( url );
     return ld;
@@ -426,28 +393,21 @@ LDAP * CDECL ldap_sslinitA( char *hostname, ULONG portnumber, int secure )
 LDAP * CDECL ldap_sslinitW( WCHAR *hostname, ULONG portnumber, int secure )
 {
     LDAP *ld = NULL;
-    char *hostnameU = NULL, *url = NULL;
-    WCHAR *hostnameW = NULL;
+    char *hostnameU, *url = NULL;
 
     TRACE( "(%s, %lu, %d)\n", debugstr_w(hostname), portnumber, secure );
 
-    if (hostname)
-    {
-        if (!(hostnameW = wcsdup( hostname ))) return NULL;
-        if (!(hostnameU = strWtoU( hostnameW ))) goto exit;
+    if (!(hostnameU = strWtoU( hostname ? hostname : L"localhost" ))) return NULL;
 
-        if (secure)
-            url = urlify_hostnames( "ldaps://", hostnameU, portnumber );
-        else
-            url = urlify_hostnames( "ldap://", hostnameU, portnumber );
-        if (!url) goto exit;
-    }
-    ld = create_context( url );
-exit:
-    if (ld)
-        ld->ld_host = hostnameW;
+    if (secure)
+        url = urlify_hostnames( "ldaps://", hostnameU, portnumber );
     else
-        free( hostnameW );
+        url = urlify_hostnames( "ldap://", hostnameU, portnumber );
+    if (!url) goto exit;
+
+    ld = create_context( url );
+
+exit:
     free( hostnameU );
     free( url );
     return ld;

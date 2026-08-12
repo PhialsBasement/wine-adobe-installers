@@ -750,24 +750,24 @@ static WCHAR *find_wine_gecko_datadir(void)
     return ret;
 }
 
-static WCHAR *find_wine_gecko_unix(const WCHAR *dir)
+static WCHAR *find_wine_gecko_unix(const char *unix_path)
 {
-    HANDLE handle;
-    WCHAR *path, *ret = NULL;
-    DWORD len, size = wcslen( dir ) + 1;
+    static WCHAR * (CDECL *p_wine_get_dos_file_name)(const char*);
+    WCHAR *dos_dir, *ret;
 
-    /* get a DOS path for that directory */
-
-    handle = CreateFileW( dir, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE,
-                          NULL, OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, 0 );
-    if (handle == INVALID_HANDLE_VALUE) return NULL;
-    if ((path = malloc( size * sizeof(WCHAR) )))
-    {
-        len = GetFinalPathNameByHandleW( handle, path, size, VOLUME_NAME_DOS );
-        if (len > 6 && len <= size && path[5] == ':') ret = check_version(path + 4);
-        free( path );
+    if(!p_wine_get_dos_file_name) {
+        p_wine_get_dos_file_name = (void*)GetProcAddress(GetModuleHandleA("kernel32"), "wine_get_dos_file_name");
+        if(!p_wine_get_dos_file_name)
+            return FALSE;
     }
-    CloseHandle( handle );
+
+    dos_dir = p_wine_get_dos_file_name(unix_path);
+    if(!dos_dir)
+        return FALSE;
+
+    ret = check_version(dos_dir);
+
+    HeapFree(GetProcessHeap(), 0, dos_dir);
     return ret;
 }
 
@@ -806,10 +806,10 @@ BOOL load_gecko(void)
 
         if(!(gecko_path = find_wine_gecko_reg())
            && !(gecko_path = find_wine_gecko_datadir())
-           && !(gecko_path = find_wine_gecko_unix(L"\\\\?\\unix" INSTALL_DATADIR "/wine/gecko/" GECKO_DIR_NAME))
+           && !(gecko_path = find_wine_gecko_unix(INSTALL_DATADIR "/wine/gecko/" GECKO_DIR_NAME))
            && (!strcmp(INSTALL_DATADIR, "/usr/share") ||
-               !(gecko_path = find_wine_gecko_unix(L"\\\\?\\unix/usr/share/wine/gecko/" GECKO_DIR_NAME)))
-           && !(gecko_path = find_wine_gecko_unix(L"\\\\?\\unix/opt/wine/gecko/" GECKO_DIR_NAME))
+               !(gecko_path = find_wine_gecko_unix("/usr/share/wine/gecko/" GECKO_DIR_NAME)))
+           && !(gecko_path = find_wine_gecko_unix("/opt/wine/gecko/" GECKO_DIR_NAME))
            && install_wine_gecko())
             gecko_path = find_wine_gecko_reg();
 
@@ -2174,6 +2174,16 @@ static const nsISupportsWeakReferenceVtbl nsSupportsWeakReferenceVtbl = {
     nsSupportsWeakReference_GetWeakReference
 };
 
+void cycle_collect(nsIDOMWindowUtils *window_utils)
+{
+    thread_data_t *thread_data = get_thread_data(TRUE);
+    if(thread_data) {
+        thread_data->full_cc_in_progress++;
+        nsIDOMWindowUtils_CycleCollect(window_utils, NULL, 0);
+        thread_data->full_cc_in_progress--;
+    }
+}
+
 static HRESULT init_browser(GeckoBrowser *browser)
 {
     mozIDOMWindowProxy *mozwindow;
@@ -2397,7 +2407,7 @@ void detach_gecko_browser(GeckoBrowser *This)
 
     /* Force cycle collection */
     if(window_utils) {
-        nsIDOMWindowUtils_CycleCollect(window_utils, NULL, 0);
+        cycle_collect(window_utils);
         nsIDOMWindowUtils_Release(window_utils);
     }
 }
@@ -2416,16 +2426,19 @@ __ASM_GLOBAL_FUNC(call_thiscall_func,
 #define nsIScriptObjectPrincipal_GetPrincipal(this) ((void* (WINAPI*)(void*,void*))&call_thiscall_func)((this)->lpVtbl->GetPrincipal,this)
 #endif
 
-nsIDOMParser *create_nsdomparser(nsIDOMWindow *nswindow)
+nsIDOMParser *create_nsdomparser(HTMLDocumentNode *doc_node)
 {
     nsIScriptObjectPrincipal *sop;
+    HTMLOuterWindow *outer_window;
     mozIDOMWindow *inner_window;
     nsIGlobalObject *nsglo;
     nsIDOMParser *nsparser;
     nsIPrincipal *nspri;
     nsresult nsres;
 
-    nsres = nsIDOMWindow_GetInnerWindow(nswindow, &inner_window);
+    outer_window = doc_node->window && doc_node->window->base.outer_window ? doc_node->window->base.outer_window : doc_node->doc_obj->window;
+
+    nsres = nsIDOMWindow_GetInnerWindow(outer_window->nswindow, &inner_window);
     if(NS_FAILED(nsres)) {
         ERR("Could not get inner window: %08lx\n", nsres);
         return NULL;

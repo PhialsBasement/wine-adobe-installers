@@ -31,9 +31,18 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(shell);
 
+/* Key/Value names for MIME content types */
+static const char lpszContentTypeA[] = "Content Type";
+static const WCHAR lpszContentTypeW[] = { 'C','o','n','t','e','n','t',' ','T','y','p','e','\0'};
+
 static const char szMimeDbContentA[] = "MIME\\Database\\Content Type\\";
-static const WCHAR szMimeDbContentW[] = L"MIME\\Database\\Content Type\\";
+static const WCHAR szMimeDbContentW[] = { 'M', 'I', 'M','E','\\',
+  'D','a','t','a','b','a','s','e','\\','C','o','n','t','e','n','t',
+  ' ','T','y','p','e','\\', 0 };
 static const DWORD dwLenMimeDbContent = 27; /* strlen of szMimeDbContentA/W */
+
+static const char szExtensionA[] = "Extension";
+static const WCHAR szExtensionW[] = { 'E', 'x', 't','e','n','s','i','o','n','\0' };
 
 INT     WINAPI SHStringFromGUIDW(REFGUID,LPWSTR,INT);
 HRESULT WINAPI SHRegGetCLSIDKeyW(REFGUID,LPCWSTR,BOOL,BOOL,PHKEY);
@@ -149,7 +158,7 @@ BOOL WINAPI RegisterMIMETypeForExtensionA(LPCSTR lpszSubKey, LPCSTR lpszValue)
     return FALSE;
   }
 
-  return !SHSetValueA(HKEY_CLASSES_ROOT, lpszSubKey, "Content Type",
+  return !SHSetValueA(HKEY_CLASSES_ROOT, lpszSubKey, lpszContentTypeA,
                       REG_SZ, lpszValue, strlen(lpszValue));
 }
 
@@ -166,7 +175,7 @@ BOOL WINAPI RegisterMIMETypeForExtensionW(LPCWSTR lpszSubKey, LPCWSTR lpszValue)
     return FALSE;
   }
 
-  return !SHSetValueW(HKEY_CLASSES_ROOT, lpszSubKey, L"Content Type",
+  return !SHSetValueW(HKEY_CLASSES_ROOT, lpszSubKey, lpszContentTypeW,
                       REG_SZ, lpszValue, lstrlenW(lpszValue));
 }
 
@@ -184,7 +193,7 @@ BOOL WINAPI RegisterMIMETypeForExtensionW(LPCWSTR lpszSubKey, LPCWSTR lpszValue)
  */
 BOOL WINAPI UnregisterMIMETypeForExtensionA(LPCSTR lpszSubKey)
 {
-  return !SHDeleteValueA(HKEY_CLASSES_ROOT, lpszSubKey, "Content Type");
+  return !SHDeleteValueA(HKEY_CLASSES_ROOT, lpszSubKey, lpszContentTypeA);
 }
 
 /*************************************************************************
@@ -194,7 +203,7 @@ BOOL WINAPI UnregisterMIMETypeForExtensionA(LPCSTR lpszSubKey)
  */
 BOOL WINAPI UnregisterMIMETypeForExtensionW(LPCWSTR lpszSubKey)
 {
-  return !SHDeleteValueW(HKEY_CLASSES_ROOT, lpszSubKey, L"Content Type");
+  return !SHDeleteValueW(HKEY_CLASSES_ROOT, lpszSubKey, lpszContentTypeW);
 }
 
 /*************************************************************************
@@ -286,7 +295,7 @@ BOOL WINAPI MIME_GetExtensionA(LPCSTR lpszType, LPSTR lpExt, INT iLen)
 
   if (lpszType && lpExt && iLen > 2 &&
       GetMIMETypeSubKeyA(lpszType, szSubKey, MAX_PATH) &&
-      !SHGetValueA(HKEY_CLASSES_ROOT, szSubKey, "Extension", &dwType, lpExt + 1, &dwlen) &&
+      !SHGetValueA(HKEY_CLASSES_ROOT, szSubKey, szExtensionA, &dwType, lpExt + 1, &dwlen) &&
       lpExt[1])
   {
     if (lpExt[1] == '.')
@@ -314,7 +323,7 @@ BOOL WINAPI MIME_GetExtensionW(LPCWSTR lpszType, LPWSTR lpExt, INT iLen)
 
   if (lpszType && lpExt && iLen > 2 &&
       GetMIMETypeSubKeyW(lpszType, szSubKey, MAX_PATH) &&
-      !SHGetValueW(HKEY_CLASSES_ROOT, szSubKey, L"Extension", &dwType, lpExt + 1, &dwlen) &&
+      !SHGetValueW(HKEY_CLASSES_ROOT, szSubKey, szExtensionW, &dwType, lpExt + 1, &dwlen) &&
       lpExt[1])
   {
     if (lpExt[1] == '.')
@@ -351,7 +360,7 @@ BOOL WINAPI RegisterExtensionForMIMETypeA(LPCSTR lpszExt, LPCSTR lpszType)
 
   dwLen = strlen(lpszExt) + 1;
 
-  if (SHSetValueA(HKEY_CLASSES_ROOT, szKey, "Extension", REG_SZ, lpszExt, dwLen))
+  if (SHSetValueA(HKEY_CLASSES_ROOT, szKey, szExtensionA, REG_SZ, lpszExt, dwLen))
     return FALSE;
   return TRUE;
 }
@@ -374,7 +383,7 @@ BOOL WINAPI RegisterExtensionForMIMETypeW(LPCWSTR lpszExt, LPCWSTR lpszType)
 
   dwLen = (lstrlenW(lpszExt) + 1) * sizeof(WCHAR);
 
-  if (SHSetValueW(HKEY_CLASSES_ROOT, szKey, L"Extension", REG_SZ, lpszExt, dwLen))
+  if (SHSetValueW(HKEY_CLASSES_ROOT, szKey, szExtensionW, REG_SZ, lpszExt, dwLen))
     return FALSE;
   return TRUE;
 }
@@ -403,7 +412,7 @@ BOOL WINAPI UnregisterExtensionForMIMETypeA(LPCSTR lpszType)
   if (!GetMIMETypeSubKeyA(lpszType, szKey, MAX_PATH)) /* Get full path to the key */
     return FALSE;
 
-  if (!SHDeleteValueA(HKEY_CLASSES_ROOT, szKey, "Extension"))
+  if (!SHDeleteValueA(HKEY_CLASSES_ROOT, szKey, szExtensionA))
     return FALSE;
 
   if (!SHDeleteOrphanKeyA(HKEY_CLASSES_ROOT, szKey))
@@ -425,7 +434,7 @@ BOOL WINAPI UnregisterExtensionForMIMETypeW(LPCWSTR lpszType)
   if (!GetMIMETypeSubKeyW(lpszType, szKey, MAX_PATH)) /* Get full path to the key */
     return FALSE;
 
-  if (!SHDeleteValueW(HKEY_CLASSES_ROOT, szKey, L"Extension"))
+  if (!SHDeleteValueW(HKEY_CLASSES_ROOT, szKey, szExtensionW))
     return FALSE;
 
   if (!SHDeleteOrphanKeyW(HKEY_CLASSES_ROOT, szKey))

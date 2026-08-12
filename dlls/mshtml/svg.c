@@ -157,8 +157,8 @@ static const event_target_vtbl_t SVGElement_event_target_vtbl = {
 };
 
 dispex_static_data_t SVGElement_dispex = {
-    .id           = OBJID_SVGElement,
-    .prototype_id = OBJID_Element,
+    .id           = PROT_SVGElement,
+    .prototype_id = PROT_Element,
     .vtbl         = &SVGElement_event_target_vtbl.dispex_vtbl,
     .disp_tid     = DispHTMLUnknownElement_tid,
     .init_info    = HTMLElement_init_dispex_info,
@@ -657,8 +657,8 @@ static const event_target_vtbl_t SVGSVGElement_event_target_vtbl = {
 };
 
 dispex_static_data_t SVGSVGElement_dispex = {
-    .id           = OBJID_SVGSVGElement,
-    .prototype_id = OBJID_SVGElement,
+    .id           = PROT_SVGSVGElement,
+    .prototype_id = PROT_SVGElement,
     .vtbl         = &SVGSVGElement_event_target_vtbl.dispex_vtbl,
     .disp_tid     = DispHTMLUnknownElement_tid,
     .init_info    = HTMLElement_init_dispex_info,
@@ -787,8 +787,8 @@ static const event_target_vtbl_t SVGCircleElement_event_target_vtbl = {
 };
 
 dispex_static_data_t SVGCircleElement_dispex = {
-    .id           = OBJID_SVGCircleElement,
-    .prototype_id = OBJID_SVGElement,
+    .id           = PROT_SVGCircleElement,
+    .prototype_id = PROT_SVGElement,
     .vtbl         = &SVGCircleElement_event_target_vtbl.dispex_vtbl,
     .disp_tid     = DispHTMLUnknownElement_tid,
     .init_info    = HTMLElement_init_dispex_info,
@@ -974,13 +974,13 @@ static void *SVGTSpanElement_query_interface(DispatchEx *dispex, REFIID riid)
 }
 
 dispex_static_data_t SVGTextContentElement_dispex = {
-    .id           = OBJID_SVGTextContentElement,
-    .prototype_id = OBJID_SVGElement,
+    .id           = PROT_SVGTextContentElement,
+    .prototype_id = PROT_SVGElement,
 };
 
 dispex_static_data_t SVGTextPositioningElement_dispex = {
-    .id           = OBJID_SVGTextPositioningElement,
-    .prototype_id = OBJID_SVGTextContentElement,
+    .id           = PROT_SVGTextPositioningElement,
+    .prototype_id = PROT_SVGTextContentElement,
 };
 
 static const NodeImplVtbl SVGTSpanElementImplVtbl = {
@@ -1003,8 +1003,8 @@ static const event_target_vtbl_t SVGTSpanElement_event_target_vtbl = {
 };
 
 dispex_static_data_t SVGTSpanElement_dispex = {
-    .id           = OBJID_SVGTSpanElement,
-    .prototype_id = OBJID_SVGTextPositioningElement,
+    .id           = PROT_SVGTSpanElement,
+    .prototype_id = PROT_SVGTextPositioningElement,
     .vtbl         = &SVGTSpanElement_event_target_vtbl.dispex_vtbl,
     .disp_tid     = DispHTMLUnknownElement_tid,
     .init_info    = HTMLElement_init_dispex_info,

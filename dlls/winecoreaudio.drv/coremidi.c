@@ -75,6 +75,7 @@
 #include <pthread.h>
 
 #include "ntstatus.h"
+#define WIN32_NO_STATUS
 #include "windef.h"
 #include "winbase.h"
 #include "winnls.h"
@@ -647,7 +648,6 @@ static UINT midi_out_data(WORD dev_id, UINT data)
 {
     struct midi_dest *dest;
     UInt8 bytes[3];
-    size_t count = sizeof(bytes);
     OSStatus sc;
 
     TRACE("dev_id = %d data = %08x\n", dev_id, data);
@@ -692,23 +692,7 @@ static UINT midi_out_data(WORD dev_id, UINT data)
     }
     else
     {
-        /* MODM_DATA always includes 3 bytes, but some message types are only
-         * 1 or 2 bytes long. The docs say that "The driver must parse the event
-         * to determine how many bytes to transfer"
-         *
-         * Sending 3 bytes seems to work for most 1/2 byte messages
-         * (Core MIDI must be doing some parsing), but some 2 byte messages
-         * result in duplicates if all 3 bytes are sent.
-         */
-        switch (bytes[0] & 0xF0)
-        {
-            case 0xC0:  /* Program Change */
-            case 0xD0:  /* Channel Pressure (After-touch) */
-                count = 2;
-                break;
-        }
-
-        midi_send(midi_out_port, dest->dest, bytes, count);
+        midi_send(midi_out_port, dest->dest, bytes, sizeof(bytes));
     }
 
     return MMSYSERR_NOERROR;
@@ -898,8 +882,8 @@ static UINT midi_out_reset(WORD dev_id)
         {
             /* turn off every note */
             MusicDeviceMIDIEvent(dests[dev_id].synth, 0xB0 | chn, 0x7B, 0, 0);
-            /* resets controller settings */
-            MusicDeviceMIDIEvent(dests[dev_id].synth, 0xB0 | chn, 0x79, 0, 0);
+            /* remove sustain on channel */
+            MusicDeviceMIDIEvent(dests[dev_id].synth, 0xB0 | chn, 0x40, 0, 0);
         }
     }
     else FIXME("MOD_MIDIPORT\n");

@@ -1,8 +1,7 @@
 @ stub BluetoothAddressToString
-@ stdcall BluetoothAuthenticateDeviceEx(ptr ptr ptr ptr long)
 @ stub BluetoothDisconnectDevice
-@ stdcall BluetoothEnableDiscovery(ptr long)
-@ stdcall BluetoothEnableIncomingConnections(ptr long)
+@ stub BluetoothEnableDiscovery
+@ stub BluetoothEnableIncomingConnections
 @ stub BluetoothEnumerateInstalledServices
 @ stub BluetoothEnumerateInstalledServicesEx
 @ stub BluetoothEnumerateLocalServices
@@ -34,33 +33,33 @@
 @ stub BluetoothGATTAbortReliableWrite
 @ stub BluetoothGATTBeginReliableWrite
 @ stub BluetoothGATTEndReliableWrite
-@ stdcall BluetoothGATTGetCharacteristicValue(ptr ptr long ptr ptr long)
-@ stdcall BluetoothGATTGetCharacteristics(ptr ptr long ptr ptr long)
+@ stub BluetoothGATTGetCharacteristicValue
+@ stub BluetoothGATTGetCharacteristics
 @ stub BluetoothGATTGetDescriptorValue
 @ stub BluetoothGATTGetDescriptors
 @ stub BluetoothGATTGetIncludedServices
-@ stdcall BluetoothGATTGetServices(ptr long ptr ptr long)
+@ stub BluetoothGATTGetServices
 @ stub BluetoothGATTRegisterEvent
 @ stub BluetoothGATTSetCharacteristicValue
 @ stub BluetoothGATTSetDescriptorValue
 @ stub BluetoothGATTUnregisterEvent
-@ stdcall BluetoothGetDeviceInfo(ptr long)
+@ stub BluetoothGetDeviceInfo
 @ stub BluetoothGetLocalServiceInfo
 @ stdcall BluetoothGetRadioInfo(ptr ptr)
 @ stub BluetoothGetServicePnpInstance
-@ stdcall BluetoothIsConnectable(ptr)
-@ stdcall BluetoothIsDiscoverable(ptr)
+@ stub BluetoothIsConnectable
+@ stub BluetoothIsDiscoverable
 @ stub BluetoothIsVersionAvailable
 @ stub BluetoothRegisterForAuthentication
 @ stdcall BluetoothRegisterForAuthenticationEx(ptr ptr ptr ptr)
-@ stdcall BluetoothRemoveDevice(ptr)
+@ stub BluetoothRemoveDevice
 @ stdcall BluetoothSdpEnumAttributes(ptr long ptr ptr)
 @ stdcall BluetoothSdpGetAttributeValue(ptr long long ptr)
 @ stdcall BluetoothSdpGetContainerElementData(ptr long ptr ptr)
 @ stdcall BluetoothSdpGetElementData(ptr long ptr)
 @ stub BluetoothSdpGetString
 @ stub BluetoothSendAuthenticationResponse
-@ stdcall BluetoothSendAuthenticationResponseEx(ptr ptr)
+@ stub BluetoothSendAuthenticationResponseEx
 @ stub BluetoothSetLocalServiceInfo
 @ stub BluetoothSetServiceState
 @ stub BluetoothSetServiceStateEx

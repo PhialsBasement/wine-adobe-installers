@@ -266,21 +266,6 @@ unsigned int CDECL wined3d_resource_get_priority(const struct wined3d_resource *
     return resource->priority;
 }
 
-unsigned int CDECL wined3d_resource_get_sub_resource_count(struct wined3d_resource *resource)
-{
-    TRACE("resource %p.\n", resource);
-
-    return resource->resource_ops->resource_get_sub_resource_count(resource);
-}
-
-HRESULT CDECL wined3d_resource_get_sub_resource_desc(struct wined3d_resource *resource,
-        unsigned int sub_resource_idx, struct wined3d_sub_resource_desc *desc)
-{
-    TRACE("resource %p, sub_resource_idx %u, desc %p.\n", resource, sub_resource_idx, desc);
-
-    return resource->resource_ops->resource_sub_resource_get_desc(resource, sub_resource_idx, desc);
-}
-
 void * CDECL wined3d_resource_get_parent(const struct wined3d_resource *resource)
 {
     return resource->parent;
@@ -517,22 +502,14 @@ HRESULT wined3d_resource_check_box_dimensions(struct wined3d_resource *resource,
         return WINEDDERR_INVALIDRECT;
     }
 
-    if (resource->format_attrs & (WINED3D_FORMAT_ATTR_BLOCKS | WINED3D_FORMAT_ATTR_PLANAR))
+    if (resource->format_attrs & WINED3D_FORMAT_ATTR_BLOCKS)
     {
         /* This assumes power of two block sizes, but NPOT block sizes would
          * be silly anyway.
          *
          * This also assumes that the format's block depth is 1. */
-        if (resource->format_attrs & WINED3D_FORMAT_ATTR_BLOCKS)
-        {
-            width_mask = format->block_width - 1;
-            height_mask = format->block_height - 1;
-        }
-        else
-        {
-            width_mask = format->uv_width - 1;
-            height_mask = format->uv_height - 1;
-        }
+        width_mask = format->block_width - 1;
+        height_mask = format->block_height - 1;
 
         if ((box->left & width_mask) || (box->top & height_mask)
                 || (box->right & width_mask && box->right != desc.width)

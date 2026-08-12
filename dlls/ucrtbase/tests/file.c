@@ -229,7 +229,6 @@ static void test_utf8(const char *argv0)
     struct _finddata64i32_t fdata64i32;
     struct _finddata32_t fdata32;
     struct _finddata64_t fdata64;
-    PROCESS_INFORMATION info;
     intptr_t hfind, hproc;
     WCHAR bufW[256], *pW;
     struct _stat64 stat;
@@ -447,10 +446,8 @@ static void test_utf8(const char *argv0)
     env[1] = NULL;
     hproc = _spawnle(_P_NOWAIT, argv0, argv0, "file", "utf8", file, NULL, env);
     ok(hproc != -1, "_spawnl returned %Id, errno %d\n", hproc, errno);
-    memset(&info, 0, sizeof(info));
-    info.hProcess = (HANDLE)hproc;
-    info.dwProcessId = GetProcessId(info.hProcess);
-    wait_child_process(&info);
+    wait_child_process((HANDLE)hproc);
+    CloseHandle((HANDLE)hproc);
 
     setlocale(LC_ALL, "C");
 }

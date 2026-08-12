@@ -58,7 +58,7 @@ static HPALETTE16 hPrimaryPalette;
  * ############################################################################
  */
 
-#pragma pack(push,1)
+#include <pshpack1.h>
 #define GDI_MAX_THUNKS      32
 
 static struct gdi_thunk
@@ -72,7 +72,7 @@ static struct gdi_thunk
     HDC16                       hdc;
 } *GDI_Thunks;
 
-#pragma pack(pop)
+#include <poppack.h>
 
 /**********************************************************************
  *           GDI_Callback3216

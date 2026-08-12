@@ -790,6 +790,33 @@ static void test_avifile_write(void)
     ok(hr == S_OK, "got %#lx.\n", hr);
     hr = IAVIFile_QueryInterface(avifile, &IID_IPersistFile, (void **)&persist);
     ok(hr == S_OK, "got %#lx.\n", hr);
+    hr = IPersistFile_Load(persist, fn, 0);
+    ok(hr == AVIERR_FILEOPEN, "got %#lx.\n", hr);
+    /* Consequent load attempt even with better flags will fail with ~0u. */
+    hr = IPersistFile_Load(persist, fn, STGM_CREATE | STGM_WRITE);
+    todo_wine ok(hr == ~0u, "got %#lx.\n", hr);
+    IPersistFile_Release(persist);
+    IAVIFile_Release(avifile);
+
+    hr = CoCreateInstance(&CLSID_AVIFile, NULL, CLSCTX_INPROC, &IID_IAVIFile, (void **)&avifile);
+    ok(hr == S_OK, "got %#lx.\n", hr);
+    hr = IAVIFile_QueryInterface(avifile, &IID_IPersistFile, (void **)&persist);
+    ok(hr == S_OK, "got %#lx.\n", hr);
+    hr = IPersistFile_Load(persist, fn, STGM_CREATE | STGM_WRITE);
+    ok(hr == S_OK, "got %#lx.\n", hr);
+    /* Consequent load attempt will fail with ~0u. */
+    hr = IPersistFile_Load(persist, fn, STGM_CREATE | STGM_WRITE);
+    todo_wine ok(hr == ~0u, "got %#lx.\n", hr);
+    IPersistFile_Release(persist);
+    IAVIFile_Release(avifile);
+
+    ret = DeleteFileW(fn);
+    ok(ret, "got error %lu.\n", GetLastError());
+
+    hr = CoCreateInstance(&CLSID_AVIFile, NULL, CLSCTX_INPROC, &IID_IAVIFile, (void **)&avifile);
+    ok(hr == S_OK, "got %#lx.\n", hr);
+    hr = IAVIFile_QueryInterface(avifile, &IID_IPersistFile, (void **)&persist);
+    ok(hr == S_OK, "got %#lx.\n", hr);
     hr = IPersistFile_Load(persist, fn, STGM_CREATE);
     ok(hr == S_OK, "got %#lx.\n", hr);
 
@@ -820,6 +847,7 @@ static void test_avifile_write(void)
     afmt.wf.nChannels = 2;
     afmt.wf.nSamplesPerSec = 44800;
     afmt.wf.nAvgBytesPerSec = afmt.wf.nSamplesPerSec * afmt.wf.nChannels;
+    //afmt.wf.wBitsPerSample = afmt.wf.nChannels * 2 * 8;
     afmt.wf.nBlockAlign = afmt.wf.nChannels * 2;
     hr = AVIStreamSetFormat(stm, 0, &afmt, sizeof(afmt));
     ok(hr == S_OK, "got %#lx.\n", hr);
@@ -854,7 +882,8 @@ static void test_avifile_write(void)
     ok(!si.dwStart, "got %lu.\n", si.dwStart);
     ok(si.dwSuggestedBufferSize == 16, "got %lu.\n", si.dwSuggestedBufferSize);
 
-    IAVIStream_Release(stm);
+    if (hr == S_OK)
+        IAVIStream_Release(stm);
     IAVIFile_Release(avifile);
     ret = DeleteFileW(fn);
     ok(ret, "got error %lu.\n", GetLastError());

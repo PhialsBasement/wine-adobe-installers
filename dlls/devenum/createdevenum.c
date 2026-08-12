@@ -473,7 +473,7 @@ static BOOL CALLBACK register_dsound_devices(GUID *guid, const WCHAR *desc, cons
     static const WCHAR defaultW[] = L"Default DirectSound Device";
     IPropertyBag *prop_bag = NULL;
     REGFILTERPINS2 rgpins = {0};
-    REGPINTYPES rgtypes = {0};
+    REGPINTYPES rgtypes[2] = {};
     REGFILTER2 rgf = {0};
     WCHAR clsid[CHARS_IN_GUID];
     VARIANT var;
@@ -504,10 +504,12 @@ static BOOL CALLBACK register_dsound_devices(GUID *guid, const WCHAR *desc, cons
     rgf.rgPins2 = &rgpins;
     rgpins.dwFlags = REG_PINFLAG_B_RENDERER;
     /* FIXME: native registers many more formats */
-    rgpins.nMediaTypes = 1;
-    rgpins.lpMediaType = &rgtypes;
-    rgtypes.clsMajorType = &MEDIATYPE_Audio;
-    rgtypes.clsMinorType = &MEDIASUBTYPE_PCM;
+    rgpins.nMediaTypes = 2;
+    rgpins.lpMediaType = rgtypes;
+    rgtypes[0].clsMajorType = &MEDIATYPE_Audio;
+    rgtypes[0].clsMinorType = &MEDIASUBTYPE_PCM;
+    rgtypes[1].clsMajorType = &MEDIATYPE_Audio;
+    rgtypes[1].clsMinorType = &MEDIASUBTYPE_IEEE_FLOAT;
 
     write_filter_data(prop_bag, &rgf);
 
@@ -713,7 +715,7 @@ static void register_vfw_codecs(void)
 
 static void register_avicap_devices(void)
 {
-    WCHAR friendlyname[32], version[32], device_path[32];
+    WCHAR friendlyname[32], version[32];
     IPropertyBag *prop_bag = NULL;
     REGFILTERPINS2 rgpins = {0};
     REGPINTYPES rgtypes;
@@ -752,11 +754,6 @@ static void register_avicap_devices(void)
         V_VT(&var) = VT_I4;
         V_I4(&var) = i;
         IPropertyBag_Write(prop_bag, L"VFWIndex", &var);
-
-        swprintf(device_path, ARRAY_SIZE(device_path), L"dummy_video%d", i);
-        V_VT(&var) = VT_BSTR;
-        V_BSTR(&var) = SysAllocString(device_path);
-        IPropertyBag_Write(prop_bag, L"DevicePath", &var);
 
         VariantClear(&var);
         IPropertyBag_Release(prop_bag);

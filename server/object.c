@@ -33,6 +33,7 @@
 #endif
 
 #include "ntstatus.h"
+#define WIN32_NO_STATUS
 #include "winternl.h"
 
 #include "file.h"
@@ -67,7 +68,6 @@ struct reserve
 {
     struct object obj;          /* object header */
     int    type;                /* reserve object type. See MEMORY_RESERVE_OBJECT_TYPE */
-    struct object *bound_obj;   /* object using reserve object */
     /* BYTE *memory */;         /* reserved memory */
 };
 
@@ -108,10 +108,11 @@ static const struct object_ops apc_reserve_ops =
     no_add_queue,               /* add_queue */
     NULL,                       /* remove_queue */
     NULL,                       /* signaled */
+    NULL,                       /* get_esync_fd */
+    NULL,                       /* get_fsync_idx */
     no_satisfied,               /* satisfied */
     no_signal,                  /* signal */
     no_get_fd,                  /* get_fd */
-    default_get_sync,           /* get_sync */
     default_map_access,         /* map_access */
     default_get_sd,             /* get_sd */
     default_set_sd,             /* set_sd */
@@ -133,10 +134,11 @@ static const struct object_ops completion_reserve_ops =
     no_add_queue,              /* add_queue */
     NULL,                      /* remove_queue */
     NULL,                      /* signaled */
+    NULL,                      /* get_esync_fd */
+    NULL,                      /* get_fsync_idx */
     no_satisfied,              /* satisfied */
     no_signal,                 /* signal */
     no_get_fd,                 /* get_fd */
-    default_get_sync,          /* get_sync */
     default_map_access,        /* map_access */
     default_get_sd,            /* get_sd */
     default_set_sd,            /* set_sd */
@@ -269,7 +271,7 @@ const WCHAR *get_object_name( struct object *obj, data_size_t *len )
 }
 
 /* get the full path name of an existing object */
-WCHAR *default_get_full_name( struct object *obj, data_size_t max, data_size_t *ret_len )
+WCHAR *default_get_full_name( struct object *obj, data_size_t *ret_len )
 {
     static const WCHAR backslash = '\\';
     struct object *ptr = obj;
@@ -294,7 +296,6 @@ WCHAR *default_get_full_name( struct object *obj, data_size_t max, data_size_t *
         memcpy( ret + len, &backslash, sizeof(WCHAR) );
         obj = name->parent;
     }
-    if (*ret_len > max) set_error( STATUS_INFO_LENGTH_MISMATCH );
     return (WCHAR *)ret;
 }
 
@@ -563,13 +564,14 @@ struct object *find_object( const struct namespace *namespace, const struct unic
                             unsigned int attributes )
 {
     const struct list *list;
-    const struct object_name *ptr;
+    struct list *p;
 
     if (!name || !name->len) return NULL;
 
     list = &namespace->names[ hash_strW( name->str, name->len, namespace->hash_size ) ];
-    LIST_FOR_EACH_ENTRY( ptr, list, struct object_name, entry )
+    LIST_FOR_EACH( p, list )
     {
+        const struct object_name *ptr = LIST_ENTRY( p, struct object_name, entry );
         if (ptr->len != name->len) continue;
         if (attributes & OBJ_CASE_INSENSITIVE)
         {
@@ -629,7 +631,7 @@ void no_satisfied( struct object *obj, struct wait_queue_entry *entry )
 {
 }
 
-int no_signal( struct object *obj, unsigned int access, int signal )
+int no_signal( struct object *obj, unsigned int access )
 {
     set_error( STATUS_OBJECT_TYPE_MISMATCH );
     return 0;
@@ -639,11 +641,6 @@ struct fd *no_get_fd( struct object *obj )
 {
     set_error( STATUS_OBJECT_TYPE_MISMATCH );
     return NULL;
-}
-
-struct object *default_get_sync( struct object *obj )
-{
-    return grab_object( obj );
 }
 
 unsigned int default_map_access( struct object *obj, unsigned int access )
@@ -656,8 +653,9 @@ struct security_descriptor *default_get_sd( struct object *obj )
     return obj->sd;
 }
 
-int set_sd_defaults_from_token( struct object *obj, const struct security_descriptor *sd,
-                                unsigned int set_info, struct token *token )
+struct security_descriptor *set_sd_from_token_internal( const struct security_descriptor *sd,
+                                                        const struct security_descriptor *old_sd,
+                                                        unsigned int set_info, struct token *token )
 {
     struct security_descriptor new_sd, *new_sd_ptr;
     int present;
@@ -666,8 +664,6 @@ int set_sd_defaults_from_token( struct object *obj, const struct security_descri
     struct acl *replaced_sacl = NULL;
     char *ptr;
 
-    if (!set_info) return 1;
-
     new_sd.control = sd->control & ~SE_SELF_RELATIVE;
 
     if (set_info & OWNER_SECURITY_INFORMATION && sd->owner_len)
@@ -675,10 +671,10 @@ int set_sd_defaults_from_token( struct object *obj, const struct security_descri
         owner = sd_get_owner( sd );
         new_sd.owner_len = sd->owner_len;
     }
-    else if (obj->sd && obj->sd->owner_len)
+    else if (old_sd && old_sd->owner_len)
     {
-        owner = sd_get_owner( obj->sd );
-        new_sd.owner_len = obj->sd->owner_len;
+        owner = sd_get_owner( old_sd );
+        new_sd.owner_len = old_sd->owner_len;
     }
     else if (token)
     {
@@ -692,10 +688,10 @@ int set_sd_defaults_from_token( struct object *obj, const struct security_descri
         group = sd_get_group( sd );
         new_sd.group_len = sd->group_len;
     }
-    else if (obj->sd && obj->sd->group_len)
+    else if (old_sd && old_sd->group_len)
     {
-        group = sd_get_group( obj->sd );
-        new_sd.group_len = obj->sd->group_len;
+        group = sd_get_group( old_sd );
+        new_sd.group_len = old_sd->group_len;
     }
     else if (token)
     {
@@ -713,20 +709,20 @@ int set_sd_defaults_from_token( struct object *obj, const struct security_descri
     else if (set_info & LABEL_SECURITY_INFORMATION && present)
     {
         const struct acl *old_sacl = NULL;
-        if (obj->sd && obj->sd->control & SE_SACL_PRESENT) old_sacl = sd_get_sacl( obj->sd, &present );
-        if (!(replaced_sacl = replace_security_labels( old_sacl, sacl ))) return 0;
+        if (old_sd && old_sd->control & SE_SACL_PRESENT) old_sacl = sd_get_sacl( old_sd, &present );
+        if (!(replaced_sacl = replace_security_labels( old_sacl, sacl ))) return NULL;
         new_sd.control |= SE_SACL_PRESENT;
         new_sd.sacl_len = replaced_sacl->size;
         sacl = replaced_sacl;
     }
     else
     {
-        if (obj->sd) sacl = sd_get_sacl( obj->sd, &present );
+        if (old_sd) sacl = sd_get_sacl( old_sd, &present );
 
-        if (obj->sd && present)
+        if (old_sd && present)
         {
             new_sd.control |= SE_SACL_PRESENT;
-            new_sd.sacl_len = obj->sd->sacl_len;
+            new_sd.sacl_len = old_sd->sacl_len;
         }
         else
             new_sd.sacl_len = 0;
@@ -740,12 +736,12 @@ int set_sd_defaults_from_token( struct object *obj, const struct security_descri
     }
     else
     {
-        if (obj->sd) dacl = sd_get_dacl( obj->sd, &present );
+        if (old_sd) dacl = sd_get_dacl( old_sd, &present );
 
-        if (obj->sd && present)
+        if (old_sd && present)
         {
             new_sd.control |= SE_DACL_PRESENT;
-            new_sd.dacl_len = obj->sd->dacl_len;
+            new_sd.dacl_len = old_sd->dacl_len;
         }
         else if (token)
         {
@@ -761,7 +757,7 @@ int set_sd_defaults_from_token( struct object *obj, const struct security_descri
     if (!ptr)
     {
         free( replaced_sacl );
-        return 0;
+        return NULL;
     }
     new_sd_ptr = (struct security_descriptor*)ptr;
 
@@ -772,9 +768,25 @@ int set_sd_defaults_from_token( struct object *obj, const struct security_descri
     mem_append( ptr, dacl, new_sd.dacl_len );
 
     free( replaced_sacl );
-    free( obj->sd );
-    obj->sd = new_sd_ptr;
-    return 1;
+    return new_sd_ptr;
+}
+
+int set_sd_defaults_from_token( struct object *obj, const struct security_descriptor *sd,
+                                unsigned int set_info, struct token *token )
+{
+    struct security_descriptor *new_sd;
+
+    if (!set_info) return 1;
+
+    new_sd = set_sd_from_token_internal( sd, obj->sd, set_info, token );
+    if (new_sd)
+    {
+        free( obj->sd );
+        obj->sd = new_sd;
+        return 1;
+    }
+
+    return 0;
 }
 
 /** Set the security descriptor using the current primary token for defaults. */
@@ -784,7 +796,7 @@ int default_set_sd( struct object *obj, const struct security_descriptor *sd,
     return set_sd_defaults_from_token( obj, sd, set_info, current->process->token );
 }
 
-WCHAR *no_get_full_name( struct object *obj, data_size_t max, data_size_t *ret_len )
+WCHAR *no_get_full_name( struct object *obj, data_size_t *ret_len )
 {
     return NULL;
 }
@@ -856,11 +868,7 @@ static struct reserve *create_reserve( struct object *root, const struct unicode
         return NULL;
     }
 
-    if (reserve && get_error() != STATUS_OBJECT_NAME_EXISTS)
-    {
-        reserve->type = type;
-        reserve->bound_obj = NULL;
-    }
+    if (reserve && get_error() != STATUS_OBJECT_NAME_EXISTS) reserve->type = type;
 
     return reserve;
 }
@@ -868,28 +876,6 @@ static struct reserve *create_reserve( struct object *root, const struct unicode
 struct reserve *get_completion_reserve_obj( struct process *process, obj_handle_t handle, unsigned int access )
 {
     return (struct reserve *)get_handle_obj( process, handle, access, &completion_reserve_ops );
-}
-
-struct reserve *reserve_obj_associate_apc( struct process *process, obj_handle_t handle, struct object *apc )
-{
-    struct reserve *reserve;
-
-    if (!(reserve = (struct reserve *)get_handle_obj( process, handle, 0, &apc_reserve_ops ))) return NULL;
-    if (reserve->bound_obj)
-    {
-        release_object( reserve );
-        set_error( STATUS_INVALID_PARAMETER_2 );
-        return NULL;
-    }
-    reserve->bound_obj = apc;
-    return reserve;
-}
-
-void reserve_obj_unbind( struct reserve *reserve )
-{
-    if (!reserve) return;
-    reserve->bound_obj = NULL;
-    release_object( reserve );
 }
 
 /* Allocate a reserve object for pre-allocating memory for object types */

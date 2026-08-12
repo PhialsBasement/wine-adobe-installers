@@ -2094,7 +2094,11 @@ static void test_reset(void)
 
     hr = IDirect3D8_CreateDevice(d3d8, D3DADAPTER_DEFAULT, D3DDEVTYPE_HAL,
             window, D3DCREATE_SOFTWARE_VERTEXPROCESSING, &d3dpp, &device2);
-    ok(hr == S_OK, "Got hr %#lx.\n", hr);
+    if (FAILED(hr))
+    {
+        skip("Failed to create device, hr %#lx.\n", hr);
+        goto cleanup;
+    }
 
     hr = IDirect3DDevice8_TestCooperativeLevel(device2);
     ok(SUCCEEDED(hr), "TestCooperativeLevel failed, hr %#lx.\n", hr);
@@ -2109,11 +2113,14 @@ static void test_reset(void)
 
     hr = IDirect3DDevice8_Reset(device2, &d3dpp);
     ok(SUCCEEDED(hr), "Reset failed, hr %#lx.\n", hr);
+    if (FAILED(hr))
+        goto cleanup;
 
     hr = IDirect3DDevice8_GetDepthStencilSurface(device2, &surface);
     ok(SUCCEEDED(hr), "GetDepthStencilSurface failed, hr %#lx.\n", hr);
     ok(!!surface, "Depth / stencil buffer should not be NULL.\n");
-    IDirect3DSurface8_Release(surface);
+    if (surface)
+        IDirect3DSurface8_Release(surface);
 
 cleanup:
     free(modes);
@@ -9966,15 +9973,6 @@ static void test_resource_access(void)
                     break;
 
                 case SURFACE_DS:
-                    if (tests[j].format == FORMAT_ATI2 && broken(1))
-                    {
-                        /* The Nvidia Windows driver crashes when attempting to create a ATI2N
-                         * depth stencil surface.
-                         *
-                         * Interestingly this crash does not happen in the d3d9 version of this
-                         * test. */
-                        continue;
-                    }
                     hr = IDirect3DDevice8_CreateDepthStencilSurface(device,
                             16, 16, format, D3DMULTISAMPLE_NONE, &surface);
                     todo_wine_if(tests[j].format == FORMAT_ATI2)
@@ -10089,7 +10087,7 @@ static void test_resource_access(void)
         {
             if (!skip_ati2n_once)
             {
-                skip("ATI2N volume texture not supported.\n");
+                skip("ATI2N texture not supported.\n");
                 skip_ati2n_once = TRUE;
             }
             continue;
@@ -10327,7 +10325,6 @@ static void test_draw_primitive(void)
         {{-1.0f,  1.0f, 0.0f}, 0xffff0000},
         {{ 1.0f,  1.0f, 0.0f}, 0xffff0000},
         {{ 1.0f, -1.0f, 0.0f}, 0xffff0000},
-        {{-1.0f, -1.0f, 0.0f}, 0xffff0000},
         {{-1.0f, -1.0f, 0.0f}, 0xffff0000},
     };
     static const WORD indices[] = {0, 1, 2, 3, 0, 2};

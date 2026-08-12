@@ -170,7 +170,6 @@ int DGifCloseFile(GifFileType * GifFile);
 /* This holds an image header, its unpacked raster bits, and extensions */
 typedef struct SavedImage {
     GifImageDesc ImageDesc;
-    int ImageDescOffset;
     unsigned char *RasterBits;
     Extensions Extensions;
 } SavedImage;

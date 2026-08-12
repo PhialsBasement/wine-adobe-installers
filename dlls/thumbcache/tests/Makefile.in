@@ -1,5 +1,0 @@
-TESTDLL   = thumbcache.dll
-IMPORTS   = uuid ole32
-
-SOURCES = \
-	thumbcache.c

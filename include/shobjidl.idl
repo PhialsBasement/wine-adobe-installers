@@ -863,7 +863,7 @@ interface IShellView : IOleWindow
 interface IShellView2 : IShellView
 {
     typedef GUID SHELLVIEWID;
-#pragma pack(push,8)
+cpp_quote("#include <pshpack8.h>")
     typedef struct _SV2CVW2_PARAMS
     {
         DWORD cbSize;
@@ -874,7 +874,7 @@ interface IShellView2 : IShellView
         SHELLVIEWID const *pvid;
         HWND hwndView;
     } SV2CVW2_PARAMS, *LPSV2CVW2_PARAMS;
-#pragma pack(pop)
+cpp_quote("#include <poppack.h>")
 
     HRESULT GetView(
         [in, out] SHELLVIEWID *view_guid,
@@ -1609,7 +1609,7 @@ cpp_quote("#define DWFAF_HIDDEN           0x0001")
         [out] LPVOID *ppvObj);
 }
 
-#pragma pack(push,8)
+cpp_quote("#include <pshpack8.h>")
 typedef struct
 {
     SIZE     sizeDragImage;
@@ -1617,7 +1617,7 @@ typedef struct
     HBITMAP  hbmpDragImage;
     COLORREF crColorKey;
 } SHDRAGIMAGE, *LPSHDRAGIMAGE;
-#pragma pack(pop)
+cpp_quote("#include <poppack.h>")
 
 cpp_quote("#define DI_GETDRAGIMAGE TEXT(\"ShellGetDragImage\")")
 
@@ -1737,7 +1737,11 @@ cpp_quote("#define GCS_VALIDATE      WINELIB_NAME_AW(GCS_VALIDATE)")
 cpp_quote("#define CMDSTR_NEWFOLDERA   \"NewFolder\"")
 cpp_quote("#define CMDSTR_VIEWLISTA    \"ViewList\"")
 cpp_quote("#define CMDSTR_VIEWDETAILSA \"ViewDetails\"")
-cpp_quote("#if defined(_MSC_VER) || defined(__MINGW32__)")
+cpp_quote("#if defined(__GNUC__)")
+cpp_quote("# define CMDSTR_NEWFOLDERW (const WCHAR []){ 'N','e','w','F','o','l','d','e','r',0 }")
+cpp_quote("# define CMDSTR_VIEWLISTW (const WCHAR []){ 'V','i','e','w','L','i','s','t',0 }")
+cpp_quote("# define CMDSTR_VIEWDETAILSW (const WCHAR []){ 'V','i','e','w','D','e','t','a','i','l','s',0 }")
+cpp_quote("#elif defined(_MSC_VER)")
 cpp_quote("# define CMDSTR_NEWFOLDERW   L\"NewFolder\"")
 cpp_quote("# define CMDSTR_VIEWLISTW    L\"ViewList\"")
 cpp_quote("# define CMDSTR_VIEWDETAILSW L\"ViewDetails\"")
@@ -2184,7 +2188,7 @@ typedef [v1_enum] enum THUMBBUTTONMASK {
 
 cpp_quote("DEFINE_ENUM_FLAG_OPERATORS(THUMBBUTTONMASK)")
 
-#pragma pack(push,8)
+cpp_quote("#include <pshpack8.h>")
 typedef struct THUMBBUTTON {
     THUMBBUTTONMASK dwMask;
     UINT iId;
@@ -2193,7 +2197,7 @@ typedef struct THUMBBUTTON {
     WCHAR szTip[260];
     THUMBBUTTONFLAGS dwFlags;
 } THUMBBUTTON, *LPTHUMBBUTTON;
-#pragma pack(pop)
+cpp_quote("#include <poppack.h>")
 
 [
     uuid(ea1afb91-9e28-4b86-90e9-9e9f8a5eefaf),
@@ -4129,18 +4133,4 @@ interface IFileOperation : IUnknown
                     [in, unique] IFileOperationProgressSink *sink);
     HRESULT PerformOperations();
     HRESULT GetAnyOperationsAborted([out] BOOL *aborted);
-}
-
-[
-    object,
-    uuid(2c1c7e2e-2d0e-4059-831e-1e6f82335c2e),
-    pointer_default(unique)
-]
-interface IEnumObjects : IUnknown
-{
-    [local] HRESULT Next([in] ULONG celt, [in] REFIID riid, [out, iid_is(riid)] void **rgelt, [out, optional] ULONG *pceltFetched);
-    [call_as(Next)] HRESULT RemoteNext([in] ULONG  celt, [in] REFIID riid, [out, size_is(celt), length_is(*pceltFetched), iid_is(riid)] void **rgelt, [out] ULONG *pceltFetched);
-    HRESULT Skip([in] ULONG celt);
-    HRESULT Reset();
-    HRESULT Clone([out] IEnumObjects **ppenum);
 }

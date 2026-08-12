@@ -24,6 +24,7 @@
 #include <sys/types.h>
 
 #include "ntstatus.h"
+#define WIN32_NO_STATUS
 #include "winternl.h"
 #include "wine/debug.h"
 #include "ntdll_misc.h"
@@ -34,6 +35,7 @@ WINE_DEFAULT_DEBUG_CHANNEL(thread);
 WINE_DECLARE_DEBUG_CHANNEL(relay);
 WINE_DECLARE_DEBUG_CHANNEL(pid);
 WINE_DECLARE_DEBUG_CHANNEL(timestamp);
+WINE_DECLARE_DEBUG_CHANNEL(microsecs);
 
 struct _KUSER_SHARED_DATA *user_shared_data = (void *)0x7ffe0000;
 
@@ -147,7 +149,14 @@ int __cdecl __wine_dbg_header( enum __wine_debug_class cls, struct __wine_debug_
     /* only print header if we are at the beginning of the line */
     if (info->out_pos) return 0;
 
-    if (TRACE_ON(timestamp))
+    if (TRACE_ON(microsecs))
+    {
+        LARGE_INTEGER counter, frequency, microsecs;
+        NtQueryPerformanceCounter(&counter, &frequency);
+        microsecs.QuadPart = counter.QuadPart * 1000000 / frequency.QuadPart;
+        pos += sprintf( pos, "%3u.%06u:", (unsigned int)(microsecs.QuadPart / 1000000), (unsigned int)(microsecs.QuadPart % 1000000) );
+    }
+    else if (TRACE_ON(timestamp))
     {
         ULONG ticks = NtGetTickCount();
         pos += sprintf( pos, "%3lu.%03lu:", ticks / 1000, ticks % 1000 );
@@ -193,6 +202,17 @@ int __cdecl __wine_dbg_output( const char *str )
 
 
 /***********************************************************************
+ *		__wine_dbg_ftrace
+ */
+unsigned int WINAPI __wine_dbg_ftrace( char *str, unsigned int len, unsigned int ctx )
+{
+    struct wine_dbg_ftrace_params params = { str, len, ctx };
+
+    return WINE_UNIX_CALL( unix_wine_dbg_ftrace, &params );
+}
+
+
+/***********************************************************************
  *           set_native_thread_name
  */
 void set_native_thread_name( DWORD tid, const char *name )
@@ -203,8 +223,15 @@ void set_native_thread_name( DWORD tid, const char *name )
 
     if (tid != -1)
     {
-        OBJECT_ATTRIBUTES attr = { .Length = sizeof(attr) };
+        OBJECT_ATTRIBUTES attr;
         CLIENT_ID cid;
+
+        attr.Length = sizeof(attr);
+        attr.RootDirectory = 0;
+        attr.Attributes = 0;
+        attr.ObjectName = NULL;
+        attr.SecurityDescriptor = NULL;
+        attr.SecurityQualityOfService = NULL;
 
         cid.UniqueProcess = 0;
         cid.UniqueThread = ULongToHandle( tid );
@@ -256,8 +283,7 @@ NTSTATUS WINAPI RtlCreateUserThread( HANDLE process, SECURITY_DESCRIPTOR *descr,
     ULONG flags = suspended ? THREAD_CREATE_FLAGS_CREATE_SUSPENDED : 0;
     ULONG_PTR buffer[offsetof( PS_ATTRIBUTE_LIST, Attributes[2] ) / sizeof(ULONG_PTR)];
     PS_ATTRIBUTE_LIST *attr_list = (PS_ATTRIBUTE_LIST *)buffer;
-    struct _ACTIVATION_CONTEXT *actctx;
-    HANDLE handle;
+    HANDLE handle, actctx;
     TEB *teb;
     ULONG ret;
     NTSTATUS status;

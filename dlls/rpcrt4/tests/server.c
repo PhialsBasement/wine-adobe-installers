@@ -1334,7 +1334,9 @@ run_client(const char *test)
   client_test_name = test;
   make_cmdline(cmdline, test);
   ok(CreateProcessA(NULL, cmdline, NULL, NULL, FALSE, 0L, NULL, NULL, &startup, &client_info), "CreateProcess\n");
-  wait_child_process(&client_info);
+  wait_child_process(client_info.hProcess);
+  ok(CloseHandle(client_info.hProcess), "CloseHandle\n");
+  ok(CloseHandle(client_info.hThread), "CloseHandle\n");
 }
 
 static void
@@ -2575,11 +2577,12 @@ static void test_server_listening(void)
     ok(status == RPC_S_OK, "RpcStringFree\n");
 }
 
-static void create_server_process(PROCESS_INFORMATION *info)
+static HANDLE create_server_process(void)
 {
     SECURITY_ATTRIBUTES sec_attr = { sizeof(sec_attr), NULL, TRUE };
     HANDLE ready_event;
     char cmdline[MAX_PATH];
+    PROCESS_INFORMATION info;
     STARTUPINFOA startup;
     DWORD ret;
 
@@ -2591,11 +2594,13 @@ static void create_server_process(PROCESS_INFORMATION *info)
 
     sprintf(cmdline, "%s server run %Ix", progname, (UINT_PTR)ready_event);
     trace("running server process...\n");
-    ok(CreateProcessA(NULL, cmdline, NULL, NULL, TRUE, 0L, NULL, NULL, &startup, info), "CreateProcess\n");
+    ok(CreateProcessA(NULL, cmdline, NULL, NULL, TRUE, 0L, NULL, NULL, &startup, &info), "CreateProcess\n");
     ret = WaitForSingleObject(ready_event, 10000);
     ok(WAIT_OBJECT_0 == ret, "WaitForSingleObject\n");
 
+    ok(CloseHandle(info.hThread), "CloseHandle\n");
     ok(CloseHandle(ready_event), "CloseHandle\n");
+    return info.hProcess;
 }
 
 static void run_server(HANDLE ready_event)
@@ -2642,13 +2647,13 @@ static void test_reconnect(void)
     static unsigned char np[] = "ncacn_np";
     static unsigned char address_np[] = "\\\\.";
     static unsigned char pipe[] = PIPE "term_test";
-    PROCESS_INFORMATION info;
     unsigned char *binding;
     HANDLE threads[32];
+    HANDLE server_process;
     unsigned i;
     DWORD ret;
 
-    create_server_process(&info);
+    server_process = create_server_process();
 
     ok(RPC_S_OK == RpcStringBindingComposeA(NULL, np, address_np, pipe, NULL, &binding), "RpcStringBindingCompose\n");
     ok(RPC_S_OK == RpcBindingFromStringBindingA(binding, &IMixedServer_IfHandle), "RpcBindingFromStringBinding\n");
@@ -2668,15 +2673,17 @@ static void test_reconnect(void)
 
     stop();
 
-    wait_child_process(&info);
+    wait_child_process(server_process);
+    ok(CloseHandle(server_process), "CloseHandle\n");
 
     /* create new server, rpcrt4 will connect to it once sending to existing connection fails
      * that current connection is broken. */
-    create_server_process(&info);
+    server_process = create_server_process();
     basic_tests();
     stop();
 
-    wait_child_process(&info);
+    wait_child_process(server_process);
+    ok(CloseHandle(server_process), "CloseHandle\n");
 
     ok(RPC_S_OK == RpcStringFreeA(&binding), "RpcStringFree\n");
     ok(RPC_S_OK == RpcBindingFree(&IMixedServer_IfHandle), "RpcBindingFree\n");
@@ -2827,7 +2834,7 @@ START_TEST(server)
     }
     RpcExcept(TRUE)
     {
-      trace("Exception %ld\n", RpcExceptionCode());
+      trace("Exception %d\n", RpcExceptionCode());
     }
     RpcEndExcept
   }

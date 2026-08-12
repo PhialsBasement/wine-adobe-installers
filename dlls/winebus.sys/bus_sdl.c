@@ -39,6 +39,7 @@
 #include <pthread.h>
 
 #include "ntstatus.h"
+#define WIN32_NO_STATUS
 #include "windef.h"
 #include "winbase.h"
 #include "winnls.h"
@@ -115,6 +116,8 @@ MAKE_FUNCPTR(SDL_GameControllerAddMapping);
 MAKE_FUNCPTR(SDL_RegisterEvents);
 MAKE_FUNCPTR(SDL_PushEvent);
 MAKE_FUNCPTR(SDL_GetTicks);
+MAKE_FUNCPTR(SDL_LogSetPriority);
+MAKE_FUNCPTR(SDL_SetHintWithPriority);
 static int (*pSDL_JoystickRumble)(SDL_Joystick *joystick, Uint16 low_frequency_rumble, Uint16 high_frequency_rumble, Uint32 duration_ms);
 static int (*pSDL_JoystickRumbleTriggers)(SDL_Joystick *joystick, Uint16 left_rumble, Uint16 right_rumble, Uint32 duration_ms);
 static Uint16 (*pSDL_JoystickGetProduct)(SDL_Joystick * joystick);
@@ -372,7 +375,7 @@ static NTSTATUS build_joystick_report_descriptor(struct unix_device *iface, cons
     for (i = 0; i < ball_count; i++)
     {
         if (!hid_device_add_axes(iface, 2, relative_axis_usages[2 * i].UsagePage,
-                                 &relative_axis_usages[2 * i].Usage, TRUE, INT16_MIN, INT16_MAX))
+                                 &relative_axis_usages[2 * i].Usage, TRUE, INT32_MIN, INT32_MAX))
             return STATUS_NO_MEMORY;
     }
 
@@ -651,8 +654,7 @@ static NTSTATUS sdl_device_physical_effect_update(struct unix_device *iface, BYT
     struct sdl_device *impl = impl_from_unix_device(iface);
     int id = impl->effect_ids[index];
     SDL_HapticEffect effect = {0};
-    int i;
-    INT32 direction;
+    INT16 direction;
     NTSTATUS status;
 
     TRACE("iface %p, index %u, params %p.\n", iface, index, params);
@@ -662,7 +664,8 @@ static NTSTATUS sdl_device_physical_effect_update(struct unix_device *iface, BYT
 
     /* The first direction we get from PID is in polar coordinate space, so we need to
      * remove 90° to make it match SDL spherical coordinates. */
-    direction = (params->direction[0] + 27000) % 36000;
+    direction = (params->direction[0] - 9000) % 36000;
+    if (direction < 0) direction += 36000;
 
     switch (params->effect_type)
     {
@@ -699,23 +702,23 @@ static NTSTATUS sdl_device_physical_effect_update(struct unix_device *iface, BYT
         effect.condition.direction.type = SDL_HAPTIC_SPHERICAL;
         effect.condition.direction.dir[0] = direction;
         effect.condition.direction.dir[1] = params->direction[1];
-
-        for (i = 0; i < max(params->condition_count, 3); i++)
+        if (params->condition_count >= 1)
         {
-            effect.condition.right_sat[i] = params->condition[i].positive_saturation;
-            effect.condition.left_sat[i] = params->condition[i].negative_saturation;
-            effect.condition.right_coeff[i] = params->condition[i].positive_coefficient;
-            effect.condition.left_coeff[i] = params->condition[i].negative_coefficient;
-            effect.condition.deadband[i] = params->condition[i].dead_band;
-            effect.condition.center[i] = params->condition[i].center_point_offset;
+            effect.condition.right_sat[0] = params->condition[0].positive_saturation;
+            effect.condition.left_sat[0] = params->condition[0].negative_saturation;
+            effect.condition.right_coeff[0] = params->condition[0].positive_coefficient;
+            effect.condition.left_coeff[0] = params->condition[0].negative_coefficient;
+            effect.condition.deadband[0] = params->condition[0].dead_band;
+            effect.condition.center[0] = params->condition[0].center_point_offset;
         }
-        /* Testing MS Sidewinder 2 indicates unspecified paramater blocks are full strength */
-        for (; i < 3; i++)
+        if (params->condition_count >= 2)
         {
-            effect.condition.right_sat[i] = 65535;
-            effect.condition.left_sat[i] = 65535;
-            effect.condition.right_coeff[i] = 32767;
-            effect.condition.left_coeff[i] = 32767;
+            effect.condition.right_sat[1] = params->condition[1].positive_saturation;
+            effect.condition.left_sat[1] = params->condition[1].negative_saturation;
+            effect.condition.right_coeff[1] = params->condition[1].positive_coefficient;
+            effect.condition.left_coeff[1] = params->condition[1].negative_coefficient;
+            effect.condition.deadband[1] = params->condition[1].dead_band;
+            effect.condition.center[1] = params->condition[1].center_point_offset;
         }
         break;
 
@@ -925,6 +928,22 @@ static BOOL set_report_from_controller_event(struct sdl_device *impl, SDL_Event 
     return FALSE;
 }
 
+/* logic from SDL2's SDL_ShouldIgnoreGameController */
+BOOL is_sdl_ignored_device(WORD vid, WORD pid)
+{
+    const char *whitelist = getenv("SDL_GAMECONTROLLER_IGNORE_DEVICES_EXCEPT");
+    const char *blacklist = getenv("SDL_GAMECONTROLLER_IGNORE_DEVICES");
+    char needle[16];
+
+    if (vid == 0x056a) return TRUE; /* all Wacom devices */
+    if (vid == 0x28de && pid == 0x11ff) return TRUE; /* Steam Input virtual controller, handled with evdev */
+
+    sprintf(needle, "0x%04x/0x%04x", vid, pid);
+    if (whitelist) return strcasestr(whitelist, needle) == NULL;
+    if (blacklist) return strcasestr(blacklist, needle) != NULL;
+    return FALSE;
+}
+
 static void sdl_add_device(unsigned int index)
 {
     struct device_desc desc =
@@ -971,6 +990,14 @@ static void sdl_add_device(unsigned int index)
         desc.vid = 0x01;
         desc.pid = pSDL_JoystickInstanceID(joystick) + 1;
         desc.version = 0;
+    }
+
+    if (is_sdl_ignored_device(desc.vid, desc.pid))
+    {
+        TRACE("ignoring %s\n", debugstr_device_desc(&desc));
+        if (controller) pSDL_GameControllerClose(controller);
+        pSDL_JoystickClose(joystick);
+        return;
     }
 
     if (pSDL_JoystickGetSerial && (sdl_serial = pSDL_JoystickGetSerial(joystick)))
@@ -1138,6 +1165,8 @@ NTSTATUS sdl_bus_init(void *args)
     LOAD_FUNCPTR(SDL_RegisterEvents);
     LOAD_FUNCPTR(SDL_PushEvent);
     LOAD_FUNCPTR(SDL_GetTicks);
+    LOAD_FUNCPTR(SDL_LogSetPriority);
+    LOAD_FUNCPTR(SDL_SetHintWithPriority);
 #undef LOAD_FUNCPTR
     pSDL_JoystickRumble = dlsym(sdl_handle, "SDL_JoystickRumble");
     pSDL_JoystickRumbleTriggers = dlsym(sdl_handle, "SDL_JoystickRumbleTriggers");
@@ -1146,6 +1175,10 @@ NTSTATUS sdl_bus_init(void *args)
     pSDL_JoystickGetVendor = dlsym(sdl_handle, "SDL_JoystickGetVendor");
     pSDL_JoystickGetType = dlsym(sdl_handle, "SDL_JoystickGetType");
     pSDL_JoystickGetSerial = dlsym(sdl_handle, "SDL_JoystickGetSerial");
+
+    /* CW-Bug-Id: #23185: Disable SDL 2.30 new behavior, we need the steam virtual
+     * controller name to figure which slot number it represents. */
+    pSDL_SetHintWithPriority("SteamVirtualGamepadInfo", "", SDL_HINT_OVERRIDE);
 
     if (pSDL_Init(SDL_INIT_GAMECONTROLLER | SDL_INIT_HAPTIC) < 0)
     {
@@ -1157,6 +1190,11 @@ NTSTATUS sdl_bus_init(void *args)
     {
         ERR("error registering quit event\n");
         goto failed;
+    }
+
+    if (TRACE_ON(hid))
+    {
+        pSDL_LogSetPriority(SDL_LOG_CATEGORY_INPUT, SDL_LOG_PRIORITY_VERBOSE);
     }
 
     pSDL_JoystickEventState(SDL_ENABLE);

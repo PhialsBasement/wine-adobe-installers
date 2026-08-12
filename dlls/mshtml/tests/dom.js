@@ -385,33 +385,6 @@ sync_test("document_owner", function() {
     ok(node.ownerDocument === document, "text.ownerDocument = " + node.ownerDocument);
 });
 
-sync_test("document_style_props", function() {
-    document.body.innerHTML = '<a href="#"></a>';
-    var r, elem = document.getElementsByTagName("a")[0];
-    todo_wine.
-    ok(document.linkColor === "#0000ff", "default linkColor = " + document.linkColor);
-
-    document.linkColor = "#deadb8";
-    ok(document.linkColor === "#deadb8", "linkColor = " + document.linkColor);
-    r = window.getComputedStyle(elem).color;
-    ok(r === "rgb(222, 173, 184)", "style color = " + r);
-
-    ok(document.vLinkColor === undefined, "default vLinkColor = " + document.vLinkColor);
-    document.vLinkColor = "#b8dead";
-    ok(document.vLinkColor === "#b8dead", "vLinkColor = " + document.vLinkColor);
-
-    ok(document.aLinkColor === undefined, "default aLinkColor = " + document.aLinkColor);
-    document.aLinkColor = "#deb8ad";
-    ok(document.aLinkColor === "#deb8ad", "aLinkColor = " + document.aLinkColor);
-});
-
-sync_test("document_frag", function() {
-    var frag = document.createDocumentFragment()
-
-    frag.textContent = "1234";
-    ok(frag.textContent === "1234", "textContent = " + frag.textContent);
-});
-
 sync_test("style_properties", function() {
     document.body.innerHTML = '<div>test</div><svg></svg>';
     var elem = document.body.firstChild;
@@ -636,6 +609,13 @@ sync_test("storage", function() {
     ok(item === "42", "'foobar' item = " + item);
     item = sessionStorage["foobar"];
     ok(item === "42", "[foobar] item = " + item);
+
+    var desc = Object.getOwnPropertyDescriptor(sessionStorage, "foobar");
+    ok(desc.value === "42", "foobar desc.value = " + desc.value);
+    ok(desc.writable === true, "foobar desc.writable = " + desc.writable);
+    ok(desc.enumerable === true, "foobar desc.enumerable = " + desc.enumerable);
+    ok(desc.configurable === true, "foobar desc.configurable = " + desc.configurable);
+
     sessionStorage.removeItem("foobar");
     item = sessionStorage["foobar"];
     ok(item === undefined, "[foobar] item after removal = " + item);
@@ -647,6 +627,136 @@ sync_test("storage", function() {
     ok(item === "true", "[barfoo] item = " + item);
     item = sessionStorage.getItem("barfoo");
     ok(item === "true", "'barfoo' item = " + item);
+
+    Object.defineProperty(sessionStorage, "barfoo", {writable: false, enumerable: false, configurable: false, value: 1234});
+    desc = Object.getOwnPropertyDescriptor(sessionStorage, "barfoo");
+    ok(desc.value === "1234", "barfoo desc.value = " + desc.value);
+    ok(desc.writable === true, "barfoo desc.writable = " + desc.writable);
+    ok(desc.enumerable === true, "barfoo desc.enumerable = " + desc.enumerable);
+    ok(desc.configurable === true, "barfoo desc.configurable = " + desc.configurable);
+
+    item = sessionStorage.barfoo;
+    ok(item === "1234", "'barfoo' prop after defineProperty = " + item);
+    item = sessionStorage.getItem("barfoo");
+    ok(item === "1234", "'barfoo' item after defineProperty = " + item);
+
+    sessionStorage.barfoo = 4321;
+    item = sessionStorage.barfoo;
+    ok(item === "4321", "'barfoo' prop after re-set = " + item);
+    item = sessionStorage.getItem("barfoo");
+    ok(item === "4321", "'barfoo' item after re-set = " + item);
+
+    ok((delete sessionStorage.barfoo) === true, "delete sessionStorage.barfoo returned false");
+    ok(!("barfoo" in sessionStorage), "barfoo in sessionStorage after defined prop deleted");
+    ok(!Object.prototype.hasOwnProperty.call(sessionStorage, "barfoo"), "barfoo prop of sessionStorage after defined prop deleted");
+    item = sessionStorage.barfoo;
+    ok(item === undefined, "[barfoo] item after second delete = " + item);
+    item = sessionStorage.getItem("barfoo");
+    ok(item === null, "'barfoo' item after second delete = " + item);
+
+    Object.defineProperty(sessionStorage, "winetest", {enumerable: false, configurable: true,
+            get: function() { return 42; }, set: function() { item = 1234; } });
+    desc = Object.getOwnPropertyDescriptor(sessionStorage, "winetest");
+    ok(desc.get() === 42, "winetest desc.get() = " + desc.get());
+    ok(desc.enumerable === false, "winetest desc.enumerable = " + desc.enumerable);
+    ok(desc.configurable === true, "winetest desc.configurable = " + desc.configurable);
+
+    item = sessionStorage.winetest;
+    ok(item === 42, "'winetest' prop = " + item);
+    item = sessionStorage.getItem("winetest");
+    ok(item === null, "'winetest' item = " + item);
+
+    sessionStorage.winetest = 0;
+    ok(item === 1234, "'winetest' item after setter = " + item);
+
+    sessionStorage.setItem("winetest", "test");
+    item = sessionStorage.winetest;
+    ok(item === "test", "'winetest' prop after setItem = " + item);
+    item = sessionStorage.getItem("winetest");
+    ok(item === "test", "'winetest' item after setItem = " + item);
+
+    desc = Object.getOwnPropertyDescriptor(sessionStorage, "winetest");
+    ok(desc.get() === 42, "winetest desc.get() after setItem = " + desc.get());
+    ok(desc.enumerable === false, "winetest desc.enumerable after setItem = " + desc.enumerable);
+    ok(desc.configurable === true, "winetest desc.configurable after setItem = " + desc.configurable);
+
+    item = sessionStorage.winetest;
+    ok(item === "test", "'winetest' prop before second setter = " + item);
+    sessionStorage.winetest = 0;
+    ok(item === 1234, "'winetest' item after second setter = " + item);
+    item = sessionStorage.winetest;
+    ok(item === "test", "'winetest' prop after second setter = " + item);
+
+    sessionStorage.removeItem("winetest");
+    item = sessionStorage.winetest;
+    ok(item === 42, "'winetest' prop after removeItem = " + item);
+    item = sessionStorage.getItem("winetest");
+    ok(item === null, "'winetest' item after removeItem = " + item);
+
+    sessionStorage.setItem("winetest", "wine");
+    item = sessionStorage.winetest;
+    ok(item === "wine", "'winetest' prop after second setItem = " + item);
+    item = sessionStorage.getItem("winetest");
+    ok(item === "wine", "'winetest' item after second setItem = " + item);
+
+    ok((delete sessionStorage.winetest) === true, "delete sessionStorage.winetest returned false");
+    ok("winetest" in sessionStorage, "'winetest' not in sessionStorage after delete");
+    ok(Object.prototype.hasOwnProperty.call(sessionStorage, "winetest"), "'winetest' not prop of sessionStorage after delete");
+    item = sessionStorage.winetest;
+    ok(item === 42, "'winetest' item after delete = " + item);
+    item = sessionStorage.getItem("winetest");
+    ok(item === null, "'winetest' item after delete = " + item);
+
+    ok((delete sessionStorage.winetest) === true, "second delete sessionStorage.winetest returned false");
+    ok("winetest" in sessionStorage, "'winetest' not in sessionStorage after second delete");
+    ok(Object.prototype.hasOwnProperty.call(sessionStorage, "winetest"), "'winetest' not prop of sessionStorage after second delete");
+    item = sessionStorage.winetest;
+    ok(item === 42, "'winetest' item after second delete = " + item);
+    item = sessionStorage.getItem("winetest");
+    ok(item === null, "'winetest' item after second delete = " + item);
+
+    Object.defineProperty(sessionStorage, "nonconf", {enumerable: false, configurable: false,
+            get: function() { return 1; }, set: function() {} });
+    desc = Object.getOwnPropertyDescriptor(sessionStorage, "nonconf");
+    ok(desc.get() === 1, "nonconf desc.get() = " + desc.get());
+    ok(desc.enumerable === false, "nonconf desc.enumerable = " + desc.enumerable);
+    ok(desc.configurable === false, "nonconf desc.configurable = " + desc.configurable);
+
+    sessionStorage.setItem("nonconf", "test");
+    item = sessionStorage.nonconf;
+    ok(item === "test", "'nonconf' prop after setItem = " + item);
+    item = sessionStorage.getItem("nonconf");
+    ok(item === "test", "'nonconf' item after setItem = " + item);
+
+    desc = Object.getOwnPropertyDescriptor(sessionStorage, "nonconf");
+    ok(desc.get() === 1, "nonconf desc.get() after setItem = " + desc.get());
+    ok(desc.enumerable === false, "nonconf desc.enumerable after setItem = " + desc.enumerable);
+    ok(desc.configurable === false, "nonconf desc.configurable after setItem = " + desc.configurable);
+
+    ok((delete sessionStorage.nonconf) === true, "delete sessionStorage.nonconf returned false");
+    ok("nonconf" in sessionStorage, "'nonconf' not in sessionStorage after delete");
+    ok(Object.prototype.hasOwnProperty.call(sessionStorage, "nonconf"), "'nonconf' not prop of sessionStorage after delete");
+    item = sessionStorage.nonconf;
+    ok(item === 1, "'nonconf' item after delete = " + item);
+    item = sessionStorage.getItem("nonconf");
+    ok(item === null, "'nonconf' item after delete = " + item);
+
+    sessionStorage.setItem("protoprop", "1111");
+    item = sessionStorage.protoprop;
+    ok(item === "1111", "'protoprop' = " + item);
+
+    var obj = Object.create(sessionStorage);
+    ok("protoprop" in obj, "'protoprop' not in object with sessionStorage prototype");
+    ok(!Object.prototype.hasOwnProperty.call(obj, "protoprop"), "'protoprop' prop of object with sessionStorage prototype");
+    item = obj.protoprop;
+    ok(item === "1111", "'protoprop' on obj = " + item);
+
+    var name = null;
+    for(name in obj)
+        ok(name === "protoprop", "got " + name + " prop enumerating");
+    ok(name === "protoprop", "protoprop not enumerated");
+
+    sessionStorage.clear();
 });
 
 async_test("animation", function() {
@@ -1048,129 +1158,6 @@ sync_test("importNode", function() {
     ok(node2.parentNode === null, "node2.parentNode = " + node2.parentNode);
 });
 
-sync_test("attributeNode", function() {
-    document.body.innerHTML = '<div id="test" attr="wine"></div>';
-    var elem = document.getElementById("test");
-    var attr, clone, prev, ret;
-
-    attr = elem.attributes["id"];
-    ok(attr.ownerDocument === document, "ownerDocument = " + attr.ownerDocument);
-    ok(attr.ownerElement === elem, "ownerElement = " + attr.ownerElement);
-    ok(attr.specified === true, "attr.specified = " + attr.expando);
-    ok(attr.expando === false, "attr.expando = " + attr.expando);
-    ok(attr.value === "test", "attr.value = " + attr.value);
-    ok(attr.name === "id", "attr.name = " + attr.name);
-
-    clone = attr.cloneNode(true);
-    ok(clone.ownerDocument === document, "ownerDocument = " + clone.ownerDocument);
-    ok(clone.ownerElement === null, "ownerElement = " + clone.ownerElement);
-    ok(clone.specified === true, "clone.specified = " + clone.expando);
-    ok(clone.expando === false, "clone.expando = " + clone.expando);
-    ok(clone.value === "test", "clone.value = " + clone.value);
-    ok(clone.name === "id", "clone.name = " + clone.name);
-
-    ok(elem.getAttributeNode("id") === attr, 'elem.getAttributeNode("id") = ' + elem.getAttributeNode("id"));
-    ok(elem.attributes.getNamedItem("id") === attr, "unexpected id named item");
-    ok(elem.getAttributeNode("nonexistent") === null,
-       'elem.getAttributeNode("nonexistent") = ' + elem.getAttributeNode("nonexistent"));
-    ok(elem.attributes.getNamedItem("nonexistent") === null,
-       'elem.attributes.getNamedItem("nonexistent") = ' + elem.attributes.getNamedItem("nonexistent"));
-    ok(elem.attributes.length === 2, "elem.attributes.length = " + elem.attributes.length);
-    ok(elem.attributes[0] == attr || elem.attributes[1] === attr, "attr not found in elem.attributes");
-    ok(elem.attributes.item(0) == attr || elem.attributes.item(1) === attr, "attr not found in items");
-    ok(elem.attributes.item(2) == null, "item(2) = " + elem.attributes.item(2));
-    prev = attr;
-
-    attr = document.createAttribute("id");
-    ok(attr.ownerDocument === document, "detached attr ownerDocument = " + attr.ownerDocument);
-    ok(attr.ownerElement === null, "detached attr ownerElement = " + attr.ownerElement);
-    ok(attr.specified === true, "attr.specified = " + attr.specified);
-    ok(attr.expando === false, "attr.expando = " + attr.expando);
-    ok(attr.value === "", "attr.value = " + attr.value);
-    ok(attr.name === "id", "attr.name = " + attr.name);
-    attr.value = "new";
-
-    ret = elem.setAttributeNode(attr);
-    ok(ret === prev, "ret != prev");
-    ok(elem.getAttributeNode("id") === attr, "unexpected id attr");
-    ok(elem.getAttribute("id") === "new", "unexpected id attr value " + elem.getAttribute("id"));
-
-    attr = document.createAttribute("test");
-    attr.value = "test";
-    ret = elem.setAttributeNode(attr);
-    ok(ret === null, "ret != null");
-    ok(elem.attributes.length === 3, "elem.attributes.length = " + elem.attributes.length);
-    ok(elem.getAttributeNode("test") === attr, "unexpected test attr");
-    ok(elem.attributes.getNamedItem("test") === attr, "unexpected test named item");
-    ok(elem.getAttribute("test") === "test", "unexpected test attr value " + elem.getAttribute("id"));
-    ok(elem.attributes.item(3) == null, "item(3) = " + elem.attributes.item(3));
-
-    attr = elem.getAttributeNode("style");
-    ok(attr === null, "found style attribute node");
-    attr = elem.attributes.getNamedItem("style");
-    ok(attr === null, "found style attribute named item");
-    ok(!("style" in elem.attributes), "found style in attribute collection " + elem.attributes["style"]);
-
-    attr = elem.getAttributeNode("attr");
-    ok(attr.ownerDocument === document, "ownerDocument = " + attr.ownerDocument);
-    ok(attr.ownerElement === elem, "ownerElement = " + attr.ownerElement);
-    ok(attr.namespaceURI === null, "namespaceURI = " + attr.namespaceURI);
-    ok(attr.specified === true, "attr is not specified");
-    ok(attr.textContent === "wine", "textContent = " + attr.textContent);
-    todo_wine.
-    ok(attr.hasChildNodes() === true, "attr doesn't have child nodes");
-    todo_wine.
-    ok(attr.childNodes.length === 1, "child count = " + attr.childNodes.length);
-    if(attr.firstChild /* todo_wine */) {
-        ok(attr.firstChild.nodeType === 3, "child nodeType = " + attr.firstChild.nodeType);
-        ok(attr.firstChild.textContent === "wine", "child textContent = " + attr.firstChild.textContent);
-    }
-
-    elem = document.createElement("span");
-    try {
-        attr.appendChild(elem);
-        ok(false, "appendChild did not throw");
-    }catch(e) {
-        todo_wine.
-        ok(e.message === "HierarchyRequestError", "appendChild threw " + e.message);
-    }
-    try {
-        attr.insertBefore(elem, null);
-        ok(false, "insertBefore did not throw");
-    }catch(e) {
-        todo_wine.
-        ok(e.message === "HierarchyRequestError", "insertBefore threw " + e.message);
-    }
-    try {
-        attr.replaceChild(elem, attr.firstChild);
-        ok(false, "replaceChild did not throw");
-    }catch(e) {
-        todo_wine.
-        ok(e.message === "HierarchyRequestError", "replaceChild threw " + e.message);
-    }
-    try {
-        attr.removeChild(attr.firstChild);
-        ok(false, "removeChild did not throw");
-    }catch(e) {
-        todo_wine.
-        ok(e.message === "NotFoundError", "removeChild threw " + e.message);
-    }
-});
-
-sync_test("document.open", function() {
-    document.body.innerHTML = '<iframe id="test"></iframe>';
-    var elem = document.getElementById("test");
-    var doc = elem.contentDocument;
-    var f = function() {};
-    doc.onclick = f;
-    ok(doc.onclick === f, "doc.onclick != f");
-    doc.open();
-    ok(doc.onclick === null, "doc.onclick != null");
-    doc.onclick = f;
-    doc.close();
-    ok(doc.onclick === f, "doc.onclick != f");
-});
-
 sync_test("XMLSerializer", function() {
     var serializer = new XMLSerializer();
     ok(serializer !== null, "XMLSerializer constructor returned null");
@@ -1182,15 +1169,26 @@ sync_test("XMLSerializer", function() {
     div.innerHTML = "test content";
 
     var result = serializer.serializeToString(div);
-    ok(/<div .*id="testdiv">test content<\/div>/.test(result), "unexpected result " + result);
+    ok(typeof result === "string", "serializeToString did not return a string");
+    ok(result.length > 0, "serializeToString returned empty string");
+    ok(result.indexOf("testdiv") !== -1, "serialized string does not contain id: " + result);
+    ok(result.indexOf("test content") !== -1, "serialized string does not contain content: " + result);
 
     /* Test with nested elements */
-    div = document.createElement("div");
-    div.innerHTML = '<span attr="attrval">nested</span>';
-    result = serializer.serializeToString(div);
-    ok(/<div.*><span attr="attrval">nested<\/span><\/div>/.test(result), "unexpected result " + result);
+    var container = document.createElement("div");
+    var child = document.createElement("span");
+    child.textContent = "nested";
+    container.appendChild(child);
 
-    /* Test with text node */
-    result = serializer.serializeToString(document.createTextNode("plain text"));
-    ok(result === "plain text", "serialized text node missing content: " + result);
+    result = serializer.serializeToString(container);
+    ok(result.indexOf("span") !== -1, "serialized string does not contain span tag: " + result);
+    ok(result.indexOf("nested") !== -1, "serialized string does not contain nested text: " + result);
+
+    /* Test with attributes */
+    var elem = document.createElement("input");
+    elem.type = "text";
+    elem.value = "test value";
+
+    result = serializer.serializeToString(elem);
+    ok(result.indexOf("input") !== -1, "serialized string does not contain input tag: " + result);
 });

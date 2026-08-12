@@ -835,7 +835,7 @@ HRESULT HTMLPluginContainer_get_prop_desc(DispatchEx *dispex, DISPID id, struct 
     desc->id = id;
     desc->flags = 0;
     desc->name = plugin_container->props[id - MSHTML_DISPID_CUSTOM_MIN]->name;
-    desc->iid = 0;
+    desc->prototype_id = 0;
     return S_OK;
 }
 

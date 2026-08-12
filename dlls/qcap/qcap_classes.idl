@@ -28,7 +28,7 @@
 coclass AudioRecord {}
 
 [
-    helpstring("AVI Compressor"),
+    helpstring("Audio Capture Filter"),
     threading(both),
     uuid(d76e2820-1563-11cf-ac98-00aa004c0fa9)
 ]
@@ -60,6 +60,12 @@ coclass CaptureGraphBuilder2 {}
     uuid(8596e5f0-0da5-11d0-bd21-00a0c911ce86)
 ]
 coclass FileWriter {}
+
+[
+    threading(both),
+    uuid(f8388a40-d5bb-11d0-be5a-0080c706568e),
+]
+coclass InfTee {}
 
 [
     helpstring("Smart Tee Filter"),

@@ -29,7 +29,6 @@
 #define IDS_FAVORITES   4
 #define IDS_HIDETABS    5
 #define IDS_SHOWTABS    6
-#define IDS_SELECT_TOPIC    7
 
 #define MENU_POPUP      1
 #define MENU_WEBBROWSER 2
@@ -57,5 +56,3 @@
 #define HHTV_FOLDER     1
 #define HHTV_OPENFOLDER 2
 #define HHTV_NUMBITMAPS HHTV_OPENFOLDER
-
-#define IDC_SEARCH_BTN 0

@@ -45,7 +45,7 @@ Winen kääntämiseen tarvitaan jokin seuraavista:
 - FreeBSD 12.4 tai uudempi
 - Solaris x86 9 tai uudempi
 - NetBSD-current
-- macOS 10.12 tai uudempi
+- Mac OS X 10.12 tai uudempi
 
 Wine vaatii kerneliltä tuen säikeille. Tämän takia toistaiseksi vain yllä
 mainittuja käyttöjärjestelmiä tuetaan; tulevaisuudessa saatetaan lisätä tuki

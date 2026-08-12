@@ -17,6 +17,7 @@
  */
 
 #include "ntstatus.h"
+#define WIN32_NO_STATUS
 #include "mfsrcsnk_private.h"
 
 #include "wine/list.h"
@@ -264,6 +265,7 @@ struct media_source
     LONG refcount;
 
     CRITICAL_SECTION cs;
+    IMFAsyncResult *shutdown_result;
     IMFMediaEventQueue *queue;
     IMFByteStream *stream;
     WCHAR *url;
@@ -273,6 +275,7 @@ struct media_source
     struct winedmo_demuxer winedmo_demuxer;
     struct winedmo_stream winedmo_stream;
     UINT64 file_size;
+    UINT64 position;
     INT64 duration;
     UINT stream_count;
     WCHAR mime_type[256];
@@ -683,6 +686,7 @@ static HRESULT media_source_send_eos(struct media_source *source, struct media_s
     }
 
     queue_media_event_value(source->queue, MEEndOfPresentation, &empty);
+    source->state = SOURCE_STOPPED;
     return S_OK;
 }
 
@@ -1258,7 +1262,10 @@ static ULONG WINAPI media_source_Release(IMFMediaSource *iface)
         free(source->stream_map);
         free(source->streams);
 
+        if (source->shutdown_result)
+            IMFAsyncResult_Release(source->shutdown_result);
         IMFMediaEventQueue_Release(source->queue);
+        IMFByteStream_Release(source->stream);
         free(source->url);
 
         source->cs.DebugInfo->Spare[0] = 0;
@@ -1384,9 +1391,6 @@ static HRESULT WINAPI media_source_Start(IMFMediaSource *iface, IMFPresentationD
     TRACE("source %p, descriptor %p, format %s, position %s\n", source, descriptor,
             debugstr_guid(format), debugstr_propvar(position));
 
-    if (!format)
-        format = &GUID_NULL;
-
     EnterCriticalSection(&source->cs);
 
     if (source->state == SOURCE_SHUTDOWN)
@@ -1462,7 +1466,6 @@ static HRESULT WINAPI media_source_Shutdown(IMFMediaSource *iface)
     IMFMediaEventQueue_QueueEventParamVar(source->queue, MEError, &GUID_NULL, MF_E_SHUTDOWN, NULL);
     IMFMediaEventQueue_Shutdown(source->queue);
     IMFByteStream_Close(source->stream);
-    IMFByteStream_Release(source->stream);
 
     while (source->stream_count--)
     {
@@ -1470,6 +1473,13 @@ static HRESULT WINAPI media_source_Shutdown(IMFMediaSource *iface)
         IMFMediaEventQueue_QueueEventParamVar(stream->queue, MEError, &GUID_NULL, MF_E_SHUTDOWN, NULL);
         IMFMediaEventQueue_Shutdown(stream->queue);
         IMFMediaStream_Release(&stream->IMFMediaStream_iface);
+    }
+
+    if (source->shutdown_result)
+    {
+        MFPutWorkItemEx(MFASYNC_CALLBACK_QUEUE_STANDARD, source->shutdown_result);
+        IMFAsyncResult_Release(source->shutdown_result);
+        source->shutdown_result = NULL;
     }
 
     LeaveCriticalSection(&source->cs);
@@ -1516,8 +1526,44 @@ static HRESULT media_type_from_winedmo_format( GUID major, union winedmo_format 
 
     if (IsEqualGUID( &major, &MFMediaType_Video ))
         return media_type_from_mf_video_format( &format->video, media_type );
+
     if (IsEqualGUID( &major, &MFMediaType_Audio ))
-        return MFCreateAudioMediaType( &format->audio, (IMFAudioMediaType **)media_type );
+    {
+        const char *sgi = getenv("SteamGameId");
+        WAVEFORMATEXTENSIBLE *audio = (WAVEFORMATEXTENSIBLE *)&format->audio;
+
+        /* Warhammer 40,000: Dakka Squadron depends on the input format belonging to a specific set of formats.
+         * Append transcoded audio info to the user data so it can be restored, and create a fake AAC media
+         * type instead. If decoding support is added, PCM will work without a hack. */
+        if (sgi && !strcmp(sgi, "1253190") && format->audio.wFormatTag == WAVE_FORMAT_EXTENSIBLE
+                && IsEqualGUID(&audio->SubFormat, &MFAudioFormat_Vorbis))
+        {
+            size_t config_data_size = format->audio.cbSize + sizeof(WAVEFORMATEX) - sizeof(WAVEFORMATEXTENSIBLE);
+            size_t data_size = config_data_size + sizeof(WAVEFORMATEXTENSIBLE);
+            HEAACWAVEFORMAT *hwf;
+            HRESULT hr;
+
+            if (!(hwf = malloc(offsetof(HEAACWAVEFORMAT, pbAudioSpecificConfig[data_size]))))
+                return E_OUTOFMEMORY;
+
+            hwf->wfInfo.wfx = audio->Format;
+            hwf->wfInfo.wfx.wFormatTag = WAVE_FORMAT_MPEG_HEAAC;
+            hwf->wfInfo.wfx.cbSize = sizeof(HEAACWAVEINFO) + data_size - sizeof(WAVEFORMATEX);
+            hwf->wfInfo.wPayloadType = 0;
+            hwf->wfInfo.wAudioProfileLevelIndication = 0;
+            hwf->wfInfo.wStructType = 0;
+            hwf->wfInfo.wReserved1 = 0;
+            hwf->wfInfo.dwReserved2 = 0;
+            memcpy(hwf->pbAudioSpecificConfig, (BYTE *)(audio + 1), config_data_size);
+            memcpy(&hwf->pbAudioSpecificConfig[config_data_size], audio, sizeof(*audio));
+
+            hr = MFCreateAudioMediaType((WAVEFORMATEX *)hwf, (IMFAudioMediaType **)media_type);
+            free(hwf);
+            return hr;
+        }
+
+        return MFCreateAudioMediaType(&format->audio, (IMFAudioMediaType **)media_type);
+    }
 
     FIXME( "Unsupported major type %s\n", debugstr_guid( &major ) );
     return E_NOTIMPL;
@@ -1730,16 +1776,26 @@ static NTSTATUS CDECL media_source_seek_cb( struct winedmo_stream *stream, UINT6
 
     if (FAILED(IMFByteStream_Seek(source->stream, msoBegin, *pos, 0, pos)))
         return STATUS_UNSUCCESSFUL;
+
+    source->position = *pos;
     return STATUS_SUCCESS;
 }
 
 static NTSTATUS CDECL media_source_read_cb(struct winedmo_stream *stream, BYTE *buffer, ULONG *size)
 {
     struct media_source *source = CONTAINING_RECORD(stream, struct media_source, winedmo_stream);
+    UINT64 position;
+
     TRACE("stream %p, buffer %p, size %p\n", stream, buffer, size);
+
+    if (SUCCEEDED(IMFByteStream_GetCurrentPosition(source->stream, &position)) && position != source->position
+            && FAILED(IMFByteStream_SetCurrentPosition(source->stream, source->position)))
+        WARN("Failed to set current position\n");
 
     if (FAILED(IMFByteStream_Read(source->stream, buffer, *size, size)))
         return STATUS_UNSUCCESSFUL;
+
+    source->position += *size;
     return STATUS_SUCCESS;
 }
 
@@ -2033,7 +2089,7 @@ static BOOL use_gst_byte_stream_handler(void)
                        RRF_RT_REG_DWORD, NULL, &result, &size ))
         return !result;
 
-    return TRUE;
+    return FALSE;
 }
 
 static HRESULT WINAPI asf_byte_stream_plugin_factory_CreateInstance(IClassFactory *iface,

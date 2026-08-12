@@ -27,6 +27,7 @@
 #include <stdio.h>
 
 #include "ntstatus.h"
+#define WIN32_NO_STATUS
 #include "windef.h"
 #include "winternl.h"
 
@@ -34,6 +35,8 @@
 #include "file.h"
 #include "handle.h"
 #include "request.h"
+#include "esync.h"
+#include "fsync.h"
 
 
 static const WCHAR completion_name[] = {'I','o','C','o','m','p','l','e','t','i','o','n'};
@@ -71,11 +74,13 @@ struct completion_wait
 
 struct completion
 {
-    struct object       obj;
-    struct object      *sync;
-    struct list         queue;
-    struct list         wait_queue;
-    unsigned int        depth;
+    struct object  obj;
+    struct list    queue;
+    struct list    wait_queue;
+    unsigned int   depth;
+    int            closed;
+    int                esync_fd;
+    unsigned int       fsync_idx;
 };
 
 static void completion_wait_dump( struct object*, int );
@@ -91,10 +96,11 @@ static const struct object_ops completion_wait_ops =
     add_queue,                      /* add_queue */
     remove_queue,                   /* remove_queue */
     completion_wait_signaled,       /* signaled */
+    NULL,                           /* get_esync_fd */
+    NULL,                           /* get_fsync_idx */
     completion_wait_satisfied,      /* satisfied */
     no_signal,                      /* signal */
     no_get_fd,                      /* get_fd */
-    default_get_sync,               /* get_sync */
     default_map_access,             /* map_access */
     default_get_sd,                 /* get_sd */
     default_set_sd,                 /* set_sd */
@@ -149,12 +155,19 @@ static void completion_wait_satisfied( struct object *obj, struct wait_queue_ent
     msg = LIST_ENTRY( msg_entry, struct comp_msg, queue_entry );
     --wait->completion->depth;
     list_remove( &msg->queue_entry );
+    if (list_empty( &wait->completion->queue ))
+    {
+        if (do_esync()) esync_clear( wait->completion->esync_fd );
+        if (do_fsync()) fsync_clear( &wait->completion->obj );
+    }
     if (wait->msg) free( wait->msg );
     wait->msg = msg;
 }
 
 static void completion_dump( struct object*, int );
-static struct object *completion_get_sync( struct object * );
+static int completion_signaled( struct object *obj, struct wait_queue_entry *entry );
+static int completion_get_esync_fd( struct object *obj, enum esync_type *type );
+static unsigned int completion_get_fsync_idx( struct object *obj, enum fsync_type *type );
 static int completion_close_handle( struct object *obj, struct process *process, obj_handle_t handle );
 static void completion_destroy( struct object * );
 
@@ -163,13 +176,14 @@ static const struct object_ops completion_ops =
     sizeof(struct completion), /* size */
     &completion_type,          /* type */
     completion_dump,           /* dump */
-    NULL,                      /* add_queue */
-    NULL,                      /* remove_queue */
-    NULL,                      /* signaled */
-    NULL,                      /* satisfied */
+    add_queue,                 /* add_queue */
+    remove_queue,              /* remove_queue */
+    completion_signaled,       /* signaled */
+    completion_get_esync_fd,   /* get_esync_fd */
+    completion_get_fsync_idx,  /* get_fsync_idx */
+    no_satisfied,              /* satisfied */
     no_signal,                 /* signal */
     no_get_fd,                 /* get_fd */
-    completion_get_sync,       /* get_sync */
     default_map_access,        /* map_access */
     default_get_sd,            /* get_sd */
     default_set_sd,            /* set_sd */
@@ -188,12 +202,13 @@ static void completion_destroy( struct object *obj)
     struct completion *completion = (struct completion *) obj;
     struct comp_msg *tmp, *next;
 
+    if (do_esync()) close( completion->esync_fd );
+    if (completion->fsync_idx) fsync_free_shm_idx( completion->fsync_idx );
+
     LIST_FOR_EACH_ENTRY_SAFE( tmp, next, &completion->queue, struct comp_msg, queue_entry )
     {
         free( tmp );
     }
-
-    if (completion->sync) release_object( completion->sync );
 }
 
 static void completion_dump( struct object *obj, int verbose )
@@ -204,11 +219,28 @@ static void completion_dump( struct object *obj, int verbose )
     fprintf( stderr, "Completion depth=%u\n", completion->depth );
 }
 
-static struct object *completion_get_sync( struct object *obj )
+static int completion_signaled( struct object *obj, struct wait_queue_entry *entry )
 {
     struct completion *completion = (struct completion *)obj;
+
+    return !list_empty( &completion->queue ) || completion->closed;
+}
+
+static int completion_get_esync_fd( struct object *obj, enum esync_type *type )
+{
+    struct completion *completion = (struct completion *)obj;
+
+    *type = ESYNC_MANUAL_SERVER;
+    return completion->esync_fd;
+}
+
+static unsigned int completion_get_fsync_idx( struct object *obj, enum fsync_type *type )
+{
+    struct completion *completion = (struct completion *)obj;
+
     assert( obj->ops == &completion_ops );
-    return grab_object( completion->sync );
+    *type = FSYNC_MANUAL_SERVER;
+    return completion->fsync_idx;
 }
 
 static int completion_close_handle( struct object *obj, struct process *process, obj_handle_t handle )
@@ -229,7 +261,8 @@ static int completion_close_handle( struct object *obj, struct process *process,
             cleanup_thread_completion( wait->thread );
         }
     }
-    signal_sync( completion->sync );
+    completion->closed = 1;
+    wake_up( obj, 0 );
     return 1;
 }
 
@@ -273,19 +306,15 @@ static struct completion *create_completion( struct object *root, const struct u
     {
         if (get_error() != STATUS_OBJECT_NAME_EXISTS)
         {
-            completion->sync = NULL;
             list_init( &completion->queue );
             list_init( &completion->wait_queue );
             completion->depth = 0;
-
-            if (!(completion->sync = create_internal_sync( 1, 0 )))
-            {
-                release_object( completion );
-                return NULL;
-            }
+            completion->closed = 0;
         }
     }
-
+    if (do_esync()) completion->esync_fd = esync_create_fd( 0, 0 );
+    completion->fsync_idx = 0;
+    if (do_fsync()) completion->fsync_idx = fsync_alloc_shm( 0, 0 );
     return completion;
 }
 
@@ -315,7 +344,7 @@ void add_completion( struct completion *completion, apc_param_t ckey, apc_param_
         wake_up( &wait->obj, 1 );
         if (list_empty( &completion->queue )) return;
     }
-    if (!list_empty( &completion->queue )) signal_sync( completion->sync );
+    if (!list_empty( &completion->queue )) wake_up( &completion->obj, 0 );
 }
 
 /* create a completion */
@@ -416,7 +445,11 @@ DECL_HANDLER(remove_completion)
         reply->information = msg->information;
         free( msg );
         reply->wait_handle = 0;
-        if (list_empty( &completion->queue )) reset_sync( completion->sync );
+        if (list_empty( &completion->queue ))
+        {
+            if (do_esync()) esync_clear( completion->esync_fd );
+            if (do_fsync()) fsync_clear( &completion->obj );
+        }
     }
 
     release_object( completion );

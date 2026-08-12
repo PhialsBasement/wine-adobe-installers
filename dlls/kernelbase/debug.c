@@ -23,6 +23,7 @@
 #include <stdlib.h>
 
 #include "ntstatus.h"
+#define WIN32_NO_STATUS
 #include "windef.h"
 #include "winbase.h"
 #include "winternl.h"
@@ -281,7 +282,6 @@ void WINAPI DECLSPEC_HOTPATCH OutputDebugStringW( LPCWSTR str )
     STRING strA;
 
     WARN( "%s\n", debugstr_w(str) );
-    if (!str) return;
 
     RtlInitUnicodeString( &strW, str );
     if (!RtlUnicodeStringToAnsiString( &strA, &strW, TRUE ))
@@ -418,34 +418,8 @@ __ASM_GLOBAL_IMPORT(RaiseException)
  */
 void WINAPI DECLSPEC_HOTPATCH RaiseFailFastException( EXCEPTION_RECORD *record, CONTEXT *context, DWORD flags )
 {
-    EXCEPTION_RECORD rec;
-    CONTEXT ctx;
-
-    WARN( "(%p, %p, %lx)\n", record, context, flags );
-
-    if (flags & FAIL_FAST_NO_HARD_ERROR_DLG)
-        TerminateProcess( GetCurrentProcess(), STATUS_FAIL_FAST_EXCEPTION );
-
-    if (!context)
-    {
-        RtlCaptureContext( &ctx );
-        context = &ctx;
-    }
-    if (!record)
-    {
-        rec.ExceptionCode    = STATUS_FAIL_FAST_EXCEPTION;
-        rec.ExceptionFlags   = EXCEPTION_NONCONTINUABLE;
-        rec.ExceptionRecord  = NULL;
-        rec.ExceptionAddress = __builtin_return_address(0);
-        rec.NumberParameters = 0;
-        record = &rec;
-    }
-    else if (flags & FAIL_FAST_GENERATE_EXCEPTION_ADDRESS)
-    {
-        record->ExceptionAddress = __builtin_return_address(0);
-    }
-
-    for (;;) NtRaiseException( record, context, FALSE );
+    FIXME( "(%p, %p, %ld) stub\n", record, context, flags );
+    TerminateProcess( GetCurrentProcess(), STATUS_FAIL_FAST_EXCEPTION );
 }
 
 /***********************************************************************
@@ -546,7 +520,13 @@ static BOOL start_debugger( EXCEPTION_POINTERS *epointers, HANDLE event )
     format_exception_msg( epointers, buffer, sizeof(buffer) );
     MESSAGE( "wine: %s (thread %04lx), starting debugger...\n", buffer, GetCurrentThreadId() );
 
-    InitializeObjectAttributes( &attr, &nameW, 0, 0, NULL );
+    attr.Length = sizeof(attr);
+    attr.RootDirectory = 0;
+    attr.ObjectName = &nameW;
+    attr.Attributes = 0;
+    attr.SecurityDescriptor = NULL;
+    attr.SecurityQualityOfService = NULL;
+
     if (!NtOpenKey( &dbg_key, KEY_READ, &attr ))
     {
         KEY_VALUE_PARTIAL_INFORMATION *info;
@@ -649,7 +629,7 @@ static BOOL start_debugger( EXCEPTION_POINTERS *epointers, HANDLE event )
     startup.cb = sizeof(startup);
     startup.dwFlags = STARTF_USESHOWWINDOW;
     startup.wShowWindow = SW_SHOWNORMAL;
-    ret = CreateProcessW( NULL, cmdline, NULL, NULL, TRUE, CREATE_UNICODE_ENVIRONMENT, env, NULL, &startup, &info );
+    ret = CreateProcessW( NULL, cmdline, NULL, NULL, TRUE, CREATE_UNICODE_ENVIRONMENT | CREATE_NO_WINDOW, env, NULL, &startup, &info );
     FreeEnvironmentStringsW( env );
 
     if (ret)
@@ -684,12 +664,19 @@ static BOOL start_debugger_atomic( EXCEPTION_POINTERS *epointers )
 {
     static HANDLE once;
 
+    if (!ERR_ON(seh)) return FALSE;
+
     if (once == 0)
     {
 	OBJECT_ATTRIBUTES attr;
 	HANDLE event;
 
-        InitializeObjectAttributes( &attr, NULL, OBJ_INHERIT, 0, NULL );
+	attr.Length                   = sizeof(attr);
+	attr.RootDirectory            = 0;
+	attr.Attributes               = OBJ_INHERIT;
+	attr.ObjectName               = NULL;
+	attr.SecurityDescriptor       = NULL;
+	attr.SecurityQualityOfService = NULL;
 
 	/* ask for manual reset, so that once the debugger is started,
 	 * every thread will know it */
@@ -1771,7 +1758,8 @@ BOOL WINAPI DECLSPEC_HOTPATCH GetWsChangesEx( HANDLE process, PSAPI_WS_WATCH_INF
 BOOL WINAPI /* DECLSPEC_HOTPATCH */ InitializeProcessForWsWatch( HANDLE process )
 {
     FIXME( "(process=%p): stub\n", process );
-    return TRUE;
+    SetLastError( ERROR_CALL_NOT_IMPLEMENTED );
+    return FALSE;
 }
 
 

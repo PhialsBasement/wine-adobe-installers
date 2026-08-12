@@ -18,46 +18,6 @@
 #ifndef _APPMODEL_H_
 #define _APPMODEL_H_
 
-/* Application User Model ID (space included for NULL terminator) */
-#define APPLICATION_USER_MODEL_ID_MIN_LENGTH 21
-#define APPLICATION_USER_MODEL_ID_MAX_LENGTH 130
-
-/* Package architecture (no space for NULL terminator) */
-#define PACKAGE_ARCHITECTURE_MIN_LENGTH 3
-#define PACKAGE_ARCHITECTURE_MAX_LENGTH 7
-
-/* Package family name (no space for NULL terminator) */
-#define PACKAGE_FAMILY_NAME_MIN_LENGTH 17
-#define PACKAGE_FAMILY_NAME_MAX_LENGTH 64
-
-/* Package full name (no space for NULL terminator) */
-#define PACKAGE_FULL_NAME_MIN_LENGTH 30
-#define PACKAGE_FULL_NAME_MAX_LENGTH 127
-
-/* Package name (no space for NULL terminator) */
-#define PACKAGE_NAME_MIN_LENGTH 3
-#define PACKAGE_NAME_MAX_LENGTH 50
-
-/* Package publisher ID (no space for NULL terminator) */
-#define PACKAGE_PUBLISHERID_MIN_LENGTH 13
-#define PACKAGE_PUBLISHERID_MAX_LENGTH 13
-
-/* Package publisher (no space for NULL terminator) */
-#define PACKAGE_PUBLISHER_MIN_LENGTH 4
-#define PACKAGE_PUBLISHER_MAX_LENGTH 8192
-
-/* Package relative application ID (space included for NULL terminator) */
-#define PACKAGE_RELATIVE_APPLICATION_ID_MIN_LENGTH 2
-#define PACKAGE_RELATIVE_APPLICATION_ID_MAX_LENGTH 65
-
-/* Package resource ID (no space for NULL terminator) */
-#define PACKAGE_RESOURCEID_MIN_LENGTH 0
-#define PACKAGE_RESOURCEID_MAX_LENGTH 30
-
-/* Package version (no space for NULL terminator) */
-#define PACKAGE_VERSION_MIN_LENGTH 7
-#define PACKAGE_VERSION_MAX_LENGTH 23
-
 #if defined(__cplusplus)
 extern "C" {
 #endif
@@ -129,6 +89,10 @@ LONG WINAPI AppPolicyGetProcessTerminationMethod(HANDLE token, AppPolicyProcessT
 LONG WINAPI AppPolicyGetShowDeveloperDiagnostic(HANDLE token, AppPolicyShowDeveloperDiagnostic *policy);
 LONG WINAPI AppPolicyGetThreadInitializationType(HANDLE token, AppPolicyThreadInitializationType *policy);
 LONG WINAPI AppPolicyGetWindowingModel(HANDLE processToken, AppPolicyWindowingModel *policy);
+LONG WINAPI GetPackagePath(const PACKAGE_ID *package_id, const UINT32 reserved, UINT32 *length, WCHAR *path);
+LONG WINAPI GetPackagesByPackageFamily(const WCHAR *family_name, UINT32 *count, WCHAR **full_names,
+        UINT32 *buffer_length, WCHAR *buffer);
+LONG WINAPI PackageFullNameFromId(const PACKAGE_ID *package_id, UINT32 *length, WCHAR *full_name);
 LONG WINAPI PackageIdFromFullName(const WCHAR *full_name, UINT32 flags, UINT32 *buffer_length, BYTE *buffer);
 
 #if defined(__cplusplus)

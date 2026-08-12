@@ -564,7 +564,7 @@ static void stb__CompressAlphaBlock(unsigned char *dest,unsigned char *src, int 
    dest += 2;
 
    /*
-    * Wine specific tweak to more closely match native behavior: If
+    * Wine specific optimization to more closely match Windows behavior: If
     * max is equal to minimum, just set all bits to 0 (which means the value
     * is the value of max in this case).
     */
@@ -634,7 +634,6 @@ void stb_compress_bc5_block(unsigned char *dest, const unsigned char *src)
    stb__CompressAlphaBlock(dest,(unsigned char*) src,2);
    stb__CompressAlphaBlock(dest + 8,(unsigned char*) src+1,2);
 }
-
 #endif // STB_DXT_IMPLEMENTATION
 
 // Compile with STB_DXT_IMPLEMENTATION and STB_DXT_GENERATE_TABLES

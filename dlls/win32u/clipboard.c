@@ -29,6 +29,7 @@
 
 #include <pthread.h>
 #include "ntstatus.h"
+#define WIN32_NO_STATUS
 #include "win32u_private.h"
 #include "ntgdi_private.h"
 #include "ntuser_private.h"
@@ -346,8 +347,24 @@ INT WINAPI NtUserGetPriorityClipboardFormat( UINT *list, INT count )
  */
 INT WINAPI NtUserGetClipboardFormatName( UINT format, WCHAR *buffer, INT maxlen )
 {
-    UNICODE_STRING str = {.Buffer = buffer, .MaximumLength = maxlen};
-    return NtUserGetAtomName( format, &str );
+    char buf[sizeof(ATOM_BASIC_INFORMATION) + MAX_ATOM_LEN * sizeof(WCHAR)];
+    ATOM_BASIC_INFORMATION *abi = (ATOM_BASIC_INFORMATION *)buf;
+    UINT length = 0;
+
+    if (format < MAXINTATOM || format > 0xffff) return 0;
+    if (maxlen <= 0)
+    {
+        RtlSetLastWin32Error( ERROR_MORE_DATA );
+        return 0;
+    }
+    if (!set_ntstatus( NtQueryInformationAtom( format, AtomBasicInformation,
+                                               buf, sizeof(buf), NULL )))
+        return 0;
+
+    length = min( abi->NameLength / sizeof(WCHAR), maxlen - 1 );
+    if (length) memcpy( buffer, abi->Name, length * sizeof(WCHAR) );
+    buffer[length] = 0;
+    return length;
 }
 
 /**************************************************************************

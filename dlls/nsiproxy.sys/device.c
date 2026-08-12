@@ -21,6 +21,7 @@
 #include <stdarg.h>
 
 #include "ntstatus.h"
+#define WIN32_NO_STATUS
 #include "windef.h"
 #include "winbase.h"
 #include "winternl.h"
@@ -290,7 +291,7 @@ static NTSTATUS handle_send_echo( IRP *irp )
         return status;
     }
     IoSetCancelRoutine( irp, icmp_echo_cancel );
-    if (irp->Cancel && IoSetCancelRoutine( irp, NULL ))
+    if (irp->Cancel && !IoSetCancelRoutine( irp, NULL ))
     {
         /* IRP was canceled before we set cancel routine */
         return STATUS_CANCELLED;
@@ -365,7 +366,7 @@ static NTSTATUS nsiproxy_change_notification( IRP *irp )
 
     EnterCriticalSection( &nsiproxy_cs );
     IoSetCancelRoutine( irp, change_notification_cancel );
-    if (irp->Cancel && IoSetCancelRoutine( irp, NULL ))
+    if (irp->Cancel && !IoSetCancelRoutine( irp, NULL ))
     {
         /* IRP was canceled before we set cancel routine */
         InitializeListHead( &irp->Tail.Overlay.ListEntry );

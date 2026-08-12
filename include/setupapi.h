@@ -24,9 +24,9 @@
 #include <devpropdef.h>
 
 #ifdef _WIN64
-#pragma pack(push,8)
+#include <pshpack8.h>
 #else
-#pragma pack(push,1)
+#include <pshpack1.h>
 #endif
 
 /* setupapi doesn't use the normal convention, it adds an underscore before A/W */
@@ -1870,6 +1870,6 @@ WINSETUPAPI BOOL     WINAPI SetupVerifyInfFileW(PCWSTR, PSP_ALTPLATFORM_INFO, PS
 
 #undef DECL_WINELIB_SETUPAPI_TYPE_AW
 
-#pragma pack(pop)
+#include <poppack.h>
 
 #endif /* _INC_SETUPAPI */

@@ -738,16 +738,10 @@ static BOOL PROFILE_Open( LPCWSTR filename, BOOL write_access )
     if (!filename)
         filename = L"win.ini";
 
-    if ((RtlDetermineDosPathNameType_U(filename) == RtlPathTypeRelative) &&
+    if ((RtlDetermineDosPathNameType_U(filename) == RELATIVE_PATH) &&
         !wcschr(filename, '\\') && !wcschr(filename, '/'))
     {
         WCHAR windirW[MAX_PATH];
-
-        if (!filename[0])
-        {
-            SetLastError( ERROR_ACCESS_DENIED );
-            return FALSE;
-        }
         GetWindowsDirectoryW( windirW, MAX_PATH );
         lstrcpyW(buffer, windirW);
         lstrcatW(buffer, L"\\");
@@ -758,7 +752,7 @@ static BOOL PROFILE_Open( LPCWSTR filename, BOOL write_access )
         LPWSTR dummy;
         GetFullPathNameW(filename, ARRAY_SIZE(buffer), buffer, &dummy);
     }
-
+        
     TRACE("path: %s\n", debugstr_w(buffer));
 
     hFile = CreateFileW(buffer, GENERIC_READ | (write_access ? GENERIC_WRITE : 0),
@@ -1038,7 +1032,7 @@ static HKEY open_file_mapping_key( const WCHAR *filename )
 
     if (!mapping_key && RegOpenKeyExW( HKEY_LOCAL_MACHINE,
                                        L"Software\\Microsoft\\Windows NT\\CurrentVersion\\IniFileMapping",
-                                       0, KEY_ENUMERATE_SUB_KEYS | KEY_WOW64_64KEY, &mapping_key ))
+                                       0, KEY_WOW64_64KEY, &mapping_key ))
         mapping_key = NULL;
 
     LeaveCriticalSection( &PROFILE_CritSect );

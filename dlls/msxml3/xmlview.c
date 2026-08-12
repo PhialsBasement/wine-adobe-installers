@@ -366,6 +366,11 @@ static inline HRESULT display_error_page(BindStatusCallback *This)
 
 static inline HRESULT handle_xml_load(BindStatusCallback *This)
 {
+    static const WCHAR selectW[] = {'p','r','o','c','e','s','s','i','n','g','-',
+        'i','n','s','t','r','u','c','t','i','o','n','(','\'','x','m','l',
+        '-','s','t','y','l','e','s','h','e','e','t','\'',')',0};
+    static const WCHAR hrefW[] = {'h','r','e','f','=',0};
+
     IXMLDOMDocument3 *xml = NULL, *xsl = NULL;
     IXMLDOMNode *stylesheet;
     IBindCtx *pbc;
@@ -396,7 +401,7 @@ static inline HRESULT handle_xml_load(BindStatusCallback *This)
     }
     V_VT(&var) = VT_EMPTY;
 
-    bstr = SysAllocString(L"processing-instruction('xml-stylesheet')");
+    bstr = SysAllocString(selectW);
     hres = IXMLDOMDocument3_selectSingleNode(xml, bstr, &stylesheet);
     SysFreeString(bstr);
     if(hres != S_OK) {
@@ -417,8 +422,8 @@ static inline HRESULT handle_xml_load(BindStatusCallback *This)
     }
 
     /* TODO: fix parsing processing instruction value */
-    if((p = wcsstr(V_BSTR(&var), L"href="))) {
-        p += ARRAY_SIZE(L"href=") - 1;
+    if((p = wcsstr(V_BSTR(&var), hrefW))) {
+        p += ARRAY_SIZE(hrefW) - 1;
         if(*p!='\'' && *p!='\"') p = NULL;
         else {
             href = p+1;
@@ -902,6 +907,12 @@ static HRESULT WINAPI XMLView_PersistMoniker_IsDirty(IPersistMoniker *iface)
 static HRESULT WINAPI XMLView_PersistMoniker_Load(IPersistMoniker *iface,
         BOOL fFullyAvailable, IMoniker *pimkName, LPBC pibc, DWORD grfMode)
 {
+    static const WCHAR XSLParametersW[] = {'X','S','L','P','a','r','a','m','e','t','e','r','s',0};
+    static const WCHAR XMLBufferStreamW[] = {'X','M','L','B','u','f','f','e','r','S','t','r','e','a','m',0};
+    static const WCHAR DWNBINDINFOW[] = {'_','_','D','W','N','B','I','N','D','I','N','F','O',0};
+    static const WCHAR HTMLLOADOPTIONSW[] = {'_','_','H','T','M','L','L','O','A','D','O','P','T','I','O','N','S',0};
+    static const WCHAR BSCBHolderW[] = { '_','B','S','C','B','_','H','o','l','d','e','r','_',0 };
+
     XMLView *This = impl_from_IPersistMoniker(iface);
     IPersistMoniker *html_persist_mon;
     IBindStatusCallback *bsc, *bsc_html;
@@ -913,12 +924,12 @@ static HRESULT WINAPI XMLView_PersistMoniker_Load(IPersistMoniker *iface,
 
     TRACE("%p, %x, %p, %p, %lx.\n", iface, fFullyAvailable, pimkName, pibc, grfMode);
 
-    hres = IBindCtx_GetObjectParam(pibc, (OLECHAR*)L"XSLParameters", &unk);
+    hres = IBindCtx_GetObjectParam(pibc, (LPOLESTR)XSLParametersW, &unk);
     if(SUCCEEDED(hres)) {
         FIXME("ignoring XSLParameters\n");
         IUnknown_Release(unk);
     }
-    hres = IBindCtx_GetObjectParam(pibc, (OLECHAR*)L"XMLBufferStream", &unk);
+    hres = IBindCtx_GetObjectParam(pibc, (LPOLESTR)XMLBufferStreamW, &unk);
     if(SUCCEEDED(hres)) {
         FIXME("ignoring XMLBufferStream\n");
         IUnknown_Release(unk);
@@ -928,14 +939,14 @@ static HRESULT WINAPI XMLView_PersistMoniker_Load(IPersistMoniker *iface,
     if(FAILED(hres))
         return hres;
 
-    hres = IBindCtx_GetObjectParam(pibc, (OLECHAR*)L"__DWNBINDINFO", &unk);
+    hres = IBindCtx_GetObjectParam(pibc, (LPOLESTR)DWNBINDINFOW, &unk);
     if(SUCCEEDED(hres)) {
-        IBindCtx_RegisterObjectParam(bindctx, (OLECHAR*)L"__DWNBINDINFO", unk);
+        IBindCtx_RegisterObjectParam(bindctx, (LPOLESTR)DWNBINDINFOW, unk);
         IUnknown_Release(unk);
     }
-    hres = IBindCtx_GetObjectParam(pibc, (OLECHAR*)L"__HTMLLOADOPTIONS", &unk);
+    hres = IBindCtx_GetObjectParam(pibc, (LPOLESTR)HTMLLOADOPTIONSW, &unk);
     if(SUCCEEDED(hres)) {
-        IBindCtx_RegisterObjectParam(bindctx, (OLECHAR*)L"__HTMLLOADOPTIONS", unk);
+        IBindCtx_RegisterObjectParam(bindctx, (LPOLESTR)HTMLLOADOPTIONSW, unk);
         IUnknown_Release(unk);
     }
     hres = IBindCtx_GetObjectParam(pibc, (LPOLESTR)SZ_HTML_CLIENTSITE_OBJECTPARAM, &unk);
@@ -980,7 +991,7 @@ static HRESULT WINAPI XMLView_PersistMoniker_Load(IPersistMoniker *iface,
         return hres;
     }
 
-    hres = IBindCtx_GetObjectParam(bindctx, (OLECHAR*)L"_BSCB_Holder_", &unk);
+    hres = IBindCtx_GetObjectParam(bindctx, (LPOLESTR)BSCBHolderW, &unk);
     IBindCtx_Release(bindctx);
     if(FAILED(hres)) {
         IStream_Release(stream);

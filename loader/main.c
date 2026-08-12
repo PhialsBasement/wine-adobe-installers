@@ -34,9 +34,6 @@
 #ifdef HAVE_SYS_SYSCTL_H
 # include <sys/sysctl.h>
 #endif
-#ifdef __APPLE__
-# include <mach-o/dyld.h>
-#endif
 
 #include "main.h"
 
@@ -76,7 +73,8 @@ static void init_reserved_areas(void)
 
 #else
 
-/* the preloader will set this variable */
+/* the preloader will set these variables */
+__attribute((visibility("default"))) struct r_debug *wine_r_debug = NULL;
 const __attribute((visibility("default"))) struct wine_preload_info *wine_main_preload_info = NULL;
 
 static void init_reserved_areas(void)
@@ -126,7 +124,44 @@ static char *build_path( const char *dir, const char *name )
     return ret;
 }
 
-static const char *get_self_exe(void)
+/* build a path with the relative dir from 'from' to 'dest' appended to base */
+static char *build_relative_path( const char *base, const char *from, const char *dest )
+{
+    const char *start;
+    char *ret;
+    unsigned int dotdots = 0;
+
+    for (;;)
+    {
+        while (*from == '/') from++;
+        while (*dest == '/') dest++;
+        start = dest;  /* save start of next path element */
+        if (!*from) break;
+
+        while (*from && *from != '/' && *from == *dest) { from++; dest++; }
+        if ((!*from || *from == '/') && (!*dest || *dest == '/')) continue;
+
+        do  /* count remaining elements in 'from' */
+        {
+            dotdots++;
+            while (*from && *from != '/') from++;
+            while (*from == '/') from++;
+        }
+        while (*from);
+        break;
+    }
+
+    ret = malloc( strlen(base) + 3 * dotdots + strlen(start) + 2 );
+    strcpy( ret, base );
+    while (dotdots--) strcat( ret, "/.." );
+
+    if (!start[0]) return ret;
+    strcat( ret, "/" );
+    strcat( ret, start );
+    return ret;
+}
+
+static const char *get_self_exe( char *argv0 )
 {
 #if defined(__linux__) || defined(__FreeBSD_kernel__) || defined(__NetBSD__)
     return "/proc/self/exe";
@@ -137,33 +172,78 @@ static const char *get_self_exe(void)
     if (path && !sysctl( pathname, sizeof(pathname)/sizeof(pathname[0]), path, &path_size, NULL, 0 ))
         return path;
     free( path );
-#elif defined(__APPLE__)
-    uint32_t path_size = PATH_MAX;
-    char *path = malloc( path_size );
-    if (path && !_NSGetExecutablePath( path, &path_size ))
-        return path;
-    free( path );
 #endif
-    return NULL;
+
+    if (!strchr( argv0, '/' )) /* search in PATH */
+    {
+        char *p, *path = getenv( "PATH" );
+
+        if (!path || !(path = strdup(path))) return NULL;
+        for (p = strtok( path, ":" ); p; p = strtok( NULL, ":" ))
+        {
+            char *name = build_path( p, argv0 );
+            if (!access( name, X_OK ))
+            {
+                free( path );
+                return name;
+            }
+            free( name );
+        }
+        free( path );
+        return NULL;
+    }
+    return argv0;
 }
 
-static void *try_dlopen( const char *argv0 )
+static void *try_dlopen( const char *dir, const char *name )
 {
-    char *dir, *path, *p;
-    void *handle;
-
-    if (!argv0) return NULL;
-    if (!(dir = realpath_dirname( argv0 ))) return NULL;
-
-    if ((p = remove_tail( dir, "/loader" )))
-        path = build_path( p, "dlls/ntdll/ntdll.so" );
-    else
-        path = build_path( dir, "ntdll.so" );
-
-    handle = dlopen( path, RTLD_NOW );
-    free( p );
-    free( dir );
+    char *path = build_path( dir, name );
+    void *handle = dlopen( path, RTLD_NOW );
     free( path );
+    return handle;
+}
+
+static void *load_ntdll( char *argv0 )
+{
+#ifdef __i386__
+#define SO_DIR "i386-unix/"
+#elif defined(__x86_64__)
+#define SO_DIR "x86_64-unix/"
+#elif defined(__arm__)
+#define SO_DIR "arm-unix/"
+#elif defined(__aarch64__)
+#define SO_DIR "aarch64-unix/"
+#else
+#define SO_DIR ""
+#endif
+    const char *self = get_self_exe( argv0 );
+    char *path, *p;
+    void *handle = NULL;
+
+    if (self && ((path = realpath_dirname( self ))))
+    {
+        if ((p = remove_tail( path, "/loader" )))
+            handle = try_dlopen( p, "dlls/ntdll/ntdll.so" );
+        else if ((p = build_relative_path( path, BINDIR, LIBDIR )))
+            handle = try_dlopen( p, "wine/" SO_DIR "ntdll.so" );
+        free( p );
+        free( path );
+    }
+
+    if (!handle && (path = getenv( "WINEDLLPATH" )))
+    {
+        path = strdup( path );
+        for (p = strtok( path, ":" ); p; p = strtok( NULL, ":" ))
+        {
+            handle = try_dlopen( p, SO_DIR "ntdll.so" );
+            if (!handle) handle = try_dlopen( p, "ntdll.so" );
+            if (handle) break;
+        }
+        free( path );
+    }
+
+    if (!handle && !self) handle = try_dlopen( LIBDIR, "wine/" SO_DIR "ntdll.so" );
+
     return handle;
 }
 
@@ -177,8 +257,7 @@ int main( int argc, char *argv[] )
 
     init_reserved_areas();
 
-    if ((handle = try_dlopen( get_self_exe() )) ||
-        (handle = try_dlopen( argv[0] )))
+    if ((handle = load_ntdll( argv[0] )))
     {
         void (*init_func)(int, char **) = dlsym( handle, "__wine_main" );
         if (init_func) init_func( argc, argv );

@@ -5220,7 +5220,8 @@ xmlParsePITarget(xmlParserCtxtPtr ctxt) {
 	int i;
 	if ((name[0] == 'x') && (name[1] == 'm') &&
 	    (name[2] == 'l') && (name[3] == 0)) {
-	    /* Wine: Windows MSXML tolerates embedded XML declarations, handled in xmlParsePI */
+	    xmlFatalErrMsg(ctxt, XML_ERR_RESERVED_XML_NAME,
+		 "XML declaration allowed only at the start of the document\n");
 	    return(name);
 	} else if (name[3] == 0) {
 	    xmlFatalErr(ctxt, XML_ERR_RESERVED_XML_NAME, NULL);
@@ -5344,82 +5345,6 @@ xmlParsePI(xmlParserCtxtPtr ctxt) {
 	 */
         target = xmlParsePITarget(ctxt);
 	if (target != NULL) {
-	    /* Wine: Windows MSXML tolerates embedded XML declarations inside elements. */
-	    if ((target[0] == 'x') && (target[1] == 'm') &&
-	        (target[2] == 'l') && (target[3] == 0)) {
-		xmlChar *text;
-		size_t textlen = 0;
-		size_t textsize = 1024;
-		int nesting = 0;
-
-		text = (xmlChar *) xmlMallocAtomic(textsize);
-		if (text == NULL) {
-		    xmlErrMemory(ctxt, NULL);
-		    ctxt->instate = state;
-		    return;
-		}
-
-		/* Start with "<?xml" */
-		memcpy(text, "<?xml", 5);
-		textlen = 5;
-
-		/* Consume everything until parent's close tag, tracking nesting */
-		while (RAW != 0) {
-		    /* Check for close tag </ */
-		    if (RAW == '<' && NXT(1) == '/') {
-			if (nesting == 0) {
-			    /* This is the parent's close tag - stop here */
-			    break;
-			}
-			nesting--;
-		    }
-		    /* Check for start tag < followed by letter (not <? or <! or </) */
-		    else if (RAW == '<' && NXT(1) != '?' && NXT(1) != '!' && NXT(1) != '/') {
-			xmlChar c = NXT(1);
-			if ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')) {
-			    /* Could be start tag - check if self-closing */
-			    const xmlChar *p = ctxt->input->cur + 1;
-			    int is_selfclose = 0;
-			    while (*p && *p != '>') {
-				if (*p == '/' && *(p+1) == '>') {
-				    is_selfclose = 1;
-				    break;
-				}
-				p++;
-			    }
-			    if (!is_selfclose)
-				nesting++;
-			}
-		    }
-
-		    /* Grow buffer if needed */
-		    if (textlen + 2 >= textsize) {
-			xmlChar *tmp;
-			textsize *= 2;
-			tmp = (xmlChar *) xmlRealloc(text, textsize);
-			if (tmp == NULL) {
-			    xmlErrMemory(ctxt, NULL);
-			    xmlFree(text);
-			    ctxt->instate = state;
-			    return;
-			}
-			text = tmp;
-		    }
-		    text[textlen++] = RAW;
-		    NEXT;
-		}
-		text[textlen] = 0;
-
-		/* Emit as text content (like CDATA) */
-		if ((ctxt->sax) && (!ctxt->disableSAX) &&
-		    (ctxt->sax->characters != NULL))
-		    ctxt->sax->characters(ctxt->userData, text, textlen);
-
-		xmlFree(text);
-		if (ctxt->instate != XML_PARSER_EOF)
-		    ctxt->instate = state;
-		return;
-	    }
 	    if ((RAW == '?') && (NXT(1) == '>')) {
 		if (inputid != ctxt->input->id) {
 		    xmlFatalErrMsg(ctxt, XML_ERR_ENTITY_BOUNDARY,
@@ -7354,14 +7279,6 @@ xmlParseReference(xmlParserCtxtPtr ctxt) {
 	    ctxt->sax->characters(ctxt->userData, val, xmlStrlen(val));
 	return;
     }
-
-    /*
-     * Some users try to parse entities on their own and used to set
-     * the renamed "checked" member. Fix the flags to cover this
-     * case.
-     */
-    if (((ent->flags & XML_ENT_PARSED) == 0) && (ent->children != NULL))
-        ent->flags |= XML_ENT_PARSED;
 
     /*
      * The first reference to the entity trigger a parsing phase
@@ -9528,35 +9445,6 @@ xmlAttrHashInsert(xmlParserCtxtPtr ctxt, unsigned size, const xmlChar *name,
     return(INT_MAX);
 }
 
-static int
-xmlAttrHashInsertQName(xmlParserCtxtPtr ctxt, unsigned size,
-                       const xmlChar *name, const xmlChar *prefix,
-                       unsigned hashValue, int aindex) {
-    xmlAttrHashBucket *table = ctxt->attrHash;
-    xmlAttrHashBucket *bucket;
-    unsigned hindex;
-
-    hindex = hashValue & (size - 1);
-    bucket = &table[hindex];
-
-    while (bucket->index >= 0) {
-        const xmlChar **atts = &ctxt->atts[bucket->index];
-
-        if ((name == atts[0]) && (prefix == atts[1]))
-            return(bucket->index);
-
-        hindex++;
-        bucket++;
-        if (hindex >= size) {
-            hindex = 0;
-            bucket = table;
-        }
-    }
-
-    bucket->index = aindex;
-
-    return(INT_MAX);
-}
 /**
  * xmlParseStartTag2:
  * @ctxt:  an XML parser context
@@ -9605,8 +9493,6 @@ xmlParseStartTag2(xmlParserCtxtPtr ctxt, const xmlChar **pref,
     int nratts, nbatts, nbdef, inputid;
     int i, j, nbNs, nbTotalDef, attval, nsIndex, maxAtts;
     int alloc = 0;
-    int numNsErr = 0;
-    int numDupErr = 0;
 
     if (RAW != '<') return(NULL);
     NEXT1;
@@ -9985,12 +9871,10 @@ next_attr:
             if (res < INT_MAX) {
                 if (aprefix == atts[res+1]) {
                     xmlErrAttributeDup(ctxt, aprefix, attname);
-                    numDupErr += 1;
                 } else {
                     xmlNsErr(ctxt, XML_NS_ERR_ATTRIBUTE_REDEFINED,
                              "Namespaced Attribute %s in '%s' redefined\n",
                              attname, nsuri, NULL);
-                    numNsErr += 1;
                 }
             }
         }
@@ -10086,43 +9970,6 @@ next_attr:
                 nbdef++;
 	    }
 	}
-    }
-
-    /*
-     * Using a single hash table for nsUri/localName pairs cannot
-     * detect duplicate QNames reliably. The following example will
-     * only result in two namespace errors.
-     *
-     * <doc xmlns:a="a" xmlns:b="a">
-     *   <elem a:a="" b:a="" b:a=""/>
-     * </doc>
-     *
-     * If we saw more than one namespace error but no duplicate QNames
-     * were found, we have to scan for duplicate QNames.
-     */
-    if ((numDupErr == 0) && (numNsErr > 1)) {
-        memset(ctxt->attrHash, -1,
-               attrHashSize * sizeof(ctxt->attrHash[0]));
-
-        for (i = 0, j = 0; j < nratts; i += 5, j++) {
-            unsigned hashValue, nameHashValue, prefixHashValue;
-            int res;
-
-            aprefix = atts[i+1];
-            if (aprefix == NULL)
-                continue;
-
-            attname = atts[i];
-            /* Hash values always have bit 31 set, see dict.c */
-            nameHashValue = ctxt->attallocs[j] | 0x80000000;
-            prefixHashValue = xmlDictComputeHash(ctxt->dict, aprefix);
-
-            hashValue = xmlDictCombineHash(nameHashValue, prefixHashValue);
-            res = xmlAttrHashInsertQName(ctxt, attrHashSize, attname,
-                                         aprefix, hashValue, i);
-            if (res < INT_MAX)
-                xmlErrAttributeDup(ctxt, aprefix, attname);
-        }
     }
 
     /*

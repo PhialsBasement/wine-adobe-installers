@@ -61,7 +61,6 @@ typedef struct tagDC
     UINT         bounds_enabled:1; /* bounds tracking is enabled */
     UINT         path_open:1;      /* path is currently open (only for saved DCs) */
     UINT         is_display:1;     /* DC is for display device */
-    struct opengl_drawable *opengl_drawable; /* GL driver drawable for the DC */
 
     RECT         device_rect;      /* rectangle for the whole device */
     int          pixel_format;     /* pixel format (for memory DCs) */
@@ -90,6 +89,8 @@ typedef struct tagDC
     XFORM         xformVport2World;  /* Inverse of the above transformation */
     BOOL          vport2WorldValid;  /* Is xformVport2World valid? */
     RECT          bounds;            /* Current bounding rect */
+    UINT          dpi_from;
+    UINT          dpi_to;
 } DC;
 
 /* dce flags */
@@ -163,8 +164,8 @@ extern void free_brush_pattern( struct brush_pattern *pattern );
 /* clipping.c */
 extern BOOL clip_device_rect( DC *dc, RECT *dst, const RECT *src );
 extern BOOL clip_visrect( DC *dc, RECT *dst, const RECT *src );
-extern void set_visible_region( HDC hdc, HRGN hrgn, const RECT *vis_rect,
-                                const RECT *device_rect, struct window_surface *surface );
+extern void set_visible_region( HDC hdc, HRGN hrgn, const RECT *vis_rect, const RECT *device_rect,
+                                struct window_surface *surface, UINT dpi_from, UINT dpi_to );
 extern void update_dc_clipping( DC * dc );
 
 /* Return the total DC region (if any) */
@@ -181,13 +182,10 @@ extern DC *alloc_dc_ptr( DWORD magic );
 extern void free_dc_ptr( DC *dc );
 extern DC *get_dc_ptr( HDC hdc );
 extern void release_dc_ptr( DC *dc );
-extern BOOL is_dc_display( HDC hdc );
-extern int get_dc_pixel_format( HDC hdc );
 extern struct dce *get_dc_dce( HDC hdc );
 extern void set_dc_dce( HDC hdc, struct dce *dce );
 extern WORD set_dce_flags( HDC hdc, WORD flags );
 extern DWORD set_stretch_blt_mode( HDC hdc, DWORD mode );
-extern BOOL offset_viewport_org( HDC hdc, INT x, INT y, POINT *point );
 extern BOOL set_viewport_org( HDC hdc, INT x, INT y, POINT *point );
 extern void DC_InitDC( DC * dc );
 extern void DC_UpdateXforms( DC * dc );
@@ -223,6 +221,7 @@ extern UINT get_dib_dc_color_table( HDC hdc, UINT startpos, UINT entries,
 extern UINT set_dib_dc_color_table( HDC hdc, UINT startpos, UINT entries,
                                     const RGBQUAD *colors );
 extern void dibdrv_set_window_surface( DC *dc, struct window_surface *surface );
+extern struct opengl_funcs *dibdrv_get_wgl_driver(void);
 
 /* driver.c */
 extern const struct gdi_dc_funcs null_driver;
@@ -331,7 +330,7 @@ struct font_backend_funcs
     UINT  (*get_default_glyph)( struct gdi_font *gdi_font );
     UINT  (*get_glyph_outline)( struct gdi_font *font, UINT glyph, UINT format,
                                 GLYPHMETRICS *gm, ABC *abc, UINT buflen, void *buf,
-                                const MAT2 *mat, BOOL tategaki );
+                                const MAT2 *mat, BOOL tategaki, UINT aa_flags );
     UINT  (*get_unicode_ranges)( struct gdi_font *font, GLYPHSET *gs );
     BOOL  (*get_char_width_info)( struct gdi_font *font, struct char_width_info *info );
     BOOL  (*set_outline_text_metrics)( struct gdi_font *font );
@@ -414,6 +413,7 @@ extern POINT *GDI_Bezier( const POINT *Points, INT count, INT *nPtsOut );
 extern HPALETTE PALETTE_Init(void);
 extern UINT get_palette_entries( HPALETTE hpalette, UINT start, UINT count,
                                  PALETTEENTRY *entries );
+extern UINT realize_palette( HDC hdc );
 
 /* pen.c */
 extern HPEN create_pen( INT style, INT width, COLORREF color );
@@ -644,5 +644,7 @@ static inline void copy_bitmapinfo( BITMAPINFO *dst, const BITMAPINFO *src )
 extern void free_heap_bits( struct gdi_image_bits *bits );
 
 void set_gdi_client_ptr( HGDIOBJ handle, void *ptr );
+
+extern SYSTEM_BASIC_INFORMATION system_info;
 
 #endif /* __WINE_NTGDI_PRIVATE_H */

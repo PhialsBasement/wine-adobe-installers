@@ -1,5 +1,4 @@
-MODULE  = cryptext.dll
-IMPORTS = crypt32 cryptui user32
+MODULE = cryptext.dll
 
 EXTRADLLFLAGS = -Wb,--prefer-native
 

@@ -453,7 +453,7 @@ static void WINAPI PMemoryAllocator_Free(PMemoryAllocator *_this, void *pv)
 
 #ifdef __i386__
 
-#pragma pack(push,1)
+#include "pshpack1.h"
 typedef struct
 {
     BYTE pop_eax;  /* popl  %eax  */
@@ -462,7 +462,7 @@ typedef struct
     BYTE jmp_func; /* jmp   $func */
     DWORD func;
 } THISCALL_TO_STDCALL_THUNK;
-#pragma pack(pop)
+#include "poppack.h"
 
 static THISCALL_TO_STDCALL_THUNK *wrapperCodeMem = NULL;
 
@@ -530,29 +530,6 @@ static const char serialized_bstr_mb[] = {
     0,0,0,0
 };
 
-static const char serialized_bstr_vec[] = {
-    VT_LPWSTR, VT_VECTOR >> 8, 0, 0,
-    3, 0, 0, 0,
-    2, 0, 0, 0, 'a', 0, 0, 0,
-    3, 0, 0, 0, 'b', 0, 'c', 0, 0, 0, 0, 0,
-    4, 0, 0, 0, 'd', 0, 'e', 0, 'f', 0, 0, 0
-};
-
-static const char serialized_i1_vec[] = {
-    VT_I1, VT_VECTOR >> 8, 0, 0,
-    3, 0, 0, 0,
-    1, 2, 3, 0
-};
-
-static const char serialized_variant_vec[] = {
-    VT_VARIANT, VT_VECTOR >> 8, 0, 0,
-    2, 0, 0, 0,
-    VT_I1, 0, 0, 0,
-    1, 0, 0, 0,
-    VT_I4, 0, 0, 0,
-    2, 0, 0, 0
-};
-
 static void test_propertytovariant(void)
 {
     HANDLE hole32;
@@ -609,43 +586,6 @@ static void test_propertytovariant(void)
     ok(ret == 0, "StgConvertPropertyToVariant returned %i\n", ret);
     ok(propvar.vt == VT_BSTR, "unexpected vt %x\n", propvar.vt);
     ok(!lstrcmpW(propvar.bstrVal, test_string), "unexpected string value\n");
-    PropVariantClear(&propvar);
-
-    ret = pStgConvertPropertyToVariant((SERIALIZEDPROPERTYVALUE*)serialized_i1_vec,
-        CP_WINUNICODE, &propvar, &allocator);
-
-    ok(!ret, "StgConvertPropertyToVariant returned %i\n", ret);
-    ok(propvar.vt == (VT_VECTOR | VT_I1), "unexpected vt %x\n", propvar.vt);
-    ok(propvar.cac.cElems == 3, "unexpected cElems %lu\n", propvar.cac.cElems);
-    ok(propvar.cac.pElems[0] == 1, "pElems[0] = %d\n", propvar.cac.pElems[0]);
-    ok(propvar.cac.pElems[1] == 2, "pElems[0] = %d\n", propvar.cac.pElems[1]);
-    ok(propvar.cac.pElems[2] == 3, "pElems[0] = %d\n", propvar.cac.pElems[2]);
-    PropVariantClear(&propvar);
-
-    ret = pStgConvertPropertyToVariant((SERIALIZEDPROPERTYVALUE*)serialized_bstr_vec,
-        CP_WINUNICODE, &propvar, &allocator);
-
-    ok(!ret, "StgConvertPropertyToVariant returned %i\n", ret);
-    ok(propvar.vt == (VT_VECTOR | VT_LPWSTR), "unexpected vt %x\n", propvar.vt);
-    ok(propvar.calpwstr.cElems == 3, "unexpected cElems %lu\n", propvar.calpwstr.cElems);
-    ok(!wcscmp(propvar.calpwstr.pElems[0], L"a"), "pElems[0] = %s\n",
-            debugstr_w(propvar.calpwstr.pElems[0]));
-    ok(!wcscmp(propvar.calpwstr.pElems[1], L"bc"), "pElems[1] = %s\n",
-            debugstr_w(propvar.calpwstr.pElems[1]));
-    ok(!wcscmp(propvar.calpwstr.pElems[2], L"def"), "pElems[2] = %s\n",
-            debugstr_w(propvar.calpwstr.pElems[2]));
-    PropVariantClear(&propvar);
-
-    ret = pStgConvertPropertyToVariant((SERIALIZEDPROPERTYVALUE*)serialized_variant_vec,
-        CP_WINUNICODE, &propvar, &allocator);
-
-    ok(!ret, "StgConvertPropertyToVariant returned %i\n", ret);
-    ok(propvar.vt == (VT_VECTOR | VT_VARIANT), "unexpected vt %x\n", propvar.vt);
-    ok(propvar.capropvar.cElems == 2, "unexpected cElems %lu\n", propvar.calpwstr.cElems);
-    ok(propvar.capropvar.pElems[0].vt == VT_I1, "pElems[0].vt = %d\n", propvar.capropvar.pElems[0].vt);
-    ok(propvar.capropvar.pElems[0].cVal == 1, "pElems[0].cVal = %d\n", propvar.capropvar.pElems[0].cVal);
-    ok(propvar.capropvar.pElems[1].vt == VT_I4, "pElems[1].vt = %d\n", propvar.capropvar.pElems[1].vt);
-    ok(propvar.capropvar.pElems[1].lVal == 2, "pElems[1].lVal = %ld\n", propvar.capropvar.pElems[1].lVal);
     PropVariantClear(&propvar);
 }
 

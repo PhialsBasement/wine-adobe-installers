@@ -96,7 +96,7 @@
  * types, they are not completely linked together.
  */
 
-#pragma pack(push,1)
+#include "pshpack1.h"
 
 /* ======================================== *
  *             Internal types
@@ -2127,20 +2127,6 @@ union codeview_symbol
         cv_typ_t                typeid;
         unsigned int            rgl[];
     } oem_v3;
-
-    struct
-    {
-        unsigned short          len;
-        unsigned short          id;
-        unsigned int            base_offset;
-        unsigned short          base_section;
-        unsigned short          switch_type;
-        unsigned int            branch_offset;
-        unsigned int            table_offset;
-        unsigned short          branch_section;
-        unsigned short          table_section;
-        unsigned int            number_entries;
-    } armswitchtable;
 };
 
 enum BinaryAnnotationOpcode
@@ -2718,7 +2704,7 @@ typedef struct
     unsigned num_sections;
 } DBI_PUBLIC_HEADER;
 
-#pragma pack(pop)
+#include "poppack.h"
 
 /* ===================================================
  * The old CodeView stuff (for NB09 and NB11)

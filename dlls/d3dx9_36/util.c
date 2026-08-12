@@ -62,7 +62,6 @@ D3DFORMAT d3dformat_from_d3dx_pixel_format_id(enum d3dx_pixel_format_id format)
         case D3DX_PIXEL_FORMAT_P8_UINT_A8_UNORM:         return D3DFMT_A8P8;
         case D3DX_PIXEL_FORMAT_U8V8W8Q8_SNORM:           return D3DFMT_Q8W8V8U8;
         case D3DX_PIXEL_FORMAT_U8V8_SNORM:               return D3DFMT_V8U8;
-        case D3DX_PIXEL_FORMAT_U8V8_SNORM_Cx:            return D3DFMT_CxV8U8;
         case D3DX_PIXEL_FORMAT_U16V16_SNORM:             return D3DFMT_V16U16;
         case D3DX_PIXEL_FORMAT_U8V8_SNORM_L8X8_UNORM:    return D3DFMT_X8L8V8U8;
         case D3DX_PIXEL_FORMAT_U10V10W10_SNORM_A2_UNORM: return D3DFMT_A2W10V10U10;
@@ -122,7 +121,6 @@ enum d3dx_pixel_format_id d3dx_pixel_format_id_from_d3dformat(D3DFORMAT format)
         case D3DFMT_A8P8:          return D3DX_PIXEL_FORMAT_P8_UINT_A8_UNORM;
         case D3DFMT_Q8W8V8U8:      return D3DX_PIXEL_FORMAT_U8V8W8Q8_SNORM;
         case D3DFMT_V8U8:          return D3DX_PIXEL_FORMAT_U8V8_SNORM;
-        case D3DFMT_CxV8U8:        return D3DX_PIXEL_FORMAT_U8V8_SNORM_Cx;
         case D3DFMT_V16U16:        return D3DX_PIXEL_FORMAT_U16V16_SNORM;
         case D3DFMT_X8L8V8U8:      return D3DX_PIXEL_FORMAT_U8V8_SNORM_L8X8_UNORM;
         case D3DFMT_A2W10V10U10:   return D3DX_PIXEL_FORMAT_U10V10W10_SNORM_A2_UNORM;
@@ -148,147 +146,6 @@ enum d3dx_resource_type d3dx_resource_type_from_d3dresourcetype(D3DRESOURCETYPE 
             FIXME("No d3dx_resource_type for D3DRESOURCETYPE %d.\n", type);
             return D3DX_RESOURCE_TYPE_COUNT;
     }
-}
-
-static D3DRESOURCETYPE d3dresourcetype_from_d3dx_resource_type(enum d3dx_resource_type type)
-{
-    switch (type)
-    {
-        case D3DX_RESOURCE_TYPE_TEXTURE_2D:   return D3DRTYPE_TEXTURE;
-        case D3DX_RESOURCE_TYPE_TEXTURE_3D:   return D3DRTYPE_VOLUMETEXTURE;
-        case D3DX_RESOURCE_TYPE_CUBE_TEXTURE: return D3DRTYPE_CUBETEXTURE;
-        default:
-            FIXME("No D3DRESOURCETYPE for d3dx_resource_type %d.\n", type);
-            return D3DRTYPE_FORCE_DWORD;
-    }
-}
-
-enum d3dx_image_file_format d3dx_image_file_format_from_d3dximage_fileformat(D3DXIMAGE_FILEFORMAT iff)
-{
-    switch (iff)
-    {
-        case D3DXIFF_BMP: return D3DX_IMAGE_FILE_FORMAT_BMP;
-        case D3DXIFF_JPG: return D3DX_IMAGE_FILE_FORMAT_JPG;
-        case D3DXIFF_TGA: return D3DX_IMAGE_FILE_FORMAT_TGA;
-        case D3DXIFF_PNG: return D3DX_IMAGE_FILE_FORMAT_PNG;
-        case D3DXIFF_DDS: return D3DX_IMAGE_FILE_FORMAT_DDS;
-        case D3DXIFF_PPM: return D3DX_IMAGE_FILE_FORMAT_PPM;
-        case D3DXIFF_DIB: return D3DX_IMAGE_FILE_FORMAT_DIB;
-        case D3DXIFF_HDR: return D3DX_IMAGE_FILE_FORMAT_HDR;
-        case D3DXIFF_PFM: return D3DX_IMAGE_FILE_FORMAT_PFM;
-        default:
-            FIXME("No d3dx_image_file_format for D3DXIMAGE_FILEFORMAT %d.\n", iff);
-            return D3DX_IMAGE_FILE_FORMAT_FORCE_DWORD;
-    }
-}
-
-D3DXIMAGE_FILEFORMAT d3dximage_fileformat_from_d3dx_image_file_format(enum d3dx_image_file_format iff)
-{
-    switch (iff)
-    {
-        case D3DX_IMAGE_FILE_FORMAT_BMP: return D3DXIFF_BMP;
-        case D3DX_IMAGE_FILE_FORMAT_JPG: return D3DXIFF_JPG;
-        case D3DX_IMAGE_FILE_FORMAT_TGA: return D3DXIFF_TGA;
-        case D3DX_IMAGE_FILE_FORMAT_PNG: return D3DXIFF_PNG;
-        case D3DX_IMAGE_FILE_FORMAT_DDS: return D3DXIFF_DDS;
-        case D3DX_IMAGE_FILE_FORMAT_PPM: return D3DXIFF_PPM;
-        case D3DX_IMAGE_FILE_FORMAT_DIB: return D3DXIFF_DIB;
-        case D3DX_IMAGE_FILE_FORMAT_HDR: return D3DXIFF_HDR;
-        case D3DX_IMAGE_FILE_FORMAT_PFM: return D3DXIFF_PFM;
-        default:
-            FIXME("No D3DXIMAGE_FILEFORMAT for d3dx_image_file_format %d.\n", iff);
-            return D3DXIFF_FORCE_DWORD;
-    }
-}
-
-BOOL d3dximage_info_from_d3dx_image(D3DXIMAGE_INFO *info, struct d3dx_image *image)
-{
-    D3DXIMAGE_FILEFORMAT iff = d3dximage_fileformat_from_d3dx_image_file_format(image->image_file_format);
-    D3DRESOURCETYPE rtype = d3dresourcetype_from_d3dx_resource_type(image->resource_type);
-
-    if (rtype == D3DRTYPE_FORCE_DWORD || iff == D3DXIFF_FORCE_DWORD)
-        return FALSE;
-
-    switch (image->format)
-    {
-        case D3DX_PIXEL_FORMAT_P1_UINT:
-        case D3DX_PIXEL_FORMAT_P2_UINT:
-        case D3DX_PIXEL_FORMAT_P4_UINT:
-            info->Format = D3DFMT_P8;
-            break;
-
-        case D3DX_PIXEL_FORMAT_R16G16B16_UNORM:
-            info->Format = D3DFMT_A16B16G16R16;
-            break;
-
-        case D3DX_PIXEL_FORMAT_B8G8R8_UNORM:
-            if (iff == D3DXIFF_PNG || iff == D3DXIFF_JPG)
-                info->Format = D3DFMT_X8R8G8B8;
-            else
-                info->Format = d3dformat_from_d3dx_pixel_format_id(image->format);
-            break;
-
-        default:
-        {
-            D3DFORMAT fmt = d3dformat_from_d3dx_pixel_format_id(image->format);
-
-            if (fmt == D3DFMT_UNKNOWN)
-                return FALSE;
-            info->Format = fmt;
-            break;
-        }
-    }
-    info->ImageFileFormat = iff;
-    info->Width = image->size.width;
-    info->Height = image->size.height;
-    info->Depth = image->size.depth;
-    info->MipLevels = image->mip_levels;
-    info->ResourceType = rtype;
-    return TRUE;
-}
-
-static void d3dx9_buffer_destroy(struct d3dx_buffer *d3dx_buffer)
-{
-    ID3DXBuffer *buffer_iface = (ID3DXBuffer *)d3dx_buffer->buffer_iface;
-
-    if (buffer_iface)
-        ID3DXBuffer_Release(buffer_iface);
-    d3dx_buffer->buffer_iface = d3dx_buffer->buffer_data = NULL;
-}
-
-static HRESULT d3dx9_buffer_create(unsigned int size, struct d3dx_buffer *buffer)
-{
-    ID3DXBuffer *buffer_iface;
-    HRESULT hr;
-
-    hr = D3DXCreateBuffer(size, &buffer_iface);
-    if (FAILED(hr))
-        return hr;
-
-    buffer->buffer_iface = buffer_iface;
-    buffer->buffer_data = ID3DXBuffer_GetBufferPointer(buffer_iface);
-    return S_OK;
-}
-
-static const struct d3dx_buffer_wrapper d3dx9_buffer_wrapper =
-{
-    d3dx9_buffer_create,
-    d3dx9_buffer_destroy,
-};
-
-HRESULT d3dx9_save_pixels_to_memory(struct d3dx_pixels *src_pixels, const struct pixel_format_desc *src_fmt_desc,
-        D3DXIMAGE_FILEFORMAT file_format, ID3DXBuffer **dst_buffer)
-{
-    struct d3dx_buffer buffer;
-    HRESULT hr;
-
-    *dst_buffer = NULL;
-    hr = d3dx_save_pixels_to_memory(src_pixels, src_fmt_desc,
-            d3dx_image_file_format_from_d3dximage_fileformat(file_format), &d3dx9_buffer_wrapper, &buffer);
-    if (SUCCEEDED(hr))
-        *dst_buffer = (ID3DXBuffer *)buffer.buffer_iface;
-
-    return hr;
 }
 
 /************************************************************
@@ -374,26 +231,6 @@ HRESULT load_resource_into_memory(HMODULE module, HRSRC resinfo, void **buffer, 
     if(*buffer == NULL) return HRESULT_FROM_WIN32(GetLastError());
 
     return S_OK;
-}
-
-HRESULT write_buffer_to_file(const WCHAR *dst_filename, ID3DXBuffer *buffer)
-{
-    HRESULT hr = S_OK;
-    void *buffer_pointer;
-    DWORD buffer_size;
-    DWORD bytes_written;
-    HANDLE file = CreateFileW(dst_filename, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
-    if (file == INVALID_HANDLE_VALUE)
-        return HRESULT_FROM_WIN32(GetLastError());
-
-    buffer_pointer = ID3DXBuffer_GetBufferPointer(buffer);
-    buffer_size = ID3DXBuffer_GetBufferSize(buffer);
-
-    if (!WriteFile(file, buffer_pointer, buffer_size, &bytes_written, NULL))
-        hr = HRESULT_FROM_WIN32(GetLastError());
-
-    CloseHandle(file);
-    return hr;
 }
 
 /************************************************************

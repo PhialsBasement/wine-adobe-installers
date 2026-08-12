@@ -1251,7 +1251,6 @@ typedef struct tagSTYLESTRUCT {
 #define GW_HWNDPREV	3
 #define GW_OWNER	4
 #define GW_CHILD	5
-#define GW_ENABLEDPOPUP 6
 
 /* GetAncestor() constants */
 #define GA_PARENT       1
@@ -1566,7 +1565,7 @@ typedef struct tagMSG
     POINT   pt;
 } MSG, *PMSG, *LPMSG;
 
-#define POINTSTOPOINT(pt, pts) { (pt).x = ((short *)&(pts))[0]; (pt).y = ((short *)&(pts))[1]; }
+#define POINTSTOPOINT(pt, pts) { (pt).x = (pts).x; (pt).y = (pts).y; }
 #define POINTTOPOINTS(pt)      (MAKELONG((short)((pt).x), (short)((pt).y)))
 
 #define MAKELPARAM(low,high)   ((LPARAM)(DWORD)MAKELONG(low,high))
@@ -2105,48 +2104,30 @@ typedef struct tagMONITORINFO
     DWORD dwFlags;
 } MONITORINFO, *LPMONITORINFO;
 
-#ifdef __cplusplus
-
-struct tagMONITORINFOEXA : public tagMONITORINFO
-{
-    CHAR szDevice[CCHDEVICENAME];
-};
-
-struct tagMONITORINFOEXW : public tagMONITORINFO
-{
-    WCHAR szDevice[CCHDEVICENAME];
-};
-
-#else
-
-struct tagMONITORINFOEXA
+typedef struct tagMONITORINFOEXA
 {   /* the 4 first entries are the same as MONITORINFO */
     DWORD	cbSize;	
     RECT	rcMonitor;
     RECT	rcWork;
     DWORD	dwFlags;
     CHAR        szDevice[CCHDEVICENAME];
-};
+} MONITORINFOEXA, *LPMONITORINFOEXA;
 
-struct tagMONITORINFOEXW
+typedef struct tagMONITORINFOEXW
 {   /* the 4 first entries are the same as MONITORINFO */
     DWORD	cbSize;
     RECT	rcMonitor;
     RECT	rcWork;
     DWORD	dwFlags;
     WCHAR       szDevice[CCHDEVICENAME];
-};
+} MONITORINFOEXW, *LPMONITORINFOEXW;
 
-#endif
-
-typedef struct tagMONITORINFOEXA MONITORINFOEXA, *LPMONITORINFOEXA;
-typedef struct tagMONITORINFOEXW MONITORINFOEXW, *LPMONITORINFOEXW;
 DECL_WINELIB_TYPE_AW(MONITORINFOEX)
 DECL_WINELIB_TYPE_AW(LPMONITORINFOEX)
 
 typedef BOOL  (CALLBACK *MONITORENUMPROC)(HMONITOR,HDC,LPRECT,LPARAM);
 
-#pragma pack(push,2)
+#include <pshpack2.h>
 
 typedef struct tagDLGTEMPLATE
 {
@@ -2184,7 +2165,7 @@ typedef DLGITEMTEMPLATE *LPDLGITEMTEMPLATEA;
 typedef DLGITEMTEMPLATE *LPDLGITEMTEMPLATEW;
 DECL_WINELIB_TYPE_AW(LPDLGITEMTEMPLATE)
 
-#pragma pack(pop)
+#include <poppack.h>
 
   /* CBT hook values */
 #define HCBT_MOVESIZE	    0
@@ -3222,8 +3203,6 @@ typedef struct
 #define WINEVENT_SKIPOWNPROCESS 0x2
 #define WINEVENT_INCONTEXT      0x4
 
-#define ENDSESSION_CLOSEAPP  0x00000001
-#define ENDSESSION_CRITICAL  0x40000000
 #define ENDSESSION_LOGOFF    0x80000000
 
 /* Object Id's */
@@ -3489,8 +3468,6 @@ typedef struct tagTOUCHINPUT {
     DWORD     cyContact;
 } TOUCHINPUT, *PTOUCHINPUT;
 typedef TOUCHINPUT const * PCTOUCHINPUT;
-
-#define TOUCH_COORD_TO_PIXEL(l) ((l) / 100)
 
 #define TOUCHEVENTF_MOVE        0x0001
 #define TOUCHEVENTF_DOWN        0x0002
@@ -3843,8 +3820,6 @@ typedef struct tagMENUGETOBJECTINFO
     void  *riid;
     void  *pvObj;
 } MENUGETOBJECTINFO, *PMENUGETOBJECTINFO;
-
-typedef BOOLEAN (WINAPI *PREGISTERCLASSNAMEW)(LPCWSTR);
 
 #if defined(_WINGDI_) && !defined(NOGDI)
 WINUSERAPI LONG        WINAPI ChangeDisplaySettingsA(LPDEVMODEA,DWORD);

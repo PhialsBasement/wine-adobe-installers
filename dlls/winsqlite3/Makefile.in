@@ -1,3 +1,0 @@
-MODULE    = winsqlite3.dll
-IMPORTLIB = winsqlite3
-IMPORTS   = $(SQLITE3_PE_LIBS)

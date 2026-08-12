@@ -27,6 +27,11 @@
 #include <gst/gst.h>
 #include <gst/audio/audio.h>
 
+#include <stdio.h>
+#include <unistd.h>
+#include <fcntl.h>
+#include <sys/stat.h>
+
 /* unixlib.c */
 
 GST_DEBUG_CATEGORY_EXTERN(wine);
@@ -95,6 +100,10 @@ extern NTSTATUS wg_muxer_push_sample(void *args);
 extern NTSTATUS wg_muxer_read_data(void *args);
 extern NTSTATUS wg_muxer_finalize(void *args);
 
+/* wg_task_pool.c */
+
+extern GstTaskPool *wg_task_pool_new(void);
+
 /* wg_allocator.c */
 
 static inline BYTE *wg_sample_data(struct wg_sample *sample)
@@ -110,6 +119,41 @@ extern void wg_allocator_provide_sample(GstAllocator *allocator, struct wg_sampl
 extern void wg_allocator_release_sample(GstAllocator *allocator, struct wg_sample *sample,
         bool discard_data);
 
-extern gboolean gst_element_register_winegstreamerstepper(GstPlugin *plugin);
+/* media-converter */
+extern bool media_converter_init(void);
+extern bool get_untranscoded_stream_format(GstElement *container, uint32_t stream_index,
+        struct wg_format *codec_format);
+
+static inline void touch_h264_used_tag(void)
+{
+    const char *e;
+
+    GST_LOG("h264 is used");
+
+    if ((e = getenv("STEAM_COMPAT_TRANSCODED_MEDIA_PATH")))
+    {
+        char buffer[PATH_MAX];
+        int fd;
+
+        snprintf(buffer, sizeof(buffer), "%s/h264-used", e);
+
+        fd = open(buffer, O_CREAT, S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP | S_IROTH | S_IWOTH);
+        if (fd == -1)
+        {
+            GST_WARNING("Failed to open/create \"%s/h264-used\"", e);
+            return;
+        }
+
+        futimens(fd, NULL);
+
+        close(fd);
+    }
+    else
+    {
+        GST_WARNING("STEAM_COMPAT_TRANSCODED_MEDIA_PATH not set, cannot create h264-used file");
+    }
+}
+
+GST_ELEMENT_REGISTER_DECLARE(winegstreamerstepper);
 
 #endif /* __WINE_WINEGSTREAMER_UNIX_PRIVATE_H */

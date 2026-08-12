@@ -108,7 +108,7 @@ typedef struct {
 #define EVENT_CANCELABLE         0x0008
 /* Event may have default handler (so we always have to register Gecko listener). */
 #define EVENT_HASDEFAULTHANDLERS 0x0020
-/* Event is not supported properly, print FIXME message when it's used. */
+/* Ecent is not supported properly, print FIXME message when it's used. */
 #define EVENT_FIXME              0x0040
 
 /* mouse event flags for fromElement and toElement implementation */
@@ -161,8 +161,6 @@ static const event_info_t event_info[] = {
         EVENT_BUBBLES | EVENT_CANCELABLE},
     {L"input",             EVENT_TYPE_EVENT,     DISPID_UNKNOWN,
         EVENT_DEFAULTLISTENER | EVENT_BUBBLES},
-    {L"invalid",           EVENT_TYPE_EVENT,     DISPID_EVPROP_INVALID,
-        EVENT_BIND_TO_TARGET | EVENT_CANCELABLE},
     {L"keydown",           EVENT_TYPE_KEYBOARD,  DISPID_EVMETH_ONKEYDOWN,
         EVENT_DEFAULTLISTENER | EVENT_HASDEFAULTHANDLERS | EVENT_BUBBLES | EVENT_CANCELABLE },
     {L"keypress",          EVENT_TYPE_KEYBOARD,  DISPID_EVMETH_ONKEYPRESS,
@@ -1811,7 +1809,7 @@ static const tid_t MSEventObj_iface_tids[] = {
 };
 
 dispex_static_data_t MSEventObj_dispex = {
-    .id         = OBJID_MSEventObj,
+    .id         = PROT_MSEventObj,
     .vtbl       = &HTMLEventObj_dispex_vtbl,
     .disp_tid   = DispCEventObj_tid,
     .iface_tids = MSEventObj_iface_tids,
@@ -3584,7 +3582,7 @@ static const tid_t Event_iface_tids[] = {
 };
 
 dispex_static_data_t Event_dispex = {
-    .id         = OBJID_Event,
+    .id         = PROT_Event,
     .vtbl       = &DOMEvent_dispex_vtbl,
     .disp_tid   = DispDOMEvent_tid,
     .iface_tids = Event_iface_tids,
@@ -3604,8 +3602,8 @@ static const tid_t UIEvent_iface_tids[] = {
 };
 
 dispex_static_data_t UIEvent_dispex = {
-    .id           = OBJID_UIEvent,
-    .prototype_id = OBJID_Event,
+    .id           = PROT_UIEvent,
+    .prototype_id = PROT_Event,
     .vtbl         = &DOMUIEvent_dispex_vtbl,
     .disp_tid     = DispDOMUIEvent_tid,
     .iface_tids   = UIEvent_iface_tids,
@@ -3626,8 +3624,8 @@ static const tid_t MouseEvent_iface_tids[] = {
 };
 
 dispex_static_data_t MouseEvent_dispex = {
-    .id           = OBJID_MouseEvent,
-    .prototype_id = OBJID_UIEvent,
+    .id           = PROT_MouseEvent,
+    .prototype_id = PROT_UIEvent,
     .vtbl         = &DOMMouseEvent_dispex_vtbl,
     .disp_tid     = DispDOMMouseEvent_tid,
     .iface_tids   = MouseEvent_iface_tids,
@@ -3656,8 +3654,8 @@ static const tid_t KeyboardEvent_iface_tids[] = {
 };
 
 dispex_static_data_t KeyboardEvent_dispex = {
-    .id           = OBJID_KeyboardEvent,
-    .prototype_id = OBJID_UIEvent,
+    .id           = PROT_KeyboardEvent,
+    .prototype_id = PROT_UIEvent,
     .vtbl         = &DOMKeyboardEvent_dispex_vtbl,
     .disp_tid     = DispDOMKeyboardEvent_tid,
     .iface_tids   = KeyboardEvent_iface_tids,
@@ -3677,8 +3675,8 @@ static const dispex_static_data_vtbl_t DOMPageTransitionEvent_dispex_vtbl = {
 };
 
 dispex_static_data_t PageTransitionEvent_dispex = {
-    .id              = OBJID_PageTransitionEvent,
-    .prototype_id    = OBJID_Event,
+    .id              = PROT_PageTransitionEvent,
+    .prototype_id    = PROT_Event,
     .vtbl            = &DOMPageTransitionEvent_dispex_vtbl,
     .disp_tid        = DispDOMEvent_tid,
     .iface_tids      = Event_iface_tids,
@@ -3700,8 +3698,8 @@ static const tid_t CustomEvent_iface_tids[] = {
 };
 
 dispex_static_data_t CustomEvent_dispex = {
-    .id           = OBJID_CustomEvent,
-    .prototype_id = OBJID_Event,
+    .id           = PROT_CustomEvent,
+    .prototype_id = PROT_Event,
     .vtbl         = &DOMCustomEvent_dispex_vtbl,
     .disp_tid     = DispDOMCustomEvent_tid,
     .iface_tids   = CustomEvent_iface_tids,
@@ -3715,8 +3713,8 @@ static const dispex_static_data_vtbl_t DOMMessageEvent_dispex_vtbl = {
 };
 
 dispex_static_data_t MessageEvent_dispex = {
-    .id           = OBJID_MessageEvent,
-    .prototype_id = OBJID_Event,
+    .id           = PROT_MessageEvent,
+    .prototype_id = PROT_Event,
     .vtbl         = &DOMMessageEvent_dispex_vtbl,
     .disp_tid     = DispDOMMessageEvent_tid,
     .iface_tids   = Event_iface_tids,
@@ -3737,8 +3735,8 @@ static const tid_t ProgressEvent_iface_tids[] = {
 };
 
 dispex_static_data_t ProgressEvent_dispex = {
-    .id              = OBJID_ProgressEvent,
-    .prototype_id    = OBJID_Event,
+    .id              = PROT_ProgressEvent,
+    .prototype_id    = PROT_Event,
     .vtbl            = &DOMProgressEvent_dispex_vtbl,
     .disp_tid        = DispDOMProgressEvent_tid,
     .iface_tids      = ProgressEvent_iface_tids,
@@ -3759,8 +3757,8 @@ static const tid_t StorageEvent_iface_tids[] = {
 };
 
 dispex_static_data_t StorageEvent_dispex = {
-    .id           = OBJID_StorageEvent,
-    .prototype_id = OBJID_Event,
+    .id           = PROT_StorageEvent,
+    .prototype_id = PROT_Event,
     .vtbl         = &DOMStorageEvent_dispex_vtbl,
     .disp_tid     = DispDOMStorageEvent_tid,
     .iface_tids   = StorageEvent_iface_tids,
@@ -4748,31 +4746,42 @@ HRESULT set_event_handler(EventTarget *event_target, eventid_t eid, VARIANT *var
         return set_event_handler_disp(event_target, eid, V_DISPATCH(var));
 
     case VT_BSTR: {
-        compat_mode_t compat_mode = dispex_compat_mode(&event_target->dispex);
-        VARIANT *v;
-        HRESULT hres;
+        HTMLInnerWindow *script_global;
+        IDispatch *disp;
 
-        if(compat_mode == COMPAT_MODE_IE8)
-            FIXME("Setting to string %s not supported\n", debugstr_w(V_BSTR(var)));
+        /* Compile the string into a callable function using the script engine */
+        script_global = get_script_global(&event_target->dispex);
+        if(script_global) {
+            TRACE("Compiling event handler string: %s\n", debugstr_w(V_BSTR(var)));
+            disp = script_parse_event(script_global, V_BSTR(var));
+            IHTMLWindow2_Release(&script_global->base.IHTMLWindow2_iface);
+            if(disp) {
+                HRESULT hres = set_event_handler_disp(event_target, eid, disp);
+                IDispatch_Release(disp);
+                return hres;
+            }
+            WARN("Failed to compile event handler string\n");
+        }
 
-        /*
-         * Setting event handler to string is a rare case and we don't want to
-         * complicate nor increase memory of listener_container_t for that. Instead,
-         * we store the value in DispatchEx, which can already handle custom
-         * properties.
-         */
-        remove_event_handler(event_target, eid);
-        if(compat_mode >= COMPAT_MODE_IE9)
+        /* Fallback: store the value in DispatchEx for quirks mode compatibility */
+        if(use_event_quirks(event_target)) {
+            VARIANT *v;
+            HRESULT hres;
+
+            remove_event_handler(event_target, eid);
+
+            hres = get_event_dispex_ref(event_target, eid, TRUE, &v);
+            if(FAILED(hres))
+                return hres;
+
+            V_BSTR(v) = SysAllocString(V_BSTR(var));
+            if(!V_BSTR(v))
+                return E_OUTOFMEMORY;
+            V_VT(v) = VT_BSTR;
             return S_OK;
+        }
 
-        hres = get_event_dispex_ref(event_target, eid, TRUE, &v);
-        if(FAILED(hres))
-            return hres;
-
-        V_BSTR(v) = SysAllocString(V_BSTR(var));
-        if(!V_BSTR(v))
-            return E_OUTOFMEMORY;
-        V_VT(v) = VT_BSTR;
+        FIXME("Setting to string %s not supported (no script global)\n", debugstr_w(V_BSTR(var)));
         return S_OK;
     }
 
@@ -4872,6 +4881,20 @@ void bind_target_event(HTMLDocumentNode *doc, EventTarget *event_target, const W
     }
 
     set_event_handler_disp(event_target, eid, disp);
+}
+
+HRESULT set_node_event_handler_by_attr(HTMLDOMNode *node, const WCHAR *attr_name, VARIANT *var)
+{
+    eventid_t eid;
+
+    eid = attr_to_eid(attr_name);
+    if(eid == EVENTID_LAST) {
+        WARN("Unsupported event attribute %s\n", debugstr_w(attr_name));
+        return DISP_E_UNKNOWNNAME;
+    }
+
+    TRACE("Setting event handler for %s (eid=%d)\n", debugstr_w(attr_name), eid);
+    return set_node_event(node, eid, var);
 }
 
 void update_doc_cp_events(HTMLDocumentNode *doc, cp_static_data_t *cp)
@@ -5008,9 +5031,8 @@ HRESULT doc_init_events(HTMLDocumentNode *doc)
     unsigned i;
     HRESULT hres;
 
-    if(doc->event_vector)
-        memset(doc->event_vector, 0, EVENTID_LAST * sizeof(BOOL));
-    else if(!(doc->event_vector = calloc(EVENTID_LAST, sizeof(BOOL))))
+    doc->event_vector = calloc(EVENTID_LAST, sizeof(BOOL));
+    if(!doc->event_vector)
         return E_OUTOFMEMORY;
 
     init_nsevents(doc);

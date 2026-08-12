@@ -169,15 +169,9 @@ static ULONG WINAPI loader_Release(IDirectMusicLoader8 *iface)
     TRACE("(%p)->(): new ref = %lu\n", iface, ref);
 
     if (!ref) {
-        struct cache_entry *obj, *obj2;
         unsigned int i;
 
-        LIST_FOR_EACH_ENTRY_SAFE(obj, obj2, &This->cache, struct cache_entry, entry) {
-            if ((obj->Desc.dwValidData & DMUS_OBJ_LOADED) && obj->pObject)
-                IDirectMusicObject_Release(obj->pObject);
-            list_remove(&obj->entry);
-            free(obj);
-        }
+        IDirectMusicLoader8_ClearCache(iface, &GUID_DirectMusicAllTypes);
         for (i = 0; i < ARRAY_SIZE(classes); i++)
             free(This->search_paths[i]);
         free(This);
@@ -445,14 +439,12 @@ static HRESULT WINAPI loader_GetObject(IDirectMusicLoader8 *iface, DMUS_OBJECTDE
             pObjectEntry = calloc(1, sizeof(*pObjectEntry));
             DM_STRUCT_INIT(&pObjectEntry->Desc);
             DMUSIC_CopyDescriptor (&pObjectEntry->Desc, &GotDesc);
-            pObjectEntry->Desc.dwValidData |= DMUS_OBJ_LOADED;
             pObjectEntry->pObject = pObject;
             list_add_head(&This->cache, &pObjectEntry->entry);
         }
         else
         {
             DMUSIC_CopyDescriptor (&pObjectEntry->Desc, &GotDesc);
-            pObjectEntry->Desc.dwValidData |= DMUS_OBJ_LOADED;
             pObjectEntry->pObject = pObject;
         }
         TRACE(": filled in cache entry\n");
@@ -749,15 +741,10 @@ static HRESULT WINAPI loader_ClearCache(IDirectMusicLoader8 *iface, REFGUID clas
     LIST_FOR_EACH_ENTRY_SAFE(obj, obj2, &This->cache, struct cache_entry, entry) {
         if ((IsEqualGUID(class, &GUID_DirectMusicAllTypes) || IsEqualGUID(class, &obj->Desc.guidClass)) &&
             (obj->Desc.dwValidData & DMUS_OBJ_LOADED)) {
-            if (obj->pObject) {
-                IDirectMusicObject_Release(obj->pObject);
-                obj->pObject = NULL;
-            }
-            obj->Desc.dwValidData &= ~DMUS_OBJ_LOADED;
-            if (!IsEqualGUID(&GUID_DefaultGMCollection, &obj->Desc.guidObject)) {
-                list_remove(&obj->entry);
-                free(obj);
-            }
+            /* basically, wrap to ReleaseObject for each object found */
+            IDirectMusicLoader8_ReleaseObject(iface, obj->pObject);
+            list_remove(&obj->entry);
+            free(obj);
         }
     }
 
@@ -899,10 +886,39 @@ static const IDirectMusicLoader8Vtbl loader_vtbl =
     loader_LoadObjectFromFile,
 };
 
+static inline void touch_soundfont_used_tag(void)
+{
+    WCHAR env[MAX_PATH];
+
+    if (GetEnvironmentVariableW(L"STEAM_COMPAT_TRANSCODED_MEDIA_PATH", env, ARRAY_SIZE(env)))
+    {
+        WCHAR buffer[MAX_PATH];
+        HANDLE file;
+
+        swprintf(buffer, ARRAY_SIZE(buffer), L"\\??\\unix%s/soundfont-used", env);
+
+        file = CreateFileW(buffer, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+
+        if (file == INVALID_HANDLE_VALUE)
+        {
+            ERR("Failed to open/create %s\n", debugstr_w(buffer));
+            return;
+        }
+
+        CloseHandle(file);
+    }
+    else
+    {
+        ERR("STEAM_COMPAT_TRANSCODED_MEDIA_PATH not set, cannot create soundfont-used file.\n");
+    }
+}
+
 static HRESULT get_default_gm_path(WCHAR *path, DWORD max_len)
 {
 	DWORD ret;
 	HKEY hkey;
+
+    touch_soundfont_used_tag();
 
 	if (!(ret = RegOpenKeyExW(HKEY_LOCAL_MACHINE, L"Software\\Microsoft\\DirectMusic" , 0, KEY_READ, &hkey)))
     {

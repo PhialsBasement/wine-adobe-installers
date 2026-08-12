@@ -141,19 +141,24 @@ static HRESULT WINAPI wine_provider_GetTrustLevel( IWineGameControllerProvider *
     return E_NOTIMPL;
 }
 
-static HRESULT WINAPI wine_provider_get_NonRoamableId( IWineGameControllerProvider *iface, HSTRING *value )
-{
-    FIXME( "iface %p, value %p stub!\n", iface, value );
-    return E_NOTIMPL;
-}
-
 static HRESULT WINAPI wine_provider_get_DisplayName( IWineGameControllerProvider *iface, HSTRING *value )
 {
     struct provider *impl = impl_from_IWineGameControllerProvider( iface );
     DIDEVICEINSTANCEW instance = {.dwSize = sizeof(DIDEVICEINSTANCEW)};
+    UINT16 vid, pid;
     HRESULT hr;
 
     TRACE( "iface %p, value %p\n", iface, value );
+
+    if (FAILED(hr = IGameControllerProvider_get_HardwareVendorId( &impl->IGameControllerProvider_iface, &vid ))) return hr;
+    if (FAILED(hr = IGameControllerProvider_get_HardwareProductId( &impl->IGameControllerProvider_iface, &pid ))) return hr;
+
+    /* CW-Bug-Id: #23185 Emulate Steam Input native hooks for native SDL */
+    if (vid == 0x28de && pid == 0x11ff)
+    {
+        static const WCHAR name[] = L"Xbox 360 Controller for Windows";
+        return WindowsCreateString( name, wcslen( name ), value );
+    }
 
     if (FAILED(hr = IDirectInputDevice8_GetDeviceInfo( impl->dinput_device, &instance ))) return hr;
     return WindowsCreateString( instance.tszProductName, wcslen( instance.tszProductName ), value );
@@ -164,6 +169,65 @@ static BOOL CALLBACK count_ffb_axes( const DIDEVICEOBJECTINSTANCEW *obj, void *a
     DWORD *count = args;
     if (obj->dwType & DIDFT_FFACTUATOR) (*count)++;
     return DIENUM_CONTINUE;
+}
+
+static BOOL steam_input_get_vid_pid( UINT slot, UINT16 *vid, UINT16 *pid )
+{
+    const char *info = getenv( "SteamVirtualGamepadInfo" );
+    char buffer[256];
+    UINT current;
+    FILE *file;
+
+    TRACE( "reading SteamVirtualGamepadInfo %s\n", debugstr_a(info) );
+
+    if (!info || !(file = fopen( info, "r" ))) return FALSE;
+    while (fscanf( file, "%255[^\n]\n", buffer ) == 1)
+    {
+        if (sscanf( buffer, "[slot %d]", &current )) continue;
+        if (current < slot) continue;
+        if (current > slot) break;
+        if (sscanf( buffer, "VID=0x%hx", vid )) continue;
+        if (sscanf( buffer, "PID=0x%hx", pid )) continue;
+    }
+
+    fclose( file );
+
+    return TRUE;
+}
+
+static HRESULT WINAPI wine_provider_get_NonRoamableId( IWineGameControllerProvider *iface, HSTRING *value )
+{
+    struct provider *impl = impl_from_IWineGameControllerProvider( iface );
+    WCHAR buffer[1024];
+    UINT16 vid, pid;
+    HRESULT hr;
+
+    FIXME( "iface %p, value %p stub!\n", iface, value );
+
+    if (FAILED(hr = IGameControllerProvider_get_HardwareVendorId( &impl->IGameControllerProvider_iface, &vid ))) return hr;
+    if (FAILED(hr = IGameControllerProvider_get_HardwareProductId( &impl->IGameControllerProvider_iface, &pid ))) return hr;
+
+    /* CW-Bug-Id: #23185 Emulate Steam Input native hooks for native SDL */
+    if (vid == 0x28de && pid == 0x11ff)
+    {
+        const WCHAR *tmp;
+        char serial[256];
+        UINT32 len, slot;
+
+        if (!(tmp = wcschr( impl->device_path + 8, '#' )) || wcsnicmp( tmp - 6, L"&XI_", 4 )) return E_NOTIMPL;
+        if (swscanf( tmp - 2, L"%02u#%*u&%255[^&]&", &slot, serial ) != 2) return E_NOTIMPL;
+
+        if (!steam_input_get_vid_pid( slot, &vid, &pid ))
+        {
+            vid = 0x045e;
+            pid = 0x028e;
+        }
+
+        len = swprintf( buffer, ARRAY_SIZE(buffer), L"{wgi/nrid/:steam-%04X&%04X&%s#%d#%u}", vid, pid, serial, slot, GetCurrentProcessId() );
+        return WindowsCreateString( buffer, len, value );
+    }
+
+    return E_NOTIMPL;
 }
 
 static HRESULT WINAPI wine_provider_get_Type( IWineGameControllerProvider *iface, WineGameControllerType *value )
@@ -565,7 +629,7 @@ failed:
     CloseHandle( device );
 }
 
-static const DIOBJECTDATAFORMAT data_format_xusb_objs[] =
+static const DIOBJECTDATAFORMAT data_format_objs[] =
 {
     {NULL,DIJOFS_X,DIDFT_OPTIONAL|DIDFT_AXIS|DIDFT_ANYINSTANCE},
     {NULL,DIJOFS_Y,DIDFT_OPTIONAL|DIDFT_AXIS|DIDFT_ANYINSTANCE},
@@ -573,43 +637,6 @@ static const DIOBJECTDATAFORMAT data_format_xusb_objs[] =
     {NULL,DIJOFS_RX,DIDFT_OPTIONAL|DIDFT_AXIS|DIDFT_ANYINSTANCE},
     {NULL,DIJOFS_RY,DIDFT_OPTIONAL|DIDFT_AXIS|DIDFT_ANYINSTANCE},
     {NULL,DIJOFS_RZ,DIDFT_OPTIONAL|DIDFT_AXIS|DIDFT_ANYINSTANCE},
-    {NULL,DIJOFS_POV(0),DIDFT_OPTIONAL|DIDFT_POV|DIDFT_ANYINSTANCE},
-    {NULL,DIJOFS_BUTTON(0),DIDFT_OPTIONAL|DIDFT_BUTTON|DIDFT_ANYINSTANCE},
-    {NULL,DIJOFS_BUTTON(1),DIDFT_OPTIONAL|DIDFT_BUTTON|DIDFT_ANYINSTANCE},
-    {NULL,DIJOFS_BUTTON(2),DIDFT_OPTIONAL|DIDFT_BUTTON|DIDFT_ANYINSTANCE},
-    {NULL,DIJOFS_BUTTON(3),DIDFT_OPTIONAL|DIDFT_BUTTON|DIDFT_ANYINSTANCE},
-    {NULL,DIJOFS_BUTTON(4),DIDFT_OPTIONAL|DIDFT_BUTTON|DIDFT_ANYINSTANCE},
-    {NULL,DIJOFS_BUTTON(5),DIDFT_OPTIONAL|DIDFT_BUTTON|DIDFT_ANYINSTANCE},
-    {NULL,DIJOFS_BUTTON(6),DIDFT_OPTIONAL|DIDFT_BUTTON|DIDFT_ANYINSTANCE},
-    {NULL,DIJOFS_BUTTON(7),DIDFT_OPTIONAL|DIDFT_BUTTON|DIDFT_ANYINSTANCE},
-    {NULL,DIJOFS_BUTTON(8),DIDFT_OPTIONAL|DIDFT_BUTTON|DIDFT_ANYINSTANCE},
-    {NULL,DIJOFS_BUTTON(9),DIDFT_OPTIONAL|DIDFT_BUTTON|DIDFT_ANYINSTANCE},
-    {NULL,DIJOFS_BUTTON(10),DIDFT_OPTIONAL|DIDFT_BUTTON|DIDFT_ANYINSTANCE},
-    {NULL,DIJOFS_BUTTON(11),DIDFT_OPTIONAL|DIDFT_BUTTON|DIDFT_ANYINSTANCE},
-    {NULL,DIJOFS_BUTTON(12),DIDFT_OPTIONAL|DIDFT_BUTTON|DIDFT_ANYINSTANCE},
-    {NULL,DIJOFS_BUTTON(13),DIDFT_OPTIONAL|DIDFT_BUTTON|DIDFT_ANYINSTANCE},
-    {NULL,DIJOFS_BUTTON(14),DIDFT_OPTIONAL|DIDFT_BUTTON|DIDFT_ANYINSTANCE},
-    {NULL,DIJOFS_BUTTON(15),DIDFT_OPTIONAL|DIDFT_BUTTON|DIDFT_ANYINSTANCE},
-};
-
-static const DIDATAFORMAT data_format_xusb =
-{
-    sizeof(DIDATAFORMAT),
-    sizeof(DIOBJECTDATAFORMAT),
-    DIDF_ABSAXIS,
-    sizeof(DIJOYSTATE2),
-    ARRAY_SIZE(data_format_xusb_objs),
-    (LPDIOBJECTDATAFORMAT)data_format_xusb_objs
-};
-
-static const DIOBJECTDATAFORMAT data_format_hid_objs[] =
-{
-    {&GUID_XAxis,DIJOFS_X,DIDFT_OPTIONAL|DIDFT_AXIS|DIDFT_ANYINSTANCE},
-    {&GUID_YAxis,DIJOFS_Y,DIDFT_OPTIONAL|DIDFT_AXIS|DIDFT_ANYINSTANCE},
-    {&GUID_ZAxis,DIJOFS_Z,DIDFT_OPTIONAL|DIDFT_AXIS|DIDFT_ANYINSTANCE},
-    {&GUID_RxAxis,DIJOFS_RX,DIDFT_OPTIONAL|DIDFT_AXIS|DIDFT_ANYINSTANCE},
-    {&GUID_RyAxis,DIJOFS_RY,DIDFT_OPTIONAL|DIDFT_AXIS|DIDFT_ANYINSTANCE},
-    {&GUID_RzAxis,DIJOFS_RZ,DIDFT_OPTIONAL|DIDFT_AXIS|DIDFT_ANYINSTANCE},
     {NULL,DIJOFS_SLIDER(0),DIDFT_OPTIONAL|DIDFT_AXIS|DIDFT_ANYINSTANCE},
     {NULL,DIJOFS_SLIDER(1),DIDFT_OPTIONAL|DIDFT_AXIS|DIDFT_ANYINSTANCE},
     {NULL,DIJOFS_POV(0),DIDFT_OPTIONAL|DIDFT_POV|DIDFT_ANYINSTANCE},
@@ -746,14 +773,14 @@ static const DIOBJECTDATAFORMAT data_format_hid_objs[] =
     {NULL,DIJOFS_BUTTON(127),DIDFT_OPTIONAL|DIDFT_BUTTON|DIDFT_ANYINSTANCE},
 };
 
-static const DIDATAFORMAT data_format_hid =
+static const DIDATAFORMAT data_format =
 {
     sizeof(DIDATAFORMAT),
     sizeof(DIOBJECTDATAFORMAT),
     DIDF_ABSAXIS,
     sizeof(DIJOYSTATE2),
-    ARRAY_SIZE(data_format_hid_objs),
-    (LPDIOBJECTDATAFORMAT)data_format_hid_objs
+    ARRAY_SIZE(data_format_objs),
+    (LPDIOBJECTDATAFORMAT)data_format_objs
 };
 
 void provider_create( const WCHAR *device_path )
@@ -762,7 +789,6 @@ void provider_create( const WCHAR *device_path )
     IGameControllerProvider *provider;
     struct provider *impl, *entry;
     GUID guid = device_path_guid;
-    const DIDATAFORMAT *format;
     IDirectInput8W *dinput;
     BOOL found = FALSE;
     const WCHAR *tmp;
@@ -770,8 +796,6 @@ void provider_create( const WCHAR *device_path )
 
     if (wcsnicmp( device_path, L"\\\\?\\HID#", 8 )) return;
     if ((tmp = wcschr( device_path + 8, '#' )) && !wcsnicmp( tmp - 6, L"&IG_", 4 )) return;
-    if (tmp && !wcsnicmp( tmp - 6, L"&XI_", 4 )) format = &data_format_xusb;
-    else format = &data_format_hid;
 
     TRACE( "device_path %s\n", debugstr_w( device_path ) );
 
@@ -783,7 +807,7 @@ void provider_create( const WCHAR *device_path )
     if (FAILED(hr)) return;
 
     if (FAILED(hr = IDirectInputDevice8_SetCooperativeLevel( dinput_device, 0, DISCL_BACKGROUND | DISCL_NONEXCLUSIVE ))) goto done;
-    if (FAILED(hr = IDirectInputDevice8_SetDataFormat( dinput_device, format ))) goto done;
+    if (FAILED(hr = IDirectInputDevice8_SetDataFormat( dinput_device, &data_format ))) goto done;
     if (FAILED(hr = IDirectInputDevice8_Acquire( dinput_device ))) goto done;
 
     if (!(impl = calloc( 1, sizeof(*impl) ))) goto done;

@@ -524,11 +524,6 @@ struct wined3d_resource * CDECL wined3d_buffer_get_resource(struct wined3d_buffe
     return &buffer->resource;
 }
 
-unsigned int buffer_resource_get_sub_resource_count(struct wined3d_resource *resource)
-{
-    return 1;
-}
-
 static HRESULT buffer_resource_sub_resource_get_desc(struct wined3d_resource *resource,
         unsigned int sub_resource_idx, struct wined3d_sub_resource_desc *desc)
 {
@@ -927,7 +922,6 @@ static const struct wined3d_resource_ops buffer_resource_ops =
     buffer_resource_decref,
     buffer_resource_preload,
     buffer_resource_unload,
-    buffer_resource_get_sub_resource_count,
     buffer_resource_sub_resource_get_desc,
     buffer_resource_sub_resource_get_map_pitch,
     buffer_resource_sub_resource_map,
@@ -971,7 +965,7 @@ static HRESULT wined3d_buffer_init(struct wined3d_buffer *buffer, struct wined3d
         access |= WINED3D_RESOURCE_ACCESS_MAP_W;
 
     if (FAILED(hr = resource_init(resource, device, WINED3D_RTYPE_BUFFER, format,
-            WINED3D_MULTISAMPLE_NONE, 0, desc->usage, desc->bind_flags, access,
+            WINED3D_MULTISAMPLE_NONE, 0, desc->usage & ~WINED3DUSAGE_CS, desc->bind_flags, access,
             desc->byte_width, 1, 1, desc->byte_width, parent, parent_ops, &buffer_resource_ops)))
     {
         WARN("Failed to initialize resource, hr %#lx.\n", hr);
@@ -984,8 +978,8 @@ static HRESULT wined3d_buffer_init(struct wined3d_buffer *buffer, struct wined3d
     TRACE("buffer %p, size %#x, usage %#x, memory @ %p.\n",
             buffer, buffer->resource.size, buffer->resource.usage, buffer->resource.heap_memory);
 
-    if (device->create_parms.flags & WINED3DCREATE_SOFTWARE_VERTEXPROCESSING
-            || (desc->usage & WINED3DUSAGE_MANAGED))
+    if (!(desc->usage & WINED3DUSAGE_CS) && (device->create_parms.flags & WINED3DCREATE_SOFTWARE_VERTEXPROCESSING
+            || (desc->usage & WINED3DUSAGE_MANAGED)))
     {
         /* SWvp and managed buffers always return the same pointer in buffer
          * maps and retain data in DISCARD maps. Keep a system memory copy of
@@ -1148,8 +1142,6 @@ VkBufferUsageFlags vk_buffer_usage_from_bind_flags(uint32_t bind_flags)
         usage |= VK_BUFFER_USAGE_STORAGE_TEXEL_BUFFER_BIT;
     if (bind_flags & WINED3D_BIND_INDIRECT_BUFFER)
         usage |= VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT;
-    if (bind_flags & WINED3D_BIND_DECODER_SRC)
-        usage |= VK_BUFFER_USAGE_VIDEO_DECODE_SRC_BIT_KHR;
     if (bind_flags & (WINED3D_BIND_RENDER_TARGET | WINED3D_BIND_DEPTH_STENCIL))
         FIXME("Ignoring some bind flags %#x.\n", bind_flags);
     return usage;
@@ -1364,7 +1356,7 @@ static HRESULT wined3d_streaming_buffer_prepare(struct wined3d_device *device,
     TRACE("Growing buffer to %u bytes.\n", size);
 
     desc.byte_width = size;
-    desc.usage = WINED3DUSAGE_DYNAMIC;
+    desc.usage = WINED3DUSAGE_DYNAMIC | WINED3DUSAGE_CS;
     desc.bind_flags = buffer->bind_flags;
     desc.access = WINED3D_RESOURCE_ACCESS_GPU | WINED3D_RESOURCE_ACCESS_MAP_W;
     desc.misc_flags = 0;

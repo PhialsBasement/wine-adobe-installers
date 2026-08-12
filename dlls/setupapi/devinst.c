@@ -38,6 +38,7 @@
 #include "shlwapi.h"
 #include "wine/debug.h"
 #include "wine/list.h"
+#include "objbase.h"
 #include "cfgmgr32.h"
 #include "winioctl.h"
 #include "rpc.h"
@@ -241,6 +242,47 @@ static inline void copy_device_iface_data(SP_DEVICE_INTERFACE_DATA *data,
     data->InterfaceClassGuid = iface->class;
     data->Flags = iface->flags;
     data->Reserved = (ULONG_PTR)iface;
+}
+
+static WCHAR **devinst_table;
+static unsigned int devinst_table_size;
+
+static DEVINST get_devinst_for_device_id(const WCHAR *id)
+{
+    unsigned int i;
+
+    for (i = 0; i < devinst_table_size; ++i)
+    {
+        if (!devinst_table[i])
+            break;
+        if (!wcsicmp(devinst_table[i], id))
+            return i;
+    }
+    return i;
+}
+
+static DEVINST alloc_devinst_for_device_id(const WCHAR *id)
+{
+    DEVINST ret;
+
+    ret = get_devinst_for_device_id(id);
+    if (ret == devinst_table_size)
+    {
+        if (devinst_table)
+        {
+            devinst_table = realloc(devinst_table, devinst_table_size * 2 * sizeof(*devinst_table));
+            memset(devinst_table + devinst_table_size, 0, devinst_table_size * sizeof(*devinst_table));
+            devinst_table_size *= 2;
+        }
+        else
+        {
+            devinst_table_size = 256;
+            devinst_table = calloc(devinst_table_size, sizeof(*devinst_table));
+        }
+    }
+    if (!devinst_table[ret])
+        devinst_table[ret] = wcsdup(id);
+    return ret;
 }
 
 static void SETUPDI_GuidToString(const GUID *guid, LPWSTR guidStr)
@@ -831,7 +873,7 @@ static struct device *create_device(struct DeviceInfoSet *set,
     device->phantom = phantom;
     list_init(&device->interfaces);
     device->class = *class;
-    CM_Locate_DevNodeW(&device->devnode, device->instanceId, 0);
+    device->devnode = alloc_devinst_for_device_id(device->instanceId);
     device->removed = FALSE;
     list_add_tail(&set->devices, &device->entry);
     device->params.cbSize = sizeof(SP_DEVINSTALL_PARAMS_W);
@@ -853,77 +895,245 @@ static struct device *create_device(struct DeviceInfoSet *set,
     return device;
 }
 
+static struct device *get_devnode_device(DEVINST devnode, HDEVINFO *set, SP_DEVINFO_DATA *data)
+{
+    data->cbSize = sizeof(*data);
+    *set = NULL;
+    if (devnode >= devinst_table_size || !devinst_table[devnode])
+    {
+        WARN("device node %lu not found\n", devnode);
+        return NULL;
+    }
+
+    *set = SetupDiCreateDeviceInfoListExW(NULL, NULL, NULL, NULL);
+    if (*set == INVALID_HANDLE_VALUE) return NULL;
+    if (!SetupDiOpenDeviceInfoW(*set, devinst_table[devnode], NULL, 0, data))
+    {
+        SetupDiDestroyDeviceInfoList(*set);
+        *set = NULL;
+        return NULL;
+    }
+    return get_device(*set, data);
+}
+
 /***********************************************************************
  *              SetupDiBuildClassInfoList  (SETUPAPI.@)
+ *
+ * Returns a list of setup class GUIDs that identify the classes
+ * that are installed on a local machine.
+ *
+ * PARAMS
+ *   Flags [I] control exclusion of classes from the list.
+ *   ClassGuidList [O] pointer to a GUID-typed array that receives a list of setup class GUIDs.
+ *   ClassGuidListSize [I] The number of GUIDs in the array (ClassGuidList).
+ *   RequiredSize [O] pointer, which receives the number of GUIDs that are returned.
+ *
+ * RETURNS
+ *   Success: TRUE.
+ *   Failure: FALSE.
  */
-BOOL WINAPI SetupDiBuildClassInfoList(DWORD flags, GUID *guids, DWORD guids_size, DWORD *guid_count)
+BOOL WINAPI SetupDiBuildClassInfoList(
+        DWORD Flags,
+        LPGUID ClassGuidList,
+        DWORD ClassGuidListSize,
+        PDWORD RequiredSize)
 {
-    return SetupDiBuildClassInfoListExW(flags, guids, guids_size, guid_count, NULL, NULL);
+    TRACE("\n");
+    return SetupDiBuildClassInfoListExW(Flags, ClassGuidList,
+                                        ClassGuidListSize, RequiredSize,
+                                        NULL, NULL);
 }
 
 /***********************************************************************
  *              SetupDiBuildClassInfoListExA  (SETUPAPI.@)
+ *
+ * Returns a list of setup class GUIDs that identify the classes
+ * that are installed on a local or remote machine.
+ *
+ * PARAMS
+ *   Flags [I] control exclusion of classes from the list.
+ *   ClassGuidList [O] pointer to a GUID-typed array that receives a list of setup class GUIDs.
+ *   ClassGuidListSize [I] The number of GUIDs in the array (ClassGuidList).
+ *   RequiredSize [O] pointer, which receives the number of GUIDs that are returned.
+ *   MachineName [I] name of a remote machine.
+ *   Reserved [I] must be NULL.
+ *
+ * RETURNS
+ *   Success: TRUE.
+ *   Failure: FALSE.
  */
-BOOL WINAPI SetupDiBuildClassInfoListExA(DWORD flags, GUID *guids, DWORD guids_size,
-        DWORD *guid_count, const char *machine_nameA, void *reserved)
+BOOL WINAPI SetupDiBuildClassInfoListExA(
+        DWORD Flags,
+        LPGUID ClassGuidList,
+        DWORD ClassGuidListSize,
+        PDWORD RequiredSize,
+        LPCSTR MachineName,
+        PVOID Reserved)
 {
-    WCHAR *machine_nameW = strdupAtoW(machine_nameA);
-    BOOL ret;
+    LPWSTR MachineNameW = NULL;
+    BOOL bResult;
 
-    TRACE("flags %#lx, guids %p, guids_size %#lx, guid_count %p, machine_nameA %s, reserved %p.\n",
-            flags, guids, guids_size, guid_count, debugstr_a(machine_nameA), reserved);
+    TRACE("\n");
 
-    ret = SetupDiBuildClassInfoListExW(flags, guids, guids_size, guid_count, machine_nameW, reserved);
-    free(machine_nameW);
-    return ret;
+    if (MachineName)
+    {
+        MachineNameW = MultiByteToUnicode(MachineName, CP_ACP);
+        if (MachineNameW == NULL) return FALSE;
+    }
+
+    bResult = SetupDiBuildClassInfoListExW(Flags, ClassGuidList,
+                                           ClassGuidListSize, RequiredSize,
+                                           MachineNameW, Reserved);
+
+    MyFree(MachineNameW);
+
+    return bResult;
 }
 
 /***********************************************************************
  *              SetupDiBuildClassInfoListExW  (SETUPAPI.@)
+ *
+ * Returns a list of setup class GUIDs that identify the classes
+ * that are installed on a local or remote machine.
+ *
+ * PARAMS
+ *   Flags [I] control exclusion of classes from the list.
+ *   ClassGuidList [O] pointer to a GUID-typed array that receives a list of setup class GUIDs.
+ *   ClassGuidListSize [I] The number of GUIDs in the array (ClassGuidList).
+ *   RequiredSize [O] pointer, which receives the number of GUIDs that are returned.
+ *   MachineName [I] name of a remote machine.
+ *   Reserved [I] must be NULL.
+ *
+ * RETURNS
+ *   Success: TRUE.
+ *   Failure: FALSE.
  */
-BOOL WINAPI SetupDiBuildClassInfoListExW(DWORD flags, GUID *guids, DWORD guids_size,
-        DWORD *guid_count, const WCHAR *machine_name, void *reserved)
+BOOL WINAPI SetupDiBuildClassInfoListExW(
+        DWORD Flags,
+        LPGUID ClassGuidList,
+        DWORD ClassGuidListSize,
+        PDWORD RequiredSize,
+        LPCWSTR MachineName,
+        PVOID Reserved)
 {
-    DWORD guid_index = 0;
-    CONFIGRET ret;
-    GUID guid;
+    WCHAR szKeyName[40];
+    HKEY hClassesKey;
+    HKEY hClassKey;
+    DWORD dwLength;
+    DWORD dwIndex;
+    LONG lError;
+    DWORD dwGuidListIndex = 0;
 
-    TRACE("flags %#lx, guids %p, guids_size %#lx, guid_count %p, machine_name %s, reserved %p.\n",
-            flags, guids, guids_size, guid_count, debugstr_w(machine_name), reserved);
+    TRACE("\n");
 
-    if (guid_count)
-        *guid_count = 0;
+    if (RequiredSize != NULL)
+	*RequiredSize = 0;
 
-    for (UINT i = 0; !(ret = CM_Enumerate_Classes(i, &guid, CM_ENUMERATE_CLASSES_INSTALLER)); i++)
+    hClassesKey = SetupDiOpenClassRegKeyExW(NULL,
+                                            KEY_ALL_ACCESS,
+                                            DIOCR_INSTALLER,
+                                            MachineName,
+                                            Reserved);
+    if (hClassesKey == INVALID_HANDLE_VALUE)
     {
-        DEVPROPTYPE type;
-        ULONG size;
-        BYTE value;
-
-        size = sizeof(value);
-        if (!CM_Get_Class_PropertyW(&guid, &DEVPKEY_DeviceClass_NoUseClass, &type, &value, &size, 0) && value)
-            continue;
-
-        size = sizeof(value);
-        if ((flags & DIBCI_NOINSTALLCLASS) && !CM_Get_Class_PropertyW(&guid, &DEVPKEY_DeviceClass_NoInstallClass, &type, &value, &size, 0) && value)
-            continue;
-
-        size = sizeof(value);
-        if ((flags & DIBCI_NOINSTALLCLASS) && !CM_Get_Class_PropertyW(&guid, &DEVPKEY_DeviceClass_NoDisplayClass, &type, &value, &size, 0) && value)
-            continue;
-
-        if (guid_index < guids_size)
-            guids[guid_index] = guid;
-        guid_index++;
+	return FALSE;
     }
 
-    if (guid_count)
-        *guid_count = guid_index;
-
-    if (guids_size < guid_index)
+    for (dwIndex = 0; ; dwIndex++)
     {
-        SetLastError(ERROR_INSUFFICIENT_BUFFER);
-        return FALSE;
+	dwLength = 40;
+	lError = RegEnumKeyExW(hClassesKey,
+			       dwIndex,
+			       szKeyName,
+			       &dwLength,
+			       NULL,
+			       NULL,
+			       NULL,
+			       NULL);
+	TRACE("RegEnumKeyExW() returns %ld\n", lError);
+	if (lError == ERROR_SUCCESS || lError == ERROR_MORE_DATA)
+	{
+	    TRACE("Key name: %p\n", szKeyName);
+
+	    if (RegOpenKeyExW(hClassesKey,
+			      szKeyName,
+			      0,
+			      KEY_ALL_ACCESS,
+			      &hClassKey))
+	    {
+		RegCloseKey(hClassesKey);
+		return FALSE;
+	    }
+
+	    if (!RegQueryValueExW(hClassKey,
+				  L"NoUseClass",
+				  NULL,
+				  NULL,
+				  NULL,
+				  NULL))
+	    {
+		TRACE("'NoUseClass' value found!\n");
+		RegCloseKey(hClassKey);
+		continue;
+	    }
+
+	    if ((Flags & DIBCI_NOINSTALLCLASS) &&
+		(!RegQueryValueExW(hClassKey,
+				   L"NoInstallClass",
+				   NULL,
+				   NULL,
+				   NULL,
+				   NULL)))
+	    {
+		TRACE("'NoInstallClass' value found!\n");
+		RegCloseKey(hClassKey);
+		continue;
+	    }
+
+	    if ((Flags & DIBCI_NODISPLAYCLASS) &&
+		(!RegQueryValueExW(hClassKey,
+				   L"NoDisplayClass",
+				   NULL,
+				   NULL,
+				   NULL,
+				   NULL)))
+	    {
+		TRACE("'NoDisplayClass' value found!\n");
+		RegCloseKey(hClassKey);
+		continue;
+	    }
+
+	    RegCloseKey(hClassKey);
+
+	    TRACE("Guid: %p\n", szKeyName);
+	    if (dwGuidListIndex < ClassGuidListSize)
+	    {
+		if (szKeyName[0] == '{' && szKeyName[37] == '}')
+		{
+		    szKeyName[37] = 0;
+		}
+		TRACE("Guid: %p\n", &szKeyName[1]);
+
+		UuidFromStringW(&szKeyName[1],
+				&ClassGuidList[dwGuidListIndex]);
+	    }
+
+	    dwGuidListIndex++;
+	}
+
+	if (lError != ERROR_SUCCESS)
+	    break;
+    }
+
+    RegCloseKey(hClassesKey);
+
+    if (RequiredSize != NULL)
+	*RequiredSize = dwGuidListIndex;
+
+    if (ClassGuidListSize < dwGuidListIndex)
+    {
+	SetLastError(ERROR_INSUFFICIENT_BUFFER);
+	return FALSE;
     }
 
     return TRUE;
@@ -932,89 +1142,176 @@ BOOL WINAPI SetupDiBuildClassInfoListExW(DWORD flags, GUID *guids, DWORD guids_s
 /***********************************************************************
  *		SetupDiClassGuidsFromNameA  (SETUPAPI.@)
  */
-BOOL WINAPI SetupDiClassGuidsFromNameA(const char *class_name, GUID *guids, DWORD guids_size, DWORD *guid_count)
+BOOL WINAPI SetupDiClassGuidsFromNameA(
+        LPCSTR ClassName,
+        LPGUID ClassGuidList,
+        DWORD ClassGuidListSize,
+        PDWORD RequiredSize)
 {
-    return SetupDiClassGuidsFromNameExA(class_name, guids, guids_size, guid_count, NULL, NULL);
+  return SetupDiClassGuidsFromNameExA(ClassName, ClassGuidList,
+                                      ClassGuidListSize, RequiredSize,
+                                      NULL, NULL);
 }
 
 /***********************************************************************
  *		SetupDiClassGuidsFromNameW  (SETUPAPI.@)
  */
-BOOL WINAPI SetupDiClassGuidsFromNameW(const WCHAR *class_name, GUID *guids, DWORD guids_size, DWORD *guid_count)
+BOOL WINAPI SetupDiClassGuidsFromNameW(
+        LPCWSTR ClassName,
+        LPGUID ClassGuidList,
+        DWORD ClassGuidListSize,
+        PDWORD RequiredSize)
 {
-    return SetupDiClassGuidsFromNameExW(class_name, guids, guids_size, guid_count, NULL, NULL);
+  return SetupDiClassGuidsFromNameExW(ClassName, ClassGuidList,
+                                      ClassGuidListSize, RequiredSize,
+                                      NULL, NULL);
 }
 
 /***********************************************************************
  *		SetupDiClassGuidsFromNameExA  (SETUPAPI.@)
  */
-BOOL WINAPI SetupDiClassGuidsFromNameExA(const char *class_nameA, GUID *guids, DWORD guids_size,
-        DWORD *guid_count, const char *machine_nameA, void *reserved)
+BOOL WINAPI SetupDiClassGuidsFromNameExA(
+        LPCSTR ClassName,
+        LPGUID ClassGuidList,
+        DWORD ClassGuidListSize,
+        PDWORD RequiredSize,
+        LPCSTR MachineName,
+        PVOID Reserved)
 {
-    WCHAR *class_nameW = strdupAtoW(class_nameA), *machine_nameW = strdupAtoW(machine_nameA);
-    BOOL ret;
+    LPWSTR ClassNameW = NULL;
+    LPWSTR MachineNameW = NULL;
+    BOOL bResult;
 
-    TRACE("class_nameA %s, guids %p, guids_size %#lx, guid_count %p, machine_nameA %s, reserved %p.\n",
-            debugstr_a(class_nameA), guids, guids_size, guid_count, debugstr_a(machine_nameA), reserved);
+    ClassNameW = MultiByteToUnicode(ClassName, CP_ACP);
+    if (ClassNameW == NULL)
+        return FALSE;
 
-    ret = SetupDiClassGuidsFromNameExW(class_nameW, guids, guids_size, guid_count, machine_nameW, reserved);
-    free(class_nameW);
-    free(machine_nameW);
-    return ret;
+    if (MachineName)
+    {
+        MachineNameW = MultiByteToUnicode(MachineName, CP_ACP);
+        if (MachineNameW == NULL)
+        {
+            MyFree(ClassNameW);
+            return FALSE;
+        }
+    }
+
+    bResult = SetupDiClassGuidsFromNameExW(ClassNameW, ClassGuidList,
+                                           ClassGuidListSize, RequiredSize,
+                                           MachineNameW, Reserved);
+
+    MyFree(MachineNameW);
+    MyFree(ClassNameW);
+
+    return bResult;
 }
 
 /***********************************************************************
  *		SetupDiClassGuidsFromNameExW  (SETUPAPI.@)
  */
-BOOL WINAPI SetupDiClassGuidsFromNameExW(const WCHAR *class_name, GUID *guids, DWORD guids_size,
-        DWORD *guid_count, const WCHAR *machine_name, void *reserved)
+BOOL WINAPI SetupDiClassGuidsFromNameExW(
+        LPCWSTR ClassName,
+        LPGUID ClassGuidList,
+        DWORD ClassGuidListSize,
+        PDWORD RequiredSize,
+        LPCWSTR MachineName,
+        PVOID Reserved)
 {
-    DWORD guid_index = 0;
-    CONFIGRET ret;
-    GUID guid;
+    WCHAR szKeyName[40];
+    WCHAR szClassName[256];
+    HKEY hClassesKey;
+    HKEY hClassKey;
+    DWORD dwLength;
+    DWORD dwIndex;
+    LONG lError;
+    DWORD dwGuidListIndex = 0;
 
-    TRACE("class_name %s, guids %p, guids_size %#lx, guid_count %p, machine_name %s, reserved "
-          "%p.\n",
-            debugstr_w(class_name), guids, guids_size, guid_count, debugstr_w(machine_name), reserved);
+    if (RequiredSize != NULL)
+	*RequiredSize = 0;
 
-    if (guid_count)
-        *guid_count = 0;
-
-    if (machine_name && *machine_name)
+    hClassesKey = SetupDiOpenClassRegKeyExW(NULL,
+                                            KEY_ALL_ACCESS,
+                                            DIOCR_INSTALLER,
+                                            MachineName,
+                                            Reserved);
+    if (hClassesKey == INVALID_HANDLE_VALUE)
     {
-        FIXME("Remote access not supported yet!\n");
-        SetLastError(ERROR_INVALID_MACHINENAME);
-        return FALSE;
+	return FALSE;
     }
 
-    for (UINT i = 0; !(ret = CM_Enumerate_Classes(i, &guid, CM_ENUMERATE_CLASSES_INSTALLER)); i++)
+    for (dwIndex = 0; ; dwIndex++)
     {
-        WCHAR buffer[MAX_CLASS_NAME_LEN];
-        ULONG size = sizeof(buffer);
-        DEVPROPTYPE type;
+        dwLength = ARRAY_SIZE(szKeyName);
+	lError = RegEnumKeyExW(hClassesKey,
+			       dwIndex,
+			       szKeyName,
+			       &dwLength,
+			       NULL,
+			       NULL,
+			       NULL,
+			       NULL);
+	TRACE("RegEnumKeyExW() returns %ld\n", lError);
+	if (lError == ERROR_SUCCESS || lError == ERROR_MORE_DATA)
+	{
+	    TRACE("Key name: %p\n", szKeyName);
 
-        if ((ret = CM_Get_Class_PropertyW(&guid, &DEVPKEY_NAME, &type, (BYTE *)buffer, &size, 0)))
-            break;
-        if (!wcsicmp(buffer, class_name))
-        {
-            if (guid_index < guids_size)
-                guids[guid_index] = guid;
-            guid_index++;
-        }
+	    if (RegOpenKeyExW(hClassesKey,
+			      szKeyName,
+			      0,
+			      KEY_ALL_ACCESS,
+			      &hClassKey))
+	    {
+		RegCloseKey(hClassesKey);
+		return FALSE;
+	    }
+
+	    dwLength = sizeof(szClassName);
+	    if (!RegQueryValueExW(hClassKey,
+				  L"Class",
+				  NULL,
+				  NULL,
+				  (LPBYTE)szClassName,
+				  &dwLength))
+	    {
+		TRACE("Class name: %p\n", szClassName);
+
+		if (wcsicmp(szClassName, ClassName) == 0)
+		{
+		    TRACE("Found matching class name\n");
+
+		    TRACE("Guid: %p\n", szKeyName);
+		    if (dwGuidListIndex < ClassGuidListSize)
+		    {
+			if (szKeyName[0] == '{' && szKeyName[37] == '}')
+			{
+			    szKeyName[37] = 0;
+			}
+			TRACE("Guid: %p\n", &szKeyName[1]);
+
+			UuidFromStringW(&szKeyName[1],
+					&ClassGuidList[dwGuidListIndex]);
+		    }
+
+		    dwGuidListIndex++;
+		}
+	    }
+
+	    RegCloseKey(hClassKey);
+	}
+
+	if (lError != ERROR_SUCCESS)
+	    break;
     }
-    if (ret && ret != CR_NO_SUCH_VALUE)
-    {
-        SetLastError(CM_MapCrToWin32Err(ret, ERROR_GEN_FAILURE));
-        return FALSE;
-    }
 
-    if (guid_count)
-        *guid_count = guid_index;
+    RegCloseKey(hClassesKey);
 
-    if (guids_size < guid_index)
+    if (RequiredSize != NULL)
+	*RequiredSize = dwGuidListIndex;
+
+    if (ClassGuidListSize < dwGuidListIndex)
     {
-        SetLastError(ERROR_INSUFFICIENT_BUFFER);
-        return FALSE;
+	SetLastError(ERROR_INSUFFICIENT_BUFFER);
+	return FALSE;
     }
 
     return TRUE;
@@ -1802,63 +2099,97 @@ BOOL WINAPI SetupDiGetActualSectionToInstallW(HINF hinf, const WCHAR *section, W
 /***********************************************************************
  *		SetupDiGetClassDescriptionA  (SETUPAPI.@)
  */
-BOOL WINAPI SetupDiGetClassDescriptionA(const GUID *class, char *buffer, DWORD buffer_len, DWORD *required_len)
+BOOL WINAPI SetupDiGetClassDescriptionA(
+        const GUID* ClassGuid,
+        PSTR ClassDescription,
+        DWORD ClassDescriptionSize,
+        PDWORD RequiredSize)
 {
-    return SetupDiGetClassDescriptionExA(class, buffer, buffer_len, required_len, NULL, NULL);
+  return SetupDiGetClassDescriptionExA(ClassGuid, ClassDescription,
+                                       ClassDescriptionSize,
+                                       RequiredSize, NULL, NULL);
 }
 
 /***********************************************************************
  *		SetupDiGetClassDescriptionW  (SETUPAPI.@)
  */
-BOOL WINAPI SetupDiGetClassDescriptionW(const GUID *class, PWSTR buffer, DWORD buffer_len, DWORD *required_len)
+BOOL WINAPI SetupDiGetClassDescriptionW(
+        const GUID* ClassGuid,
+        PWSTR ClassDescription,
+        DWORD ClassDescriptionSize,
+        PDWORD RequiredSize)
 {
-    return SetupDiGetClassDescriptionExW(class, buffer, buffer_len, required_len, NULL, NULL);
+  return SetupDiGetClassDescriptionExW(ClassGuid, ClassDescription,
+                                       ClassDescriptionSize,
+                                       RequiredSize, NULL, NULL);
 }
 
 /***********************************************************************
  *		SetupDiGetClassDescriptionExA  (SETUPAPI.@)
  */
-BOOL WINAPI SetupDiGetClassDescriptionExA(const GUID *class, char *buffer, DWORD buffer_len,
-        DWORD *required_len, const char *machine_nameA, void *reserved)
+BOOL WINAPI SetupDiGetClassDescriptionExA(
+        const GUID* ClassGuid,
+        PSTR ClassDescription,
+        DWORD ClassDescriptionSize,
+        PDWORD RequiredSize,
+        PCSTR MachineName,
+        PVOID Reserved)
 {
-    WCHAR *bufferW, *machine_nameW = strdupAtoW(machine_nameA);
-    ULONG lenW = 0, lenA = *required_len;
-    BOOL ret;
+    HKEY hKey;
+    DWORD dwLength;
+    LSTATUS ls;
 
-    TRACE("class %s, buffer %p, buffer_len %#lx, required_len %p, machine_nameA %s, reserved %p.\n",
-            debugstr_guid(class), buffer, buffer_len, required_len, debugstr_a(machine_nameA), reserved);
+    hKey = SetupDiOpenClassRegKeyExA(ClassGuid,
+                                     KEY_ALL_ACCESS,
+                                     DIOCR_INSTALLER,
+                                     MachineName,
+                                     Reserved);
+    if (hKey == INVALID_HANDLE_VALUE)
+    {
+	WARN("SetupDiOpenClassRegKeyExA() failed (Error %lu)\n", GetLastError());
+	return FALSE;
+    }
 
-    ret = SetupDiGetClassDescriptionExW(class, NULL, 0, &lenW, machine_nameW, reserved);
-    bufferW = lenW ? malloc(lenW * sizeof(WCHAR)) : NULL;
-    if (bufferW && (ret = SetupDiGetClassDescriptionExW(class, bufferW, lenW, &lenW, machine_nameW, reserved)) && lenW)
-        lenA = WideCharToMultiByte(CP_ACP, 0, bufferW, lenW, buffer, buffer_len, NULL, NULL);
-    free(bufferW);
-    free(machine_nameW);
-
-    if (required_len)
-        *required_len = lenA;
-    return ret && buffer_len >= lenA;
+    dwLength = ClassDescriptionSize;
+    ls = RegQueryValueExA(hKey, NULL, NULL, NULL, (BYTE *)ClassDescription, &dwLength);
+    RegCloseKey(hKey);
+    if ((!ls || ls == ERROR_MORE_DATA) && RequiredSize)
+        *RequiredSize = dwLength;
+    return !ls;
 }
 
 /***********************************************************************
  *		SetupDiGetClassDescriptionExW  (SETUPAPI.@)
  */
-BOOL WINAPI SetupDiGetClassDescriptionExW(const GUID *class, WCHAR *buffer, DWORD buffer_len,
-        DWORD *required_len, const WCHAR *machine_name, void *reserved)
+BOOL WINAPI SetupDiGetClassDescriptionExW(
+        const GUID* ClassGuid,
+        PWSTR ClassDescription,
+        DWORD ClassDescriptionSize,
+        PDWORD RequiredSize,
+        PCWSTR MachineName,
+        PVOID Reserved)
 {
-    DEVPROPTYPE type;
-    CONFIGRET ret;
-    ULONG size;
+    HKEY hKey;
+    DWORD dwLength;
+    LSTATUS ls;
 
-    TRACE("class %s, buffer %p, buffer_len %#lx, required_len %p, machine_name %s, reserved %p.\n",
-            debugstr_guid(class), buffer, buffer_len, required_len, debugstr_w(machine_name), reserved);
+    hKey = SetupDiOpenClassRegKeyExW(ClassGuid,
+                                     KEY_ALL_ACCESS,
+                                     DIOCR_INSTALLER,
+                                     MachineName,
+                                     Reserved);
+    if (hKey == INVALID_HANDLE_VALUE)
+    {
+	WARN("SetupDiOpenClassRegKeyExW() failed (Error %lu)\n", GetLastError());
+	return FALSE;
+    }
 
-    size = buffer_len * sizeof(WCHAR);
-    ret = CM_Get_Class_PropertyW(class, &DEVPKEY_DeviceClass_Name, &type, (BYTE *)buffer, &size, 0);
-    if ((!ret || ret == CR_BUFFER_SMALL) && required_len)
-        *required_len = size / sizeof(WCHAR);
-
-    return !ret;
+    dwLength = ClassDescriptionSize * sizeof(WCHAR);
+    ls = RegQueryValueExW(hKey, NULL, NULL, NULL, (BYTE *)ClassDescription, &dwLength);
+    RegCloseKey(hKey);
+    if ((!ls || ls == ERROR_MORE_DATA) && RequiredSize)
+        *RequiredSize = dwLength / sizeof(WCHAR);
+    return !ls;
 }
 
 /***********************************************************************
@@ -2038,6 +2369,13 @@ static void SETUPDI_EnumerateMatchingInterfaces(HDEVINFO DeviceInfoSet,
                                         &deviceClass);
                                 if ((device = create_device(set, &deviceClass, deviceInst, FALSE)))
                                     SETUPDI_AddDeviceInterfaces(device, subKey, guid, flags);
+                                /*
+                                 * If there weren't any interfaces present for
+                                 * this device, remove it from the device info
+                                 * list.
+                                 */
+                                if (device && ((flags & DIGCF_PRESENT) && !list_count(&device->interfaces)))
+                                    remove_device(device);
                             }
                             RegCloseKey(deviceKey);
                         }
@@ -2111,6 +2449,94 @@ static void SETUPDI_EnumerateInterfaces(HDEVINFO DeviceInfoSet,
     }
 }
 
+
+/* iterate over all interfaces supported by this device instance. if any of
+ * them are "linked", return TRUE */
+static BOOL is_device_instance_linked(HKEY subKey, HKEY interfacesKey, const WCHAR *deviceInstance)
+{
+    LONG l;
+    DWORD class_idx = 0, device_idx, len, type;
+    HKEY class_key, device_key, link_key;
+    WCHAR class_keyname[40], device_keyname[MAX_DEVICE_ID_LEN];
+    WCHAR interface_devinstance[MAX_DEVICE_ID_LEN];
+    WCHAR alt_devinstance[MAX_DEVICE_ID_LEN];
+    WCHAR service[40];
+
+    l = RegQueryValueExW(subKey, L"Service", NULL, &type, (BYTE *)service, &len);
+    if (!l && type == REG_SZ && !wcsicmp(service, L"winehid") && !wcsstr(deviceInstance, L"HID\\"))
+    {
+        const WCHAR *tmp = wcschr(deviceInstance, L'\\');
+
+        if (tmp && (swprintf(alt_devinstance, ARRAY_SIZE(alt_devinstance), L"HID%s", tmp) != -1))
+        {
+            TRACE("Found winehid device instance, checking for link with device instance %s.\n", debugstr_w(alt_devinstance));
+            deviceInstance = alt_devinstance;
+        }
+    }
+
+    while (1)
+    {
+        len = ARRAY_SIZE(class_keyname);
+        l = RegEnumKeyExW(interfacesKey, class_idx++, class_keyname, &len, NULL, NULL, NULL, NULL);
+        if (l)
+            break;
+
+        l = RegOpenKeyExW(interfacesKey, class_keyname, 0, KEY_READ, &class_key);
+        if (l)
+            continue;
+
+        device_idx = 0;
+        while (1)
+        {
+            len = ARRAY_SIZE(device_keyname);
+            l = RegEnumKeyExW(class_key, device_idx++, device_keyname, &len, NULL, NULL, NULL, NULL);
+            if (l)
+                break;
+
+            l = RegOpenKeyExW(class_key, device_keyname, 0, KEY_READ, &device_key);
+            if (l)
+                continue;
+
+            len = ARRAY_SIZE(interface_devinstance);
+            l = RegQueryValueExW(device_key, L"DeviceInstance", NULL, &type, (BYTE *)interface_devinstance, &len);
+            if (l || type != REG_SZ)
+            {
+                RegCloseKey(device_key);
+                continue;
+            }
+
+            if (lstrcmpiW(interface_devinstance, deviceInstance))
+            {
+                /* not our device instance */
+                RegCloseKey(device_key);
+                continue;
+            }
+
+            l = RegOpenKeyExW(device_key, L"#", 0, KEY_READ, &link_key);
+            if (l)
+            {
+                RegCloseKey(device_key);
+                continue;
+            }
+
+            if (is_linked(link_key))
+            {
+                RegCloseKey(link_key);
+                RegCloseKey(device_key);
+                RegCloseKey(class_key);
+                return TRUE;
+            }
+
+            RegCloseKey(link_key);
+            RegCloseKey(device_key);
+        }
+
+        RegCloseKey(class_key);
+    }
+
+    return FALSE;
+}
+
 static void SETUPDI_EnumerateMatchingDeviceInstances(struct DeviceInfoSet *set,
         LPCWSTR enumerator, LPCWSTR deviceName, HKEY deviceKey,
         const GUID *class, DWORD flags)
@@ -2119,6 +2545,7 @@ static void SETUPDI_EnumerateMatchingDeviceInstances(struct DeviceInfoSet *set,
     DWORD i, len;
     WCHAR deviceInstance[MAX_PATH];
     LONG l = ERROR_SUCCESS;
+    HKEY interfacesKey = SetupDiOpenClassRegKeyExW(NULL, KEY_READ, DIOCR_INTERFACE, NULL, NULL);
 
     TRACE("%s %s\n", debugstr_w(enumerator), debugstr_w(deviceName));
 
@@ -2151,14 +2578,16 @@ static void SETUPDI_EnumerateMatchingDeviceInstances(struct DeviceInfoSet *set,
                         if ((flags & DIGCF_ALLCLASSES) ||
                                 IsEqualGUID(class, &deviceClass))
                         {
-                            static const WCHAR fmt[] =
-                             {'%','s','\\','%','s','\\','%','s',0};
+                            static const WCHAR fmt[] = L"%s\\%s\\%s";
 
                             if (swprintf(id, ARRAY_SIZE(id), fmt, enumerator,
-                                    deviceName, deviceInstance) != -1)
+                                        deviceName, deviceInstance) != -1 &&
+                                    (!(flags & DIGCF_PRESENT) ||
+                                     is_device_instance_linked(subKey, interfacesKey, id)))
                             {
                                 create_device(set, &deviceClass, id, FALSE);
                             }
+
                         }
                     }
                 }
@@ -2168,6 +2597,8 @@ static void SETUPDI_EnumerateMatchingDeviceInstances(struct DeviceInfoSet *set,
             l = ERROR_SUCCESS;
         }
     }
+
+    RegCloseKey(interfacesKey);
 }
 
 static void SETUPDI_EnumerateMatchingDevices(HDEVINFO DeviceInfoSet,
@@ -3440,74 +3871,124 @@ BOOL WINAPI SetupDiInstallClassW(
 /***********************************************************************
  *		SetupDiOpenClassRegKey  (SETUPAPI.@)
  */
-HKEY WINAPI SetupDiOpenClassRegKey(const GUID *class, REGSAM access)
+HKEY WINAPI SetupDiOpenClassRegKey(
+        const GUID* ClassGuid,
+        REGSAM samDesired)
 {
-    return SetupDiOpenClassRegKeyExW(class, access, DIOCR_INSTALLER, NULL, NULL);
+    return SetupDiOpenClassRegKeyExW(ClassGuid, samDesired,
+                                     DIOCR_INSTALLER, NULL, NULL);
 }
 
 
 /***********************************************************************
  *		SetupDiOpenClassRegKeyExA  (SETUPAPI.@)
  */
-HKEY WINAPI SetupDiOpenClassRegKeyExA(const GUID *class, REGSAM access, DWORD flags,
-        const char *machine_nameA, void *reserved)
+HKEY WINAPI SetupDiOpenClassRegKeyExA(
+        const GUID* ClassGuid,
+        REGSAM samDesired,
+        DWORD Flags,
+        PCSTR MachineName,
+        PVOID Reserved)
 {
-    WCHAR *machine_nameW = strdupAtoW(machine_nameA);
-    HKEY hkey;
+    PWSTR MachineNameW = NULL;
+    HKEY hKey;
 
-    TRACE("class %s, access %#lx, flags %#lx, machine_nameA %s, reserved %p.\n", debugstr_guid(class),
-            access, flags, debugstr_a(machine_nameA), reserved);
+    TRACE("\n");
 
-    hkey = SetupDiOpenClassRegKeyExW(class, access, flags, machine_nameW, reserved);
-    free(machine_nameW);
-    return hkey;
+    if (MachineName)
+    {
+        MachineNameW = MultiByteToUnicode(MachineName, CP_ACP);
+        if (MachineNameW == NULL)
+            return INVALID_HANDLE_VALUE;
+    }
+
+    hKey = SetupDiOpenClassRegKeyExW(ClassGuid, samDesired,
+                                     Flags, MachineNameW, Reserved);
+
+    MyFree(MachineNameW);
+
+    return hKey;
 }
 
 
 /***********************************************************************
  *		SetupDiOpenClassRegKeyExW  (SETUPAPI.@)
  */
-HKEY WINAPI SetupDiOpenClassRegKeyExW(const GUID *class, REGSAM access, DWORD flags,
-        const WCHAR *machine_name, void *reserved)
+HKEY WINAPI SetupDiOpenClassRegKeyExW(
+        const GUID* ClassGuid,
+        REGSAM samDesired,
+        DWORD Flags,
+        PCWSTR MachineName,
+        PVOID Reserved)
 {
-    DWORD open_flags = 0;
-    GUID guid = {0};
-    CONFIGRET ret;
+    HKEY hClassesKey;
     HKEY key;
+    LPCWSTR lpKeyName;
+    LONG l;
 
-    TRACE("class %s, access %#lx, flags %#lx, machine_name %s, reserved %p.\n", debugstr_guid(class),
-            access, flags, debugstr_w(machine_name), reserved);
-
-    if (machine_name && *machine_name)
+    if (MachineName && *MachineName)
     {
         FIXME("Remote access not supported yet!\n");
         return INVALID_HANDLE_VALUE;
     }
 
-    if (flags & DIOCR_INSTALLER)
-        open_flags = CM_OPEN_CLASS_KEY_INSTALLER;
-    else if (flags & DIOCR_INTERFACE)
-        open_flags = CM_OPEN_CLASS_KEY_INTERFACE;
+    if (Flags == DIOCR_INSTALLER)
+    {
+        lpKeyName = ControlClass;
+    }
+    else if (Flags == DIOCR_INTERFACE)
+    {
+        lpKeyName = DeviceClasses;
+    }
     else
     {
-        ERR("Invalid flags parameter!\n");
+        ERR("Invalid Flags parameter!\n");
         SetLastError(ERROR_INVALID_PARAMETER);
         return INVALID_HANDLE_VALUE;
     }
 
-    if (class)
+    if (!ClassGuid)
     {
-        guid = *class;
-        class = &guid;
+        if ((l = RegOpenKeyExW(HKEY_LOCAL_MACHINE,
+                          lpKeyName,
+                          0,
+                          samDesired,
+                          &hClassesKey)))
+        {
+            SetLastError(l);
+            hClassesKey = INVALID_HANDLE_VALUE;
+        }
+        key = hClassesKey;
     }
-
-    if ((ret = CM_Open_Class_Key_ExW((GUID *)class, NULL, access,
-                 RegDisposition_OpenExisting, &key, open_flags, NULL)))
+    else
     {
-        SetLastError(CM_MapCrToWin32Err(ret, ERROR_INVALID_PARAMETER));
-        return INVALID_HANDLE_VALUE;
-    }
+        WCHAR bracedGuidString[39];
 
+        SETUPDI_GuidToString(ClassGuid, bracedGuidString);
+
+        if (!(l = RegOpenKeyExW(HKEY_LOCAL_MACHINE,
+                          lpKeyName,
+                          0,
+                          samDesired,
+                          &hClassesKey)))
+        {
+            if ((l = RegOpenKeyExW(hClassesKey,
+                              bracedGuidString,
+                              0,
+                              samDesired,
+                              &key)))
+            {
+                SetLastError(l);
+                key = INVALID_HANDLE_VALUE;
+            }
+            RegCloseKey(hClassesKey);
+        }
+        else
+        {
+            SetLastError(l);
+            key = INVALID_HANDLE_VALUE;
+        }
+    }
     return key;
 }
 
@@ -4162,6 +4643,501 @@ BOOL WINAPI SetupDiDeleteDevRegKey(HDEVINFO devinfo, SP_DEVINFO_DATA *device_dat
 }
 
 /***********************************************************************
+ *              CM_Get_Device_IDA  (SETUPAPI.@)
+ */
+CONFIGRET WINAPI CM_Get_Device_IDA(DEVINST devnode, char *buffer, ULONG len, ULONG flags)
+{
+    TRACE("%lu, %p, %lu, %#lx\n", devnode, buffer, len, flags);
+
+    if (devnode >= devinst_table_size || !devinst_table[devnode])
+        return CR_NO_SUCH_DEVINST;
+
+    WideCharToMultiByte(CP_ACP, 0, devinst_table[devnode], -1, buffer, len, 0, 0);
+    TRACE("Returning %s\n", debugstr_a(buffer));
+    return CR_SUCCESS;
+}
+
+/***********************************************************************
+ *              CM_Get_Device_IDW  (SETUPAPI.@)
+ */
+CONFIGRET WINAPI CM_Get_Device_IDW(DEVINST devnode, WCHAR *buffer, ULONG len, ULONG flags)
+{
+    TRACE("%lu, %p, %lu, %#lx\n", devnode, buffer, len, flags);
+
+    if (devnode >= devinst_table_size || !devinst_table[devnode])
+        return CR_NO_SUCH_DEVINST;
+
+    lstrcpynW(buffer, devinst_table[devnode], len);
+    TRACE("Returning %s\n", debugstr_w(buffer));
+    return CR_SUCCESS;
+}
+
+/***********************************************************************
+ *              CM_Get_Device_ID_Size  (SETUPAPI.@)
+ */
+CONFIGRET WINAPI CM_Get_Device_ID_Size(ULONG *len, DEVINST devnode, ULONG flags)
+{
+    TRACE("%p, %lu, %#lx\n", len, devnode, flags);
+
+    if (devnode >= devinst_table_size || !devinst_table[devnode])
+        return CR_NO_SUCH_DEVINST;
+
+    *len = lstrlenW(devinst_table[devnode]);
+    return CR_SUCCESS;
+}
+
+/***********************************************************************
+ *      CM_Locate_DevNodeA (SETUPAPI.@)
+ */
+CONFIGRET WINAPI CM_Locate_DevNodeA(DEVINST *devinst, DEVINSTID_A device_id, ULONG flags)
+{
+    TRACE("%p %s %#lx.\n", devinst, debugstr_a(device_id), flags);
+
+    return CM_Locate_DevNode_ExA(devinst, device_id, flags, NULL);
+}
+
+/***********************************************************************
+ *      CM_Locate_DevNodeW (SETUPAPI.@)
+ */
+CONFIGRET WINAPI CM_Locate_DevNodeW(DEVINST *devinst, DEVINSTID_W device_id, ULONG flags)
+{
+    TRACE("%p %s %#lx.\n", devinst, debugstr_w(device_id), flags);
+
+    return CM_Locate_DevNode_ExW(devinst, device_id, flags, NULL);
+}
+
+/***********************************************************************
+ *      CM_Locate_DevNode_ExA (SETUPAPI.@)
+ */
+CONFIGRET WINAPI CM_Locate_DevNode_ExA(DEVINST *devinst, DEVINSTID_A device_id, ULONG flags, HMACHINE machine)
+{
+    CONFIGRET ret;
+    DEVINSTID_W device_idw;
+    WCHAR *p;
+
+    TRACE("%p %s %#lx %p.\n", devinst, debugstr_a(device_id), flags, machine);
+
+    if (!device_id)
+    {
+        FIXME("NULL device_id unsupported.\n");
+        return CR_CALL_NOT_IMPLEMENTED;
+    }
+
+    if (!(device_idw = malloc((strlen(device_id) + 1) * sizeof(*device_idw))))
+        return CR_OUT_OF_MEMORY;
+
+    p = device_idw;
+    while ((*p++ = *device_id++))
+        ;
+
+    ret = CM_Locate_DevNode_ExW(devinst, device_idw, flags, NULL);
+    free(device_idw);
+    return ret;
+}
+
+/***********************************************************************
+ *      CM_Locate_DevNode_ExW (SETUPAPI.@)
+ */
+CONFIGRET WINAPI CM_Locate_DevNode_ExW(DEVINST *devinst, DEVINSTID_W device_id, ULONG flags, HMACHINE machine)
+{
+    DEVINST ret;
+
+    TRACE("%p %s %#lx %p.\n", devinst, debugstr_w(device_id), flags, machine);
+
+    if (!devinst)
+        return CR_INVALID_POINTER;
+
+    *devinst = 0;
+
+    if (machine)
+        FIXME("machine %p not supported.\n", machine);
+    if (flags)
+        FIXME("flags %#lx are not supported.\n", flags);
+
+    if (!device_id)
+    {
+        FIXME("NULL device_id unsupported.\n");
+        return CR_CALL_NOT_IMPLEMENTED;
+    }
+
+    if ((ret = get_devinst_for_device_id(device_id)) < devinst_table_size && devinst_table[ret])
+    {
+        *devinst = ret;
+        return CR_SUCCESS;
+    }
+
+    return CR_NO_SUCH_DEVNODE;
+}
+
+static CONFIGRET get_device_id_list(const WCHAR *filter, WCHAR *buffer, ULONG *len, ULONG flags)
+{
+    const ULONG supported_flags = CM_GETIDLIST_FILTER_NONE | CM_GETIDLIST_FILTER_CLASS | CM_GETIDLIST_FILTER_PRESENT;
+    SP_DEVINFO_DATA device = { sizeof(device) };
+    CONFIGRET ret = CR_SUCCESS;
+    GUID guid, *pguid = NULL;
+    unsigned int i, id_len;
+    ULONG query_flags = 0;
+    WCHAR id[256];
+    HDEVINFO set;
+    ULONG needed;
+    WCHAR *p;
+
+    if (!len || (buffer && !*len))
+        return CR_INVALID_POINTER;
+
+    needed = 1;
+
+    if (buffer)
+        *buffer = 0;
+    if (flags & ~supported_flags)
+    {
+        FIXME("Flags %#lx are not supported.\n", flags);
+        *len = needed;
+        return CR_SUCCESS;
+    }
+
+    if (!buffer)
+        *len = 0;
+
+    if (flags & CM_GETIDLIST_FILTER_CLASS)
+    {
+        if (!filter)
+            return CR_INVALID_POINTER;
+        if (IIDFromString((WCHAR *)filter, &guid))
+            return CR_INVALID_DATA;
+        pguid = &guid;
+    }
+
+    if (!buffer)
+        *len = needed;
+
+    if (!pguid)
+        query_flags |= DIGCF_ALLCLASSES;
+    if (flags & CM_GETIDLIST_FILTER_PRESENT)
+        query_flags |= DIGCF_PRESENT;
+
+    set = SetupDiGetClassDevsW(pguid, NULL, NULL, query_flags);
+    if (set == INVALID_HANDLE_VALUE)
+        return CR_SUCCESS;
+
+    p = buffer;
+    for (i = 0; SetupDiEnumDeviceInfo(set, i, &device); ++i)
+    {
+        ret = SetupDiGetDeviceInstanceIdW(set, &device, id, sizeof(id) / sizeof(*id), NULL);
+        if (!ret) continue;
+        id_len = wcslen(id) + 1;
+        needed += id_len;
+        if (buffer)
+        {
+            if (needed > *len)
+            {
+                SetupDiDestroyDeviceInfoList(set);
+                *buffer = 0;
+                return CR_BUFFER_SMALL;
+            }
+            memcpy(p, id, sizeof(*p) * id_len);
+            p += id_len;
+        }
+    }
+    SetupDiDestroyDeviceInfoList(set);
+    *len = needed;
+    if (buffer)
+        *p = 0;
+    return CR_SUCCESS;
+}
+
+/***********************************************************************
+ *             CM_Get_Device_ID_ListW  (SETUPAPI.@)
+ */
+CONFIGRET WINAPI CM_Get_Device_ID_ListW(const WCHAR *filter, WCHAR *buffer, ULONG len, ULONG flags)
+{
+    TRACE("%s %p %ld %#lx.\n", debugstr_w(filter), buffer, len, flags);
+
+    if (!buffer)
+        return CR_INVALID_POINTER;
+
+    return get_device_id_list(filter, buffer, &len, flags);
+}
+
+/***********************************************************************
+ *             CM_Get_Device_ID_List_SizeW  (SETUPAPI.@)
+ */
+CONFIGRET WINAPI CM_Get_Device_ID_List_SizeW(ULONG *len, const WCHAR *filter, ULONG flags)
+{
+    TRACE("%p %s %#lx.\n", len, debugstr_w(filter), flags);
+
+    return get_device_id_list(filter, NULL, len, flags);
+}
+
+/***********************************************************************
+ *             CM_Get_Device_ID_ListA  (SETUPAPI.@)
+ */
+CONFIGRET WINAPI CM_Get_Device_ID_ListA(const char *filter, char *buffer, ULONG len, ULONG flags )
+{
+    WCHAR *wbuffer, *wfilter = NULL, *p;
+    CONFIGRET ret;
+
+    TRACE("%s %p %ld %#lx.\n", debugstr_a(filter), buffer, len, flags);
+
+    if (!buffer || !len)
+        return CR_INVALID_POINTER;
+
+    if (!(wbuffer = malloc(len * sizeof(*wbuffer))))
+        return CR_OUT_OF_MEMORY;
+
+    if (filter)
+    {
+        if (!(wfilter = malloc((strlen(filter) + 1) * sizeof(*wfilter))))
+        {
+            free(wbuffer);
+            return CR_OUT_OF_MEMORY;
+        }
+
+        p = wfilter;
+        while ((*p++ = *filter++))
+            ;
+    }
+
+    if (!(ret = CM_Get_Device_ID_ListW(wfilter, wbuffer, len, flags)))
+    {
+        p = wbuffer;
+        while (*p)
+        {
+            while ((*buffer++ = *p++))
+                ;
+        }
+        *buffer = 0;
+    }
+    free(wfilter);
+    free(wbuffer);
+    return ret;
+}
+
+/***********************************************************************
+ *             CM_Get_Device_ID_List_SizeA  (SETUPAPI.@)
+ */
+CONFIGRET WINAPI CM_Get_Device_ID_List_SizeA(ULONG *len, const char *filter, ULONG flags)
+{
+    WCHAR *wfilter = NULL, *p;
+    CONFIGRET ret;
+
+    TRACE("%p %s %#lx.\n", len, debugstr_a(filter), flags);
+
+    if (filter)
+    {
+        if (!(wfilter = malloc(strlen(filter) * sizeof(*wfilter))))
+            return CR_OUT_OF_MEMORY;
+
+        p = wfilter;
+        while ((*p++ = *filter++))
+            ;
+    }
+    ret = CM_Get_Device_ID_List_SizeW(len, wfilter, flags);
+    free(wfilter);
+    return ret;
+}
+
+static CONFIGRET get_device_interface_list(const GUID *class_guid, DEVINSTID_W device_id, WCHAR *buffer, ULONG *len,
+        ULONG flags)
+{
+    const ULONG supported_flags = CM_GET_DEVICE_INTERFACE_LIST_ALL_DEVICES;
+
+    SP_DEVICE_INTERFACE_DATA iface = {sizeof(iface)};
+    SP_DEVINFO_DATA device = { sizeof(device) };
+    ULONG query_flags = DIGCF_DEVICEINTERFACE;
+    unsigned int i, id_len;
+    HDEVINFO set;
+    ULONG needed;
+    WCHAR *p;
+
+    if (!len || (buffer && !*len))
+        return CR_INVALID_POINTER;
+
+    needed = 1;
+
+    if (buffer)
+        *buffer = 0;
+    if (flags & ~supported_flags)
+        FIXME("Flags %#lx are not supported.\n", flags);
+
+    if (!buffer)
+        *len = 0;
+
+    if (!buffer)
+        *len = needed;
+
+    if (!(flags & CM_GET_DEVICE_INTERFACE_LIST_ALL_DEVICES)) query_flags |= DIGCF_PRESENT;
+    set = SetupDiGetClassDevsW(class_guid, device_id, NULL, query_flags);
+    if (set == INVALID_HANDLE_VALUE)
+        return CR_SUCCESS;
+
+    p = buffer;
+    for (i = 0; SetupDiEnumDeviceInterfaces(set, NULL, class_guid, i, &iface); ++i)
+    {
+        struct device_iface *device_iface;
+        device_iface = get_device_iface(set, &iface);
+        id_len = wcslen(device_iface->symlink) + 1;
+        needed += id_len;
+        if (buffer)
+        {
+            if (needed > *len)
+            {
+                SetupDiDestroyDeviceInfoList(set);
+                *buffer = 0;
+                return CR_BUFFER_SMALL;
+            }
+            memcpy(p, device_iface->symlink, sizeof(*p) * id_len);
+            p += id_len;
+        }
+    }
+    SetupDiDestroyDeviceInfoList(set);
+    *len = needed;
+    if (buffer)
+        *p = 0;
+    return CR_SUCCESS;
+}
+
+/***********************************************************************
+ *      CM_Get_Device_Interface_List_Size_ExW (SETUPAPI.@)
+ */
+CONFIGRET WINAPI CM_Get_Device_Interface_List_Size_ExW(PULONG len, LPGUID class, DEVINSTID_W id,
+                                                       ULONG flags, HMACHINE machine)
+{
+    TRACE("%p %s %s 0x%08lx %p\n", len, debugstr_guid(class), debugstr_w(id), flags, machine);
+
+    if (machine)
+        FIXME("machine %p.\n", machine);
+
+    return get_device_interface_list(class, id, NULL, len, flags);
+}
+
+/***********************************************************************
+ *      CM_Get_Device_Interface_List_SizeW (SETUPAPI.@)
+ */
+CONFIGRET WINAPI CM_Get_Device_Interface_List_SizeW(PULONG len, LPGUID class, DEVINSTID_W id, ULONG flags)
+{
+    TRACE("%p %s %s 0x%08lx\n", len, debugstr_guid(class), debugstr_w(id), flags);
+    return get_device_interface_list(class, id, NULL, len, flags);
+}
+
+/***********************************************************************
+ *      CM_Get_Device_Interface_List_W (SETUPAPI.@)
+ */
+CONFIGRET WINAPI CM_Get_Device_Interface_List_ExW(LPGUID class, DEVINSTID_W id, PZZWSTR buffer, ULONG len, ULONG flags,
+        HMACHINE machine)
+{
+    TRACE("%s %s %p %lu %#lx\n", debugstr_guid(class), debugstr_w(id), buffer, len, flags);
+
+    if (machine)
+        FIXME("machine %p.\n", machine);
+
+    return get_device_interface_list(class, id, buffer, &len, flags);
+}
+
+/***********************************************************************
+ *      CM_Get_Device_Interface_List_W (SETUPAPI.@)
+ */
+CONFIGRET WINAPI CM_Get_Device_Interface_ListW(LPGUID class, DEVINSTID_W id, PZZWSTR buffer, ULONG len, ULONG flags)
+{
+    TRACE("%s %s %p %lu %#lx\n", debugstr_guid(class), debugstr_w(id), buffer, len, flags);
+
+    return get_device_interface_list(class, id, buffer, &len, flags);
+}
+
+/***********************************************************************
+ *      CM_Get_Device_Interface_List_SizeA (SETUPAPI.@)
+ */
+CONFIGRET WINAPI CM_Get_Device_Interface_List_SizeA(PULONG len, LPGUID class, DEVINSTID_A id,
+        ULONG flags)
+{
+    return CM_Get_Device_Interface_List_Size_ExA(len, class, id, flags, NULL);
+}
+
+/***********************************************************************
+ *      CM_Get_Device_Interface_List_Size_ExA (SETUPAPI.@)
+ */
+CONFIGRET WINAPI CM_Get_Device_Interface_List_Size_ExA(PULONG len, LPGUID class, DEVINSTID_A id,
+                                                       ULONG flags, HMACHINE machine)
+{
+    WCHAR *wid = NULL;
+    unsigned int slen;
+    CONFIGRET ret;
+
+    TRACE("%p %s %s 0x%08lx %p\n", len, debugstr_guid(class), debugstr_a(id), flags, machine);
+
+    if (machine)
+        FIXME("machine %p.\n", machine);
+
+    if (id)
+    {
+        slen = strlen(id) + 1;
+        if (!(wid = malloc(slen * sizeof(*wid))))
+            return CR_OUT_OF_MEMORY;
+        MultiByteToWideChar(CP_ACP, 0, id, slen, wid, slen);
+    }
+    ret = CM_Get_Device_Interface_List_SizeW(len, class, wid, flags);
+    free(wid);
+    return ret;
+}
+
+/***********************************************************************
+ *      CM_Get_Device_Interface_List_ExA (SETUPAPI.@)
+ */
+CONFIGRET WINAPI CM_Get_Device_Interface_List_ExA(LPGUID class, DEVINSTID_A id, PZZSTR buffer, ULONG len, ULONG flags,
+        HMACHINE machine)
+{
+    WCHAR *wbuffer, *wid = NULL, *p;
+    unsigned int slen;
+    CONFIGRET ret;
+
+    TRACE("%s %s %p %lu 0x%08lx %p\n", debugstr_guid(class), debugstr_a(id), buffer, len, flags, machine);
+
+    if (machine)
+        FIXME("machine %p.\n", machine);
+
+    if (!buffer || !len)
+        return CR_INVALID_POINTER;
+
+    if (!(wbuffer = malloc(len * sizeof(*wbuffer))))
+        return CR_OUT_OF_MEMORY;
+
+    if (id)
+    {
+        slen = strlen(id) + 1;
+        if (!(wid = malloc(slen * sizeof(*wid))))
+        {
+            free(wbuffer);
+            return CR_OUT_OF_MEMORY;
+        }
+        MultiByteToWideChar(CP_ACP, 0, id, slen, wid, slen);
+    }
+
+    if (!(ret = CM_Get_Device_Interface_List_ExW(class, wid, wbuffer, len, flags, machine)))
+    {
+        p = wbuffer;
+        while (*p)
+        {
+            slen = wcslen(p) + 1;
+            WideCharToMultiByte(CP_ACP, 0, p, slen, buffer, slen, NULL, NULL);
+            p += slen;
+            buffer += slen;
+        }
+        *buffer = 0;
+    }
+    free(wid);
+    free(wbuffer);
+    return ret;
+}
+
+/***********************************************************************
+ *      CM_Get_Device_Interface_ListA (SETUPAPI.@)
+ */
+CONFIGRET WINAPI CM_Get_Device_Interface_ListA(LPGUID class, DEVINSTID_A id, PZZSTR buffer, ULONG len, ULONG flags)
+{
+    return CM_Get_Device_Interface_List_ExA(class, id, buffer, len, flags, NULL);
+}
+
+/***********************************************************************
  *      SetupDiGetINFClassA (SETUPAPI.@)
  */
 BOOL WINAPI SetupDiGetINFClassA(PCSTR inf, LPGUID class_guid, PSTR class_name,
@@ -4446,6 +5422,59 @@ BOOL WINAPI SetupDiGetDevicePropertyW(HDEVINFO devinfo, PSP_DEVINFO_DATA device_
 
     SetLastError(ls);
     return !ls;
+}
+
+/***********************************************************************
+ *              CM_Get_DevNode_Property_ExW (SETUPAPI.@)
+ */
+CONFIGRET WINAPI CM_Get_DevNode_Property_ExW(DEVINST devnode, const DEVPROPKEY *prop_key, DEVPROPTYPE *prop_type,
+    BYTE *prop_buff, ULONG *prop_buff_size, ULONG flags, HMACHINE machine)
+{
+    HDEVINFO set;
+    SP_DEVINFO_DATA data = { sizeof(data) };
+    struct device *device;
+    LSTATUS ls;
+
+    TRACE("%lu, %p, %p, %p, %p, %#lx, %p\n", devnode, prop_key, prop_type, prop_buff, prop_buff_size,
+          flags, machine);
+
+    if (machine)
+        return CR_MACHINE_UNAVAILABLE;
+
+    if (!prop_buff_size)
+        return CR_INVALID_POINTER;
+
+    if (!(device = get_devnode_device(devnode, &set, &data)))
+        return CR_NO_SUCH_DEVINST;
+
+    ls = get_device_property(device, set, &data, prop_key, prop_type, prop_buff, *prop_buff_size,
+                             prop_buff_size, flags);
+    SetupDiDestroyDeviceInfoList(set);
+    switch (ls)
+    {
+    case NO_ERROR:
+        return CR_SUCCESS;
+    case ERROR_INVALID_DATA:
+        return CR_INVALID_DATA;
+    case ERROR_INVALID_USER_BUFFER:
+        return CR_INVALID_POINTER;
+    case ERROR_INVALID_FLAGS:
+        return CR_INVALID_FLAG;
+    case ERROR_INSUFFICIENT_BUFFER:
+        return CR_BUFFER_SMALL;
+    case ERROR_NOT_FOUND:
+        return CR_NO_SUCH_VALUE;
+    }
+    return CR_FAILURE;
+}
+
+/***********************************************************************
+ *              CM_Get_DevNode_PropertyW (SETUPAPI.@)
+ */
+CONFIGRET WINAPI CM_Get_DevNode_PropertyW(DEVINST dev, const DEVPROPKEY *key, DEVPROPTYPE *type,
+    PVOID buf, PULONG len, ULONG flags)
+{
+    return CM_Get_DevNode_Property_ExW(dev, key, type, buf, len, flags, NULL);
 }
 
 /***********************************************************************
@@ -5300,7 +6329,7 @@ BOOL WINAPI SetupCopyOEMInfA( PCSTR source, PCSTR location,
 
     if (required_size) *required_size = size;
 
-    if (dest && (ret || GetLastError() == ERROR_FILE_EXISTS))
+    if (dest)
     {
         if (buffer_size >= size)
         {

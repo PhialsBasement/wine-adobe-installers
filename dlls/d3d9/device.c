@@ -593,64 +593,6 @@ static void device_reset_viewport_state(struct d3d9_device *device)
     wined3d_stateblock_set_scissor_rect(device->state, &rect);
 }
 
-static struct d3d9_device *impl_from_IDirect3DDevice9On12(IDirect3DDevice9On12 *iface)
-{
-    return CONTAINING_RECORD(iface, struct d3d9_device, IDirect3DDevice9On12_iface);
-}
-
-static HRESULT WINAPI d3d9on12_QueryInterface(IDirect3DDevice9On12 *iface, REFIID iid, void **out)
-{
-    struct d3d9_device *device = impl_from_IDirect3DDevice9On12(iface);
-    return IDirect3DDevice9Ex_QueryInterface(&device->IDirect3DDevice9Ex_iface, iid, out);
-}
-
-static ULONG WINAPI d3d9on12_AddRef(IDirect3DDevice9On12 *iface)
-{
-    struct d3d9_device *device = impl_from_IDirect3DDevice9On12(iface);
-    return IDirect3DDevice9Ex_AddRef(&device->IDirect3DDevice9Ex_iface);
-}
-
-static ULONG WINAPI d3d9on12_Release(IDirect3DDevice9On12 *iface)
-{
-    struct d3d9_device *device = impl_from_IDirect3DDevice9On12(iface);
-    return IDirect3DDevice9Ex_Release(&device->IDirect3DDevice9Ex_iface);
-}
-
-static HRESULT WINAPI d3d9on12_GetD3D12Device(IDirect3DDevice9On12 *iface, REFIID iid, void **out)
-{
-    FIXME("iface %p, iid %s, out %p stub!\n", iface, debugstr_guid(iid), out);
-
-    if (!out)
-        return E_INVALIDARG;
-
-    *out = NULL;
-    return E_NOINTERFACE;
-}
-
-static HRESULT WINAPI d3d9on12_UnwrapUnderlyingResource(IDirect3DDevice9On12 *iface, IDirect3DResource9 *resource, ID3D12CommandQueue *queue, REFIID iid, void **out)
-{
-    FIXME("iface %p, resource %p, queue %p, iid %s, out %p stub!\n", iface, resource, queue, debugstr_guid(iid), out);
-    return E_NOTIMPL;
-}
-
-static HRESULT WINAPI d3d9on12_ReturnUnderlyingResource(IDirect3DDevice9On12 *iface, IDirect3DResource9 *resource, UINT fence_count, UINT64 *signal_values, ID3D12Fence **fences)
-{
-    FIXME("iface %p, resource %p, fence_count %#x, signal_values %p, fences %p stub!\n", iface, resource, fence_count, signal_values, fences);
-    return E_NOTIMPL;
-}
-
-static const struct IDirect3DDevice9On12Vtbl d3d9on12_vtbl =
-{
-    /* IUnknown */
-    d3d9on12_QueryInterface,
-    d3d9on12_AddRef,
-    d3d9on12_Release,
-    /* IDirect3DDevice9On12 */
-    d3d9on12_GetD3D12Device,
-    d3d9on12_UnwrapUnderlyingResource,
-    d3d9on12_ReturnUnderlyingResource
-};
-
 static HRESULT WINAPI d3d9_device_QueryInterface(IDirect3DDevice9Ex *iface, REFIID riid, void **out)
 {
     TRACE("iface %p, riid %s, out %p.\n", iface, debugstr_guid(riid), out);
@@ -678,22 +620,6 @@ static HRESULT WINAPI d3d9_device_QueryInterface(IDirect3DDevice9Ex *iface, REFI
 
         IDirect3DDevice9Ex_AddRef(iface);
         *out = iface;
-        return S_OK;
-    }
-
-    if (IsEqualGUID(riid, &IID_IDirect3DDevice9On12))
-    {
-        struct d3d9_device *device = impl_from_IDirect3DDevice9Ex(iface);
-
-        if (!device->d3d_parent->d3d9on12)
-        {
-            WARN("IDirect3D9 instance wasn't created with D3D9On12 enabled, returning E_NOINTERFACE.\n");
-            *out = NULL;
-            return E_NOINTERFACE;
-        }
-
-        IDirect3DDevice9Ex_AddRef(iface);
-        *out = &device->IDirect3DDevice9On12_iface;
         return S_OK;
     }
 
@@ -2615,7 +2541,7 @@ static void resolve_depth_buffer(struct d3d9_device *device)
     d3d9_dsv = wined3d_rendertarget_view_get_sub_resource_parent(wined3d_dsv);
 
     wined3d_device_context_resolve_sub_resource(device->immediate_context, dst_resource, 0,
-            wined3d_rendertarget_view_get_resource(wined3d_dsv), d3d9_dsv->sub_resource_idx, 0, desc.format);
+            wined3d_rendertarget_view_get_resource(wined3d_dsv), d3d9_dsv->sub_resource_idx, desc.format);
 }
 
 static HRESULT WINAPI DECLSPEC_HOTPATCH d3d9_device_SetRenderState(IDirect3DDevice9Ex *iface,
@@ -4626,38 +4552,6 @@ static const struct IDirect3DDevice9ExVtbl d3d9_device_vtbl =
     d3d9_device_GetDisplayModeEx,
 };
 
-#ifdef __i386__
-
-/* BFME Online Arena hooks the IDirect3DDevice9 vtbl. Instead of getting the
- * vtbl address by doing something as simple as constructing a device, it
- * apparently looks for the code sequence used by MSVC to initialize the device
- * object with the vtbl address. Somehow this sequence has both remained stable
- * and can be reliably used to identify *this* COM object specifically. It is:
- *
- *  mov &d3d9_device_vtbl, %esi
- *  mov %eax, 0x########(%esi)
- *  mov %eax, 0x########(%esi)
- *
- * It doesn't really make sense to force using this sequence to initialize the
- * d3d9_device, so instead just put it here. */
-
-#pragma pack(push,1)
-
-static const __attribute__((used)) struct
-{
-    unsigned char op_mov_to_this[2];
-    const struct IDirect3DDevice9ExVtbl *vtable_addr;
-    unsigned char op_mov_field_a[2];
-    unsigned int disp_a;
-    unsigned char op_mov_field_b[2];
-    unsigned int disp_b;
-}
-d3d9_overlay_scanner_marker = {{0xc7, 0x06}, &d3d9_device_vtbl, {0x89, 0x86}, 0, {0x89, 0x86}, 0};
-
-#pragma pack(pop)
-
-#endif
-
 static inline struct d3d9_device *device_from_device_parent(struct wined3d_device_parent *device_parent)
 {
     return CONTAINING_RECORD(device_parent, struct d3d9_device, device_parent);
@@ -4775,7 +4669,6 @@ HRESULT device_init(struct d3d9_device *device, struct d3d9 *parent, struct wine
         FIXME("Ignoring display mode.\n");
 
     device->IDirect3DDevice9Ex_iface.lpVtbl = &d3d9_device_vtbl;
-    device->IDirect3DDevice9On12_iface.lpVtbl = &d3d9on12_vtbl;
     device->device_parent.ops = &d3d9_wined3d_device_parent_ops;
     device->adapter_ordinal = adapter;
     device->refcount = 1;

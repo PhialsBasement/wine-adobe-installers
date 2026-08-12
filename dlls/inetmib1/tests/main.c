@@ -413,7 +413,6 @@ if (0) /* crashes on native */
                         vars2[0].name.ids[vars2[0].name.idLength - 4 + i]);
                 }
             }
-            else break;
         }
         else if (noChange)
             skip("no change in OID, no MIB2 IP route table implementation\n");

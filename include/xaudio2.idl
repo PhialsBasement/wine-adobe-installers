@@ -24,9 +24,8 @@ import "unknwn.idl";
 import "mmdeviceapi.idl";
 
 import "audiosessiontypes.h";
-import "mmreg.h";
 
-#pragma pack(push,1)
+cpp_quote("#include <pshpack1.h>")
 
 #if XAUDIO2_VER <= 7
 
@@ -78,6 +77,32 @@ coclass XAudio2Debug {
 }
 
 #endif
+
+cpp_quote("#if 0")
+typedef struct WAVEFORMATEX
+{
+    WORD wFormatTag;
+    WORD nChannels;
+    DWORD nSamplesPerSec;
+    DWORD nAvgBytesPerSec;
+    WORD nBlockAlign;
+    WORD wBitsPerSample;
+    WORD cbSize;
+} WAVEFORMATEX;
+
+typedef struct {
+    WAVEFORMATEX    Format;
+    union {
+        WORD        wValidBitsPerSample;
+        WORD        wSamplesPerBlock;
+        WORD        wReserved;
+    } Samples;
+    DWORD           dwChannelMask;
+    GUID            SubFormat;
+} WAVEFORMATEXTENSIBLE, *PWAVEFORMATEXTENSIBLE;
+cpp_quote("#else")
+cpp_quote("#include <mmreg.h>")
+cpp_quote("#endif")
 
 interface IXAudio2Voice;
 
@@ -599,7 +624,7 @@ cpp_quote("inline static float XAudio2CutoffFrequencyToRadians(float cutofffreq,
 cpp_quote("inline static float XAudio2RadiansToCutoffFrequency(float radians, float samplerate) { return samplerate * asinf(radians/2.0f) / (float)M_PI; }")
 cpp_quote("#endif")
 
-#pragma pack(pop)
+cpp_quote("#include <poppack.h>")
 
 #if XAUDIO2_VER >= 8
 cpp_quote("HRESULT WINAPI XAudio2Create(IXAudio2** pxaudio2, UINT32 flags, XAUDIO2_PROCESSOR processor);")

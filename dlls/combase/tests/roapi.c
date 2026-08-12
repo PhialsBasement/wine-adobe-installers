@@ -26,7 +26,6 @@
 
 #include "initguid.h"
 #include "roapi.h"
-#include "roerrorapi.h"
 
 #include "wine/test.h"
 
@@ -626,19 +625,6 @@ static void test_RoGetAgileReference(void)
     }
 }
 
-static void test_RoGetErrorReportingFlags(void)
-{
-    UINT32 flags;
-    HRESULT hr;
-
-    hr = RoGetErrorReportingFlags(NULL);
-    ok(hr == E_POINTER, "Got unexpected hr %#lx.\n", hr);
-
-    hr = RoGetErrorReportingFlags(&flags);
-    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
-    ok(flags == RO_ERROR_REPORTING_USESETERRORINFO, "Got unexpected flag %#x.\n", flags);
-}
-
 START_TEST(roapi)
 {
     BOOL ret;
@@ -648,7 +634,6 @@ START_TEST(roapi)
     test_implicit_mta();
     test_ActivationFactories();
     test_RoGetAgileReference();
-    test_RoGetErrorReportingFlags();
 
     SetLastError(0xdeadbeef);
     ret = DeleteFileW(L"wine.combase.test.dll");

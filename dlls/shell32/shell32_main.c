@@ -42,6 +42,7 @@
 
 #include "pidl.h"
 #include "shell32_main.h"
+#include "version.h"
 #include "shresdef.h"
 #include "initguid.h"
 #include "shfldr.h"
@@ -79,14 +80,14 @@ static DWORD shgfi_get_exe_type(LPCWSTR szFullPath)
      * Seek to the start of the file and read the header information.
      */
 
-    SetFilePointer( hfile, 0, NULL, FILE_BEGIN );
+    SetFilePointer( hfile, 0, NULL, SEEK_SET );
     ReadFile( hfile, &mz_header, sizeof(mz_header), &len, NULL );
 
-    SetFilePointer( hfile, mz_header.e_lfanew, NULL, FILE_BEGIN );
+    SetFilePointer( hfile, mz_header.e_lfanew, NULL, SEEK_SET );
     ReadFile( hfile, magic, sizeof(magic), &len, NULL );
     if ( *(DWORD*)magic == IMAGE_NT_SIGNATURE )
     {
-        SetFilePointer( hfile, mz_header.e_lfanew, NULL, FILE_BEGIN );
+        SetFilePointer( hfile, mz_header.e_lfanew, NULL, SEEK_SET );
         ReadFile( hfile, &nt, sizeof(nt), &len, NULL );
         CloseHandle( hfile );
         /* DLL files are not executable and should return 0 */
@@ -103,7 +104,7 @@ static DWORD shgfi_get_exe_type(LPCWSTR szFullPath)
     else if ( *(WORD*)magic == IMAGE_OS2_SIGNATURE )
     {
         IMAGE_OS2_HEADER ne;
-        SetFilePointer( hfile, mz_header.e_lfanew, NULL, FILE_BEGIN );
+        SetFilePointer( hfile, mz_header.e_lfanew, NULL, SEEK_SET );
         ReadFile( hfile, &ne, sizeof(ne), &len, NULL );
         CloseHandle( hfile );
         if (ne.ne_exetyp == 2)
@@ -264,7 +265,7 @@ DWORD_PTR WINAPI SHGetFileInfoW(LPCWSTR path,DWORD dwFileAttributes,
             STRRET str;
             hr = IShellFolder_GetDisplayNameOf( psfParent, pidlLast,
                                                 SHGDN_INFOLDER, &str);
-            StrRetToBufW(&str, pidlLast, psfi->szDisplayName, MAX_PATH);
+            StrRetToStrNW (psfi->szDisplayName, MAX_PATH, &str, pidlLast);
         }
     }
 
@@ -1046,6 +1047,54 @@ HRESULT WINAPI SHLoadNonloadedIconOverlayIdentifiers( VOID )
     return S_OK;
 }
 
+/***********************************************************************
+ * DllGetVersion [SHELL32.@]
+ *
+ * Retrieves version information of the 'SHELL32.DLL'
+ *
+ * PARAMS
+ *     pdvi [O] pointer to version information structure.
+ *
+ * RETURNS
+ *     Success: S_OK
+ *     Failure: E_INVALIDARG
+ *
+ * NOTES
+ *     Returns version of a shell32.dll from IE4.01 SP1.
+ */
+
+HRESULT WINAPI DllGetVersion (DLLVERSIONINFO *pdvi)
+{
+    /* FIXME: shouldn't these values come from the version resource? */
+    if (pdvi->cbSize == sizeof(DLLVERSIONINFO) ||
+        pdvi->cbSize == sizeof(DLLVERSIONINFO2))
+    {
+        pdvi->dwMajorVersion = WINE_FILEVERSION_MAJOR;
+        pdvi->dwMinorVersion = WINE_FILEVERSION_MINOR;
+        pdvi->dwBuildNumber = WINE_FILEVERSION_BUILD;
+        pdvi->dwPlatformID = WINE_FILEVERSION_PLATFORMID;
+        if (pdvi->cbSize == sizeof(DLLVERSIONINFO2))
+        {
+            DLLVERSIONINFO2 *pdvi2 = (DLLVERSIONINFO2 *)pdvi;
+
+            pdvi2->dwFlags = 0;
+            pdvi2->ullVersion = MAKEDLLVERULL(WINE_FILEVERSION_MAJOR,
+                                              WINE_FILEVERSION_MINOR,
+                                              WINE_FILEVERSION_BUILD,
+                                              WINE_FILEVERSION_PLATFORMID);
+        }
+        TRACE("%lu.%lu.%lu.%lu\n",
+              pdvi->dwMajorVersion, pdvi->dwMinorVersion,
+              pdvi->dwBuildNumber, pdvi->dwPlatformID);
+        return S_OK;
+    }
+    else
+    {
+        WARN("wrong DLLVERSIONINFO size from app\n");
+        return E_INVALIDARG;
+    }
+}
+
 /*************************************************************************
  * global variables of the shell32.dll
  * all are once per process
@@ -1185,17 +1234,6 @@ HRESULT WINAPI SHSetUnreadMailCountW(LPCWSTR mailaddress, DWORD count, LPCWSTR e
 HRESULT WINAPI SHEnumerateUnreadMailAccountsW(HKEY user, DWORD idx, LPWSTR mailaddress, INT mailaddresslen)
 {
     FIXME("%p %ld %p %d: stub\n", user, idx, mailaddress, mailaddresslen);
-    return E_NOTIMPL;
-}
-
-/***********************************************************************
- *              SHEvaluateSystemCommandTemplate (SHELL32.@)
- */
-HRESULT WINAPI SHEvaluateSystemCommandTemplate(PCWSTR cmdtemplate, PWSTR *application,
-                                               PWSTR *commandline, PWSTR *parameters)
-{
-    FIXME("(%s %p %p %p) stub!\n", debugstr_w(cmdtemplate), application,
-           commandline, parameters);
     return E_NOTIMPL;
 }
 

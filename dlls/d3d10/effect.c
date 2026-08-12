@@ -940,13 +940,8 @@ static HRESULT d3d10_effect_preshader_eval(struct d3d10_effect_preshader *p)
     for (i = 0; i < p->vars_count; ++i)
     {
         struct d3d10_ctab_var *v = &p->vars[i];
-        size_t size;
-
-        /* Constant table variables are allocated at register granularity.
-           Corresponding constant buffer variables does not share same alignment,
-           overall buffer size alignment to 16 bytes also does not help. */
-        size = min(v->length * sizeof(*dst), v->v->type->size_unpacked);
-        memcpy(dst + v->offset, v->v->buffer->u.buffer.local_buffer + v->v->buffer_offset, size);
+        memcpy(dst + v->offset, v->v->buffer->u.buffer.local_buffer + v->v->buffer_offset,
+                v->length * sizeof(*dst));
     }
 
     instr_count = *ip++;
@@ -2431,7 +2426,7 @@ static HRESULT parse_fx10_annotations(const char *data, size_t data_size, const 
             return hr;
     }
 
-    return S_OK;
+    return hr;
 }
 
 static HRESULT parse_fx10_anonymous_shader(struct d3d10_effect *e, D3D_SHADER_VARIABLE_TYPE basetype,

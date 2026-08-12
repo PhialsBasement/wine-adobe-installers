@@ -25,6 +25,7 @@
 #include "config.h"
 
 #include "ntstatus.h"
+#define WIN32_NO_STATUS
 #include "x11drv.h"
 #include "wine/debug.h"
 
@@ -32,6 +33,7 @@ WINE_DEFAULT_DEBUG_CHANNEL(x11drv);
 
 static struct x11drv_display_device_handler host_handler;
 static struct x11drv_settings_handler settings_handler;
+RECT gamescope_screen_rect;
 
 #define NEXT_DEVMODEW(mode) ((DEVMODEW *)((char *)((mode) + 1) + (mode)->dmDriverExtra))
 
@@ -41,18 +43,6 @@ static struct x11drv_settings_handler settings_handler;
 static const unsigned int depths_24[]  = {8, 16, 24};
 static const unsigned int depths_32[]  = {8, 16, 32};
 const unsigned int *depths;
-
-static const char *debugstr_devmodew( const DEVMODEW *devmode )
-{
-    char position[32] = {0};
-    if (devmode->dmFields & DM_POSITION) snprintf( position, sizeof(position), " at %s", wine_dbgstr_point( (POINT *)&devmode->dmPosition ) );
-    return wine_dbg_sprintf( "%ux%u %ubits %uHz rotated %u degrees %sstretched %sinterlaced%s",
-                             devmode->dmPelsWidth, devmode->dmPelsHeight, devmode->dmBitsPerPel,
-                             devmode->dmDisplayFrequency, devmode->dmDisplayOrientation * 90,
-                             devmode->dmDisplayFixedOutput == DMDFO_STRETCH ? "" : "un",
-                             devmode->dmDisplayFlags & DM_INTERLACED ? "" : "non-",
-                             position );
-}
 
 void X11DRV_Settings_SetHandler(const struct x11drv_settings_handler *new_handler)
 {
@@ -73,10 +63,10 @@ static BOOL nores_get_id(const WCHAR *device_name, BOOL is_primary, x11drv_setti
     return TRUE;
 }
 
-static BOOL nores_get_modes( x11drv_settings_id id, DWORD flags, struct x11drv_mode **new_modes, UINT *mode_count )
+static BOOL nores_get_modes( x11drv_settings_id id, DWORD flags, DEVMODEW **new_modes, UINT *mode_count, BOOL full )
 {
     RECT primary = get_host_primary_monitor_rect();
-    struct x11drv_mode *modes;
+    DEVMODEW *modes;
 
     modes = calloc(1, sizeof(*modes));
     if (!modes)
@@ -85,20 +75,25 @@ static BOOL nores_get_modes( x11drv_settings_id id, DWORD flags, struct x11drv_m
         return FALSE;
     }
 
-    modes[0].mode.dmSize = sizeof(*modes);
-    modes[0].mode.dmDriverExtra = 0;
-    modes[0].mode.dmFields = DM_DISPLAYORIENTATION | DM_BITSPERPEL | DM_PELSWIDTH | DM_PELSHEIGHT |
-                             DM_DISPLAYFLAGS | DM_DISPLAYFREQUENCY;
-    modes[0].mode.dmDisplayOrientation = DMDO_DEFAULT;
-    modes[0].mode.dmBitsPerPel = screen_bpp;
-    modes[0].mode.dmPelsWidth = primary.right;
-    modes[0].mode.dmPelsHeight = primary.bottom;
-    modes[0].mode.dmDisplayFlags = 0;
-    modes[0].mode.dmDisplayFrequency = 60;
+    modes[0].dmSize = sizeof(*modes);
+    modes[0].dmDriverExtra = 0;
+    modes[0].dmFields = DM_DISPLAYORIENTATION | DM_BITSPERPEL | DM_PELSWIDTH | DM_PELSHEIGHT |
+                        DM_DISPLAYFLAGS | DM_DISPLAYFREQUENCY;
+    modes[0].dmDisplayOrientation = DMDO_DEFAULT;
+    modes[0].dmBitsPerPel = screen_bpp;
+    modes[0].dmPelsWidth = primary.right;
+    modes[0].dmPelsHeight = primary.bottom;
+    modes[0].dmDisplayFlags = 0;
+    modes[0].dmDisplayFrequency = 60;
 
     *new_modes = modes;
     *mode_count = 1;
     return TRUE;
+}
+
+static void nores_free_modes(DEVMODEW *modes)
+{
+    free(modes);
 }
 
 static BOOL nores_get_current_mode(x11drv_settings_id id, DEVMODEW *mode)
@@ -129,7 +124,7 @@ static BOOL nores_get_current_mode(x11drv_settings_id id, DEVMODEW *mode)
     return TRUE;
 }
 
-static LONG nores_set_current_mode( x11drv_settings_id id, const struct x11drv_mode *mode )
+static LONG nores_set_current_mode(x11drv_settings_id id, const DEVMODEW *mode)
 {
     WARN("NoRes settings handler, ignoring mode change request.\n");
     return DISP_CHANGE_SUCCESSFUL;
@@ -146,22 +141,10 @@ void X11DRV_Settings_Init(void)
     nores_handler.priority = 1;
     nores_handler.get_id = nores_get_id;
     nores_handler.get_modes = nores_get_modes;
+    nores_handler.free_modes = nores_free_modes;
     nores_handler.get_current_mode = nores_get_current_mode;
     nores_handler.set_current_mode = nores_set_current_mode;
     X11DRV_Settings_SetHandler(&nores_handler);
-}
-
-static void strip_driver_extra( DEVMODEW *modes, UINT count )
-{
-    DEVMODEW *mode, *next;
-    UINT i;
-
-    for (i = 0, mode = modes; i < count; i++, mode = next)
-    {
-        next = NEXT_DEVMODEW(mode);
-        mode->dmDriverExtra = 0;
-        memcpy( modes + i, mode, sizeof(*mode) );
-    }
 }
 
 BOOL is_detached_mode(const DEVMODEW *mode)
@@ -182,27 +165,84 @@ static BOOL is_same_devmode( const DEVMODEW *a, const DEVMODEW *b )
            a->dmDisplayFrequency == b->dmDisplayFrequency;
 }
 
-static DWORD x11drv_mode_from_devmode( x11drv_settings_id id, DEVMODEW *mode, struct x11drv_mode *full )
+/* Get the full display mode with all the necessary fields set.
+ * Return NULL on failure. Caller should call free_full_mode() to free the returned mode. */
+static DEVMODEW *get_full_mode(x11drv_settings_id id, DEVMODEW *dev_mode)
 {
-    struct x11drv_mode *modes;
-    UINT count, i;
+    DEVMODEW *modes, *full_mode, *found_mode = NULL;
+    UINT mode_count, mode_idx;
 
-    full->mode = *mode;
-    full->mode.dmDriverExtra = sizeof(*full) - sizeof(full->mode);
-    if (is_detached_mode( mode )) return DISP_CHANGE_SUCCESSFUL;
+    if (is_detached_mode(dev_mode))
+        return dev_mode;
 
-    if (!settings_handler.get_modes( id, EDS_ROTATEDMODE, &modes, &count )) return DISP_CHANGE_BADMODE;
-    for (i = 0; i < count; i++) if (is_same_devmode( &modes[i].mode, mode )) break;
-    if (i < count)
+    if (!settings_handler.get_modes( id, EDS_ROTATEDMODE, &modes, &mode_count, TRUE )) return NULL;
+
+    for (mode_idx = 0; mode_idx < mode_count; ++mode_idx)
     {
-        *full = modes[i];
-        full->mode.dmFields |= DM_POSITION;
-        full->mode.dmPosition = mode->dmPosition;
-        memcpy( full->mode.dmDeviceName, mode->dmDeviceName, sizeof(mode->dmDeviceName) );
+        found_mode = (DEVMODEW *)((BYTE *)modes + (sizeof(*modes) + modes[0].dmDriverExtra) * mode_idx);
+        if (is_same_devmode( found_mode, dev_mode )) break;
     }
-    free( modes );
 
-    return i < count ? DISP_CHANGE_SUCCESSFUL : DISP_CHANGE_BADMODE;
+    if (!found_mode || mode_idx == mode_count)
+    {
+        settings_handler.free_modes(modes);
+        return NULL;
+    }
+
+    if (!(full_mode = malloc(sizeof(*found_mode) + found_mode->dmDriverExtra)))
+    {
+        settings_handler.free_modes(modes);
+        return NULL;
+    }
+
+    memcpy(full_mode, found_mode, sizeof(*found_mode) + found_mode->dmDriverExtra);
+    settings_handler.free_modes(modes);
+
+    full_mode->dmFields |= DM_POSITION;
+    full_mode->dmPosition = dev_mode->dmPosition;
+    return full_mode;
+}
+
+static void free_full_mode(DEVMODEW *mode)
+{
+    if (!is_detached_mode(mode))
+        free(mode);
+}
+
+static LONG apply_display_settings( DEVMODEW *displays, x11drv_settings_id *ids, BOOL do_attach )
+{
+    DEVMODEW *full_mode;
+    BOOL attached_mode;
+    LONG count, ret;
+    DEVMODEW *mode;
+
+    for (count = 0, mode = displays; mode->dmSize; mode = NEXT_DEVMODEW(mode), count++)
+    {
+        x11drv_settings_id *id = ids + count;
+
+        attached_mode = !is_detached_mode(mode);
+        if ((attached_mode && !do_attach) || (!attached_mode && do_attach))
+            continue;
+
+        /* FIXME: get a full mode again because X11 driver extra data isn't portable */
+        full_mode = get_full_mode(*id, mode);
+        if (!full_mode)
+            return DISP_CHANGE_BADMODE;
+
+        TRACE("handler:%s changing %s to position:(%d,%d) resolution:%ux%u frequency:%uHz "
+              "depth:%ubits orientation:%#x.\n", settings_handler.name,
+              wine_dbgstr_w(mode->dmDeviceName),
+              (int)full_mode->dmPosition.x, (int)full_mode->dmPosition.y, (int)full_mode->dmPelsWidth,
+              (int)full_mode->dmPelsHeight, (int)full_mode->dmDisplayFrequency,
+              (int)full_mode->dmBitsPerPel, (int)full_mode->dmDisplayOrientation);
+
+        ret = settings_handler.set_current_mode(*id, full_mode);
+        free_full_mode(full_mode);
+        if (ret != DISP_CHANGE_SUCCESSFUL)
+            return ret;
+    }
+
+    return DISP_CHANGE_SUCCESSFUL;
 }
 
 /***********************************************************************
@@ -212,8 +252,7 @@ static DWORD x11drv_mode_from_devmode( x11drv_settings_id id, DEVMODEW *mode, st
 LONG X11DRV_ChangeDisplaySettings( LPDEVMODEW displays, LPCWSTR primary_name, HWND hwnd, DWORD flags, LPVOID lpvoid )
 {
     INT left_most = INT_MAX, top_most = INT_MAX;
-    LONG count, ret = DISP_CHANGE_FAILED;
-    struct x11drv_mode *modes;
+    LONG count, ret = DISP_CHANGE_BADPARAM;
     x11drv_settings_id *ids;
     DEVMODEW *mode;
 
@@ -227,39 +266,19 @@ LONG X11DRV_ChangeDisplaySettings( LPDEVMODEW displays, LPCWSTR primary_name, HW
     }
 
     if (!(ids = calloc( count, sizeof(*ids) ))) return DISP_CHANGE_FAILED;
-    if (!(modes = calloc( count, sizeof(*modes) ))) goto done;
-
     for (count = 0, mode = displays; mode->dmSize; mode = NEXT_DEVMODEW(mode), count++)
     {
-        BOOL is_primary = !wcsicmp( mode->dmDeviceName, primary_name );
-        if (!settings_handler.get_id( mode->dmDeviceName, is_primary, ids + count )) goto done;
+        if (!settings_handler.get_id( mode->dmDeviceName, !wcsicmp( mode->dmDeviceName, primary_name ), ids + count )) goto done;
         mode->dmPosition.x -= left_most;
         mode->dmPosition.y -= top_most;
-        if ((ret = x11drv_mode_from_devmode( ids[count], mode, modes + count ))) goto done;
     }
-
-    XGrabServer( gdi_display );
 
     /* Detach displays first to free up CRTCs */
-    TRACE( "Using %s\n", settings_handler.name );
-    for (UINT i = 0; !ret && i < count; i++)
-    {
-        if (!is_detached_mode( &modes[i].mode )) continue;
-        TRACE( "  setting %s mode %s\n", debugstr_w(modes[i].mode.dmDeviceName), debugstr_devmodew(&modes[i].mode) );
-        ret = settings_handler.set_current_mode( ids[i], modes + i );
-    }
-    for (UINT i = 0; !ret && i < count; i++)
-    {
-        if (is_detached_mode( &modes[i].mode )) continue;
-        TRACE( "  setting %s mode %s\n", debugstr_w(modes[i].mode.dmDeviceName), debugstr_devmodew(&modes[i].mode) );
-        ret = settings_handler.set_current_mode( ids[i], modes + i );
-    }
-
-    XUngrabServer( gdi_display );
-    XFlush( gdi_display );
+    ret = apply_display_settings( displays, ids, FALSE );
+    if (ret == DISP_CHANGE_SUCCESSFUL)
+        ret = apply_display_settings( displays, ids, TRUE );
 
 done:
-    free( modes );
     free( ids );
     return ret;
 }
@@ -303,6 +322,67 @@ RECT get_host_primary_monitor_rect(void)
     if (adapters) host_handler.free_adapters(adapters);
     if (monitors) host_handler.free_monitors(monitors, monitor_count);
     return rect;
+}
+
+/* Get an array of host monitor rectangles in X11 root coordinates. Free the array when it's done */
+BOOL get_host_monitor_rects( RECT **ret_rects, int *ret_count )
+{
+    int gpu_count, adapter_count, monitor_count, rect_count = 0;
+    int gpu_idx, adapter_idx, monitor_idx, rect_idx;
+    struct x11drv_gpu *gpus = NULL;
+    struct x11drv_adapter *adapters = NULL;
+    struct gdi_monitor *monitors = NULL;
+    RECT *rects = NULL, *new_rects;
+    POINT left_top = {INT_MAX, INT_MAX};
+
+    if (!host_handler.get_gpus( &gpus, &gpu_count, FALSE )) goto failed;
+
+    for (gpu_idx = 0; gpu_idx < gpu_count; gpu_idx++)
+    {
+        if (!host_handler.get_adapters( gpus[gpu_idx].id, &adapters, &adapter_count )) goto failed;
+
+        for (adapter_idx = 0; adapter_idx < adapter_count; adapter_idx++)
+        {
+            if (!host_handler.get_monitors( adapters[adapter_idx].id, &monitors, &monitor_count )) goto failed;
+
+            new_rects = realloc( rects, (rect_count + monitor_count) * sizeof(*rects) );
+            if (!new_rects) goto failed;
+            rects = new_rects;
+
+            for (monitor_idx = 0; monitor_idx < monitor_count; monitor_idx++)
+            {
+                rects[rect_count++] = monitors[monitor_idx].rc_monitor;
+                left_top.x = min( left_top.x, monitors[monitor_idx].rc_monitor.left );
+                left_top.y = min( left_top.y, monitors[monitor_idx].rc_monitor.top );
+            }
+
+            host_handler.free_monitors( monitors, monitor_count );
+            monitors = NULL;
+        }
+
+        host_handler.free_adapters( adapters );
+        adapters = NULL;
+    }
+
+    host_handler.free_gpus( gpus, gpu_count );
+    gpus = NULL;
+
+    /* Convert from win32 virtual screen coordinates to X11 root coordinates */
+    for (rect_idx = 0; rect_idx < rect_count; rect_idx++)
+        OffsetRect( &rects[rect_idx], -left_top.x, -left_top.y );
+
+    *ret_rects = rects;
+    *ret_count = rect_count;
+    return TRUE;
+
+failed:
+    if (monitors) host_handler.free_monitors( monitors, monitor_count );
+    if (adapters) host_handler.free_adapters( adapters );
+    if (gpus) host_handler.free_gpus( gpus, gpu_count );
+    free( rects );
+    *ret_rects = NULL;
+    *ret_count = 0;
+    return FALSE;
 }
 
 RECT get_work_area(const RECT *monitor_rect)
@@ -391,7 +471,7 @@ UINT X11DRV_UpdateDisplayDevices( const struct gdi_device_manager *device_manage
     struct gdi_monitor *monitors;
     struct x11drv_gpu *gpus;
     INT gpu, adapter, monitor;
-    struct x11drv_mode *modes;
+    DEVMODEW *modes;
     UINT mode_count;
 
     TRACE( "via %s\n", debugstr_a(host_handler.name) );
@@ -435,11 +515,17 @@ UINT X11DRV_UpdateDisplayDevices( const struct gdi_device_manager *device_manage
             if (!settings_handler.get_id( devname, is_primary, &settings_id )) break;
 
             settings_handler.get_current_mode( settings_id, &current_mode );
-            if (settings_handler.get_modes( settings_id, EDS_ROTATEDMODE, &modes, &mode_count ))
+            if (!gpu && X11DRV_HasWindowManager( "steamcompmgr" ))
             {
-                strip_driver_extra( &modes->mode, mode_count );
-                device_manager->add_modes( &current_mode, mode_count, &modes->mode, param );
-                free( modes );
+                gamescope_screen_rect.left = gamescope_screen_rect.top = 0;
+                gamescope_screen_rect.right = current_mode.dmPelsWidth;
+                gamescope_screen_rect.bottom = current_mode.dmPelsHeight;
+            }
+
+            if (settings_handler.get_modes( settings_id, EDS_ROTATEDMODE, &modes, &mode_count, FALSE ))
+            {
+                device_manager->add_modes( &current_mode, mode_count, modes, param );
+                settings_handler.free_modes( modes );
             }
         }
 

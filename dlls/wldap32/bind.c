@@ -140,9 +140,7 @@ static int interact_callback( LDAP *ld, unsigned flags, void *defaults, void *sa
     SEC_WINNT_AUTH_IDENTITY_W *id = defaults;
     struct sasl_interact *ptr = sasl_interact;
 
-    TRACE( "%p, %08x, %p, %p\n", ld, flags, defaults, sasl_interact );
-
-    if (!defaults) return 0;
+    TRACE( "%p, %08xlx, %p, %p\n", ld, flags, defaults, sasl_interact );
 
     while (ptr && ptr->id != SASL_CB_LIST_END)
     {
@@ -206,7 +204,6 @@ ULONG CDECL ldap_bind_sW( LDAP *ld, WCHAR *dn, WCHAR *cred, ULONG method )
             idW.User = (unsigned short *)strnAtoW( (char *)id->User, id->UserLength, &idW.UserLength );
             idW.Domain = (unsigned short *)strnAtoW( (char *)id->Domain, id->DomainLength, &idW.DomainLength );
             idW.Password = (unsigned short *)strnAtoW( (char *)id->Password, id->PasswordLength, &idW.PasswordLength );
-            idW.Flags = SEC_WINNT_AUTH_IDENTITY_UNICODE;
             id = &idW;
         }
 
@@ -496,7 +493,6 @@ ULONG CDECL WLDAP32_ldap_unbind( LDAP *ld )
 
     if (SERVER_CTRLS(ld)) ldap_value_free_len( SERVER_CTRLS(ld) );
 
-    free( ld->ld_host );
     free( ld );
     return ret;
 }

@@ -25,6 +25,7 @@
 #include <stdarg.h>
 
 #include "ntstatus.h"
+#define WIN32_NO_STATUS
 #include "windef.h"
 #include "winternl.h"
 #include "wine/exception.h"
@@ -79,6 +80,92 @@ static RTL_CRITICAL_SECTION_DEBUG dynamic_unwind_debug =
 };
 static RTL_CRITICAL_SECTION dynamic_unwind_section = { &dynamic_unwind_debug, -1, 0, 0, 0, 0 };
 
+struct module_exception_dir_entry
+{
+    void *exception_dir;
+    void *dllbase;
+    DWORD size_of_image;
+    DWORD exception_dir_size;
+};
+
+#define MAX_MODULE_EXCEPTION_DIR_ENTRIES 512
+
+struct module_exception_dir_table
+{
+    DWORD count;
+    DWORD max_count;
+    DWORD unk;
+    DWORD unk2;
+    struct module_exception_dir_entry entries[MAX_MODULE_EXCEPTION_DIR_ENTRIES];
+};
+struct module_exception_dir_table DECLSPEC_ALLOCATE(".mrdata") exception_dir_table = { 1, MAX_MODULE_EXCEPTION_DIR_ENTRIES };
+
+C_ASSERT( sizeof(struct module_exception_dir_entry) == 0x18 );
+C_ASSERT( offsetof(struct module_exception_dir_table, entries) == 0x10 );
+
+void register_module_exception_directory( void *module )
+{
+    SIZE_T size = sizeof(exception_dir_table);
+    struct module_exception_dir_entry e;
+    void *addr = &exception_dir_table;
+    IMAGE_NT_HEADERS *nt;
+    ULONG old_prot;
+    unsigned int i;
+
+    if (!(nt = RtlImageNtHeader( module ))) return;
+    e.exception_dir = RtlImageDirectoryEntryToData( module, TRUE, IMAGE_DIRECTORY_ENTRY_EXCEPTION, &e.exception_dir_size );
+    if (!e.exception_dir) return;
+    e.size_of_image = nt->OptionalHeader.SizeOfImage;
+    e.dllbase = module;
+
+    RtlEnterCriticalSection( &dynamic_unwind_section );
+
+    if (exception_dir_table.count == MAX_MODULE_EXCEPTION_DIR_ENTRIES) goto done;
+
+    NtProtectVirtualMemory( NtCurrentProcess(), &addr, &size, PAGE_READWRITE, &old_prot );
+    /* First entry is reserved for ntdll regardless of base address order. */
+    if (exception_dir_table.count <= 2)
+    {
+        MEMORY_BASIC_INFORMATION mbi;
+
+        NtQueryVirtualMemory( GetCurrentProcess(), LdrInitializeThunk, MemoryBasicInformation, &mbi, sizeof(mbi), NULL );
+        if (module == mbi.AllocationBase)
+        {
+            exception_dir_table.entries[0] = e;
+            goto done;
+        }
+    }
+    for (i = 1; i < exception_dir_table.count; ++i)
+        if ((ULONG_PTR)module < (ULONG_PTR)exception_dir_table.entries[i].dllbase) break;
+    memmove( &exception_dir_table.entries[i + 1], &exception_dir_table.entries[i],
+             sizeof(*exception_dir_table.entries) * (exception_dir_table.count - i) );
+    exception_dir_table.entries[i] = e;
+    ++exception_dir_table.count;
+done:
+    RtlLeaveCriticalSection( &dynamic_unwind_section );
+}
+
+void unregister_module_exception_directory( void *module )
+{
+    SIZE_T size = sizeof(exception_dir_table);
+    void *addr = &exception_dir_table;
+    ULONG old_prot;
+    unsigned int i;
+
+    RtlEnterCriticalSection( &dynamic_unwind_section );
+    for (i = 1; i < exception_dir_table.count; ++i)
+    {
+        if (module == exception_dir_table.entries[i].dllbase)
+        {
+            NtProtectVirtualMemory( NtCurrentProcess(), &addr, &size, PAGE_READWRITE, &old_prot );
+            memmove( &exception_dir_table.entries[i], &exception_dir_table.entries[i + 1],
+                     sizeof(*exception_dir_table.entries) * (exception_dir_table.count - i - 1) );
+            --exception_dir_table.count;
+            break;
+        }
+    }
+    RtlLeaveCriticalSection( &dynamic_unwind_section );
+}
 
 static RUNTIME_FUNCTION *lookup_dynamic_function_table( ULONG_PTR pc, ULONG_PTR *base, ULONG *count )
 {
@@ -522,12 +609,9 @@ static void *unwind_packed_data( ULONG_PTR base, ULONG_PTR pc, ARM64_RUNTIME_FUN
                                  ARM64_NT_CONTEXT *context, KNONVOLATILE_CONTEXT_POINTERS_ARM64 *ptrs )
 {
     int i;
-    unsigned int len, offset;
-    unsigned int int_size = func->RegI * 8, fp_size = func->RegF * 8, regsave, local_size;
-    unsigned int int_regs, fp_regs, saved_regs, homing = func->H;
-    BYTE prologue[40], *prologue_end, epilogue[40], *epilogue_end;
-    unsigned int ppos = 0, epos = 0;
-    BOOLEAN final_pc_from_lr;
+    unsigned int len, offset, skip = 0;
+    unsigned int int_size = func->RegI * 8, fp_size = func->RegF * 8, h_size = func->H * 4, regsave, local_size;
+    unsigned int int_regs, fp_regs, saved_regs, local_size_regs;
 
     TRACE( "function %I64x-%I64x: len=%#x flag=%x regF=%u regI=%u H=%u CR=%u frame=%x\n",
            base + func->BeginAddress, base + func->BeginAddress + func->FunctionLength * 4,
@@ -542,129 +626,133 @@ static void *unwind_packed_data( ULONG_PTR base, ULONG_PTR pc, ARM64_RUNTIME_FUN
     int_regs = int_size / 8;
     fp_regs = fp_size / 8;
     saved_regs = regsave / 8;
+    local_size_regs = local_size / 8;
 
-    offset = ((pc - base) - func->BeginAddress) / 4;
-
-    if (func->H && func->RegI == 0 && func->RegF == 0 && func->CR != 1)
-    {
-        local_size += regsave;
-        homing = 0;
-    }
-
-    /* Synthesize prologue opcodes */
-#define WRITE_ONE(x) do { prologue[ppos++] = epilogue[epos++] = (x); } while (0)
-#define WRITE_TWO(x) do { WRITE_ONE((x) >> 8); WRITE_ONE((x) & 0xff); } while (0)
-    if (func->CR == 2 || func->CR == 3)
-    {
-        WRITE_ONE(0xe1); /* set_fp */
-        if (local_size <= 512)
-        {
-            WRITE_ONE(0x80 | (local_size/8 - 1)); /* save_fplr_x */
-        }
-        else
-        {
-            WRITE_ONE(0x40); /* save_fplr */
-        }
-    }
-    if ((func->CR <= 1 && local_size > 0) || local_size > 512)
-    {
-        if (local_size <= 512)
-        {
-            WRITE_ONE(local_size/16); /* alloc_s */
-        }
-        else if (local_size <= 4080)
-        {
-            WRITE_TWO(0xc000 | (local_size/16)); /* alloc_m */
-        }
-        else
-        {
-            WRITE_ONE((local_size - 4080)/16); /* alloc_s */
-            WRITE_TWO(0xc000 | (4080/16)); /* alloc_m */
-        }
-    }
-    if (homing)
-    {
-        prologue[ppos++] = 0xe3; /* nop */
-        prologue[ppos++] = 0xe3; /* nop */
-        prologue[ppos++] = 0xe3; /* nop */
-        prologue[ppos++] = 0xe3; /* nop */
-    }
-    if (func->RegF > 0)
-    {
-        if (func->RegF % 2 == 0)
-        {
-            WRITE_TWO(0xdc00 | ((func->RegF) << 6) | (int_regs + fp_regs - 1)); /* save_freg */
-        }
-        for (i = (func->RegF + 1) / 2 - 1; i >= 0; i--)
-        {
-            if (!i && !int_size)
-                WRITE_TWO(0xda00 | ((0) << 6) | (saved_regs - 1)); /* save_fregp_x */
-            else
-                WRITE_TWO(0xd800 | ((2*i) << 6) | (int_regs + 2*i)); /* save_fregp d(8+2*i), int_regs + 2*i */
-        }
-    }
-    if (func->CR == 1 && func->RegI % 2 == 0)
-    {
-        if (func->RegI == 0)
-            WRITE_TWO(0xd400 | ((30 - 19) << 5) | (saved_regs - 1)); /* save_reg_x x30 */
-        else
-            WRITE_TWO(0xd000 | ((30 - 19) << 6) | (int_regs - 1)); /* save_reg x30 */
-    }
-    if (func->RegI > 0)
-    {
-        if (func->RegI % 2)
-        {
-            if (func->CR == 1)
-            {
-                WRITE_TWO(0xd600 | ((func->RegI - 1)/2) << 6 | (int_regs - 2)); /* save_lrpair x(19+RegI-1), (int_regs-2) */
-                if (func->RegI == 1)
-                    WRITE_ONE(saved_regs/2); /* alloc_s */
-            }
-            else
-            {
-                if (func->RegI == 1)
-                    WRITE_TWO(0xd400 | ((0) << 5) | (saved_regs - 1)); /* save_reg_x x19 */
-                else
-                    WRITE_TWO(0xd000 | ((int_regs - 1) << 6) | (int_regs - 1)); /* save_reg x(19+int_regs-1) */
-            }
-        }
-        for (i = func->RegI / 2 - 1; i >= 0; i--)
-        {
-            if (i)
-                WRITE_TWO(0xc800 | ((2*i) << 6) | (2*i)); /* save_regp x(19+2*i), 2*i */
-            else
-                WRITE_TWO(0xcc00 | ((0) << 6) | (saved_regs - 1)); /* save_regp_x x19, saved_regs */
-        }
-    }
-    if (func->CR == 2)
-        WRITE_ONE(0xfc); /* pac_sign_lr */
-    WRITE_ONE(0xe4); /* end */
-    prologue_end = &prologue[ppos];
-    epilogue_end = &epilogue[epos];
-
+    /* check for prolog/epilog */
     if (func->Flag == 1)
     {
-        if (offset < (prologue_end - prologue) || offset >= func->FunctionLength - (epilogue_end - epilogue))
+        offset = ((pc - base) - func->BeginAddress) / 4;
+        if (offset < 17 || offset >= func->FunctionLength - 15)
         {
-            /* Check prologue */
-            len = get_sequence_len( prologue, prologue_end );
-            if (offset < len)
+            len = (int_size + 8) / 16 + (fp_size + 8) / 16;
+            switch (func->CR)
             {
-                process_unwind_codes( prologue, prologue_end, context, ptrs, len - offset, &final_pc_from_lr );
-                return NULL;
+            case 2:
+                len++; /* pacibsp */
+                /* fall through */
+            case 3:
+                len++; /* mov x29,sp */
+                len++; /* stp x29,lr,[sp,0] */
+                if (local_size <= 512) break;
+                /* fall through */
+            case 0:
+            case 1:
+                if (local_size) len++;  /* sub sp,sp,#local_size */
+                if (local_size > 4088) len++;  /* sub sp,sp,#4088 */
+                break;
             }
-            /* Check epilogue */
-            len = get_sequence_len( epilogue, epilogue_end );
-            if (offset >= func->FunctionLength - (len + 1))  /* epilog */
+            if (offset < len + h_size)  /* prolog */
             {
-                process_unwind_codes( epilogue, epilogue_end, context, ptrs, offset - (func->FunctionLength - (len + 1)), &final_pc_from_lr );
-                return NULL;
+                skip = len + h_size - offset;
+            }
+            else if (offset >= func->FunctionLength - (len + 1))  /* epilog */
+            {
+                skip = offset - (func->FunctionLength - (len + 1));
+                h_size = 0;
             }
         }
     }
 
-    /* Execute full prologue */
-    process_unwind_codes( prologue, prologue_end, context, ptrs, 0, &final_pc_from_lr );
+    if (!skip)
+    {
+        if (func->CR == 3 || func->CR == 2)
+        {
+            /* mov x29,sp */
+            context->Sp = context->Fp;
+            restore_regs( 29, 2, 0, context, ptrs );
+        }
+        context->Sp += local_size;
+        if (fp_size) restore_fpregs( 8, fp_regs, int_regs, context, ptrs );
+        if (func->CR == 1) restore_regs( 30, 1, int_regs - 1, context, ptrs );
+        restore_regs( 19, func->RegI, -saved_regs, context, ptrs );
+    }
+    else
+    {
+        unsigned int pos = 0;
+
+        switch (func->CR)
+        {
+        case 3:
+        case 2:
+            /* mov x29,sp */
+            if (pos++ >= skip) context->Sp = context->Fp;
+            if (local_size <= 512)
+            {
+                /* stp x29,lr,[sp,-#local_size]! */
+                if (pos++ >= skip) restore_regs( 29, 2, -local_size_regs, context, ptrs );
+                break;
+            }
+            /* stp x29,lr,[sp,0] */
+            if (pos++ >= skip) restore_regs( 29, 2, 0, context, ptrs );
+            /* fall through */
+        case 0:
+        case 1:
+            if (!local_size) break;
+            /* sub sp,sp,#local_size */
+            if (pos++ >= skip) context->Sp += (local_size - 1) % 4088 + 1;
+            if (local_size > 4088 && pos++ >= skip) context->Sp += 4088;
+            break;
+        }
+
+        pos += h_size;
+
+        if (fp_size)
+        {
+            if (func->RegF % 2 == 0 && pos++ >= skip)
+                /* str d%u,[sp,#fp_size] */
+                restore_fpregs( 8 + func->RegF, 1, int_regs + fp_regs - 1, context, ptrs );
+            for (i = (func->RegF + 1) / 2 - 1; i >= 0; i--)
+            {
+                if (pos++ < skip) continue;
+                if (!i && !int_size)
+                     /* stp d8,d9,[sp,-#regsave]! */
+                    restore_fpregs( 8, 2, -saved_regs, context, ptrs );
+                else
+                     /* stp dn,dn+1,[sp,#offset] */
+                    restore_fpregs( 8 + 2 * i, 2, int_regs + 2 * i, context, ptrs );
+            }
+        }
+
+        if (func->RegI % 2)
+        {
+            if (pos++ >= skip)
+            {
+                /* stp xn,lr,[sp,#offset] */
+                if (func->CR == 1) restore_regs( 30, 1, int_regs - 1, context, ptrs );
+                /* str xn,[sp,#offset] */
+                restore_regs( 18 + func->RegI, 1,
+                              (func->RegI > 1) ? func->RegI - 1 : -saved_regs,
+                              context, ptrs );
+            }
+        }
+        else if (func->CR == 1)
+        {
+            /* str lr,[sp,#offset] */
+            if (pos++ >= skip) restore_regs( 30, 1, func->RegI ? int_regs - 1 : -saved_regs, context, ptrs );
+        }
+
+        for (i = func->RegI / 2 - 1; i >= 0; i--)
+        {
+            if (pos++ < skip) continue;
+            if (i)
+                /* stp xn,xn+1,[sp,#offset] */
+                restore_regs( 19 + 2 * i, 2, 2 * i, context, ptrs );
+            else
+                /* stp x19,x20,[sp,-#regsave]! */
+                restore_regs( 19, 2, -saved_regs, context, ptrs );
+        }
+    }
+    if (func->CR == 2) do_pac_auth( context );
     return NULL;
 }
 
@@ -794,46 +882,25 @@ NTSTATUS WINAPI RtlVirtualUnwind2( ULONG type, ULONG_PTR base, ULONG_PTR pc,
                                    PEXCEPTION_ROUTINE *handler_ret, ULONG flags )
 {
     BOOLEAN final_pc_from_lr = TRUE;
-    PEXCEPTION_ROUTINE handler;
-    void *data = NULL;
-
     TRACE( "type %lx base %I64x pc %I64x rva %I64x sp %I64x\n", type, base, pc, pc - base, context->Sp );
     if (limit_low || limit_high) FIXME( "limits not supported\n" );
 
     if (!func && pc == context->Lr) return STATUS_BAD_FUNCTION_TABLE;  /* invalid leaf function */
 
+    *handler_data = NULL;
     context->ContextFlags |= CONTEXT_UNWOUND_TO_CALL;
 
     if (!func)  /* leaf function */
-    {
-        context->Pc = context->Lr;
-        *frame_ret = context->Sp;
-        if (handler_ret) *handler_ret = NULL;
-        *handler_data = NULL;
-        return STATUS_SUCCESS;
-    }
+        *handler_ret = NULL;
+    else if (func->Flag)
+        *handler_ret = unwind_packed_data( base, pc, func, context, ctx_ptr );
+    else
+        *handler_ret = unwind_full_data( base, pc, func, context, handler_data, ctx_ptr, &final_pc_from_lr );
 
-    __TRY
-    {
-        if (func->Flag)
-            handler = unwind_packed_data( base, pc, func, context, ctx_ptr );
-        else
-            handler = unwind_full_data( base, pc, func, context, &data, ctx_ptr, &final_pc_from_lr );
+    if (final_pc_from_lr) context->Pc = context->Lr;
 
-        if (final_pc_from_lr) context->Pc = context->Lr;
-        *frame_ret = context->Sp;
-
-        if (handler_ret) *handler_ret = handler;
-        *handler_data = data;
-    }
-    __EXCEPT_PAGE_FAULT
-    {
-        WARN( "Access violation.\n" );
-        return STATUS_ACCESS_VIOLATION;
-    }
-    __ENDTRY
-
-    TRACE( "ret: pc=%I64x lr=%I64x sp=%I64x handler=%p\n", context->Pc, context->Lr, context->Sp, handler );
+    TRACE( "ret: pc=%I64x lr=%I64x sp=%I64x handler=%p\n", context->Pc, context->Lr, context->Sp, *handler_ret );
+    *frame_ret = context->Sp;
     return STATUS_SUCCESS;
 }
 
@@ -921,8 +988,7 @@ EXCEPTION_DISPOSITION WINAPI __C_specific_handler( EXCEPTION_RECORD *rec, void *
             }
             TRACE( "unwinding to target %Ix\n", base + table->ScopeRecord[i].JumpTarget );
             RtlUnwindEx( frame, (char *)base + table->ScopeRecord[i].JumpTarget,
-                         rec, ULongToPtr(rec->ExceptionCode), (CONTEXT *)dispatch->ContextRecord,
-                         dispatch->HistoryTable );
+                         rec, 0, (CONTEXT *)dispatch->ContextRecord, dispatch->HistoryTable );
         }
     }
     return ExceptionContinueSearch;
@@ -1613,8 +1679,7 @@ EXCEPTION_DISPOSITION WINAPI __C_specific_handler( EXCEPTION_RECORD *rec, void *
             }
             TRACE( "unwinding to target %lx\n", base + table->ScopeRecord[i].JumpTarget );
             RtlUnwindEx( frame, (char *)base + table->ScopeRecord[i].JumpTarget,
-                         rec, ULongToPtr(rec->ExceptionCode), dispatch->ContextRecord,
-                         dispatch->HistoryTable );
+                         rec, 0, dispatch->ContextRecord, dispatch->HistoryTable );
         }
     }
     return ExceptionContinueSearch;
@@ -2092,8 +2157,8 @@ NTSTATUS WINAPI RtlVirtualUnwind2( ULONG type, ULONG_PTR base, ULONG_PTR pc,
     {
         context->Rip = *(ULONG64 *)context->Rsp;
         context->Rsp += sizeof(ULONG64);
-        if (type) *data = NULL;
-        if (handler_ret) *handler_ret = NULL;
+        *data = NULL;
+        *handler_ret = NULL;
         return STATUS_SUCCESS;
     }
 
@@ -2128,7 +2193,7 @@ NTSTATUS WINAPI RtlVirtualUnwind2( ULONG type, ULONG_PTR base, ULONG_PTR pc,
                 TRACE("inside epilog.\n");
                 interpret_epilog( (BYTE *)pc, context, ctx_ptr );
                 *frame_ret = info->frame_reg ? context->Rsp - 8 : frame;
-                if (handler_ret) *handler_ret = NULL;
+                *handler_ret = NULL;
                 return STATUS_SUCCESS;
             }
         }
@@ -2209,12 +2274,12 @@ NTSTATUS WINAPI RtlVirtualUnwind2( ULONG type, ULONG_PTR base, ULONG_PTR pc,
         context->Rsp += sizeof(ULONG64);
     }
 
-    if (handler_ret) *handler_ret = NULL;
+    *handler_ret = NULL;
 
     if (!(info->flags & type)) return STATUS_SUCCESS;  /* no matching handler */
     if (prolog_offset != ~0) return STATUS_SUCCESS;  /* inside prolog */
 
-    if (handler_ret) *handler_ret = (PEXCEPTION_ROUTINE)((char *)base + handler_data->handler);
+    *handler_ret = (PEXCEPTION_ROUTINE)((char *)base + handler_data->handler);
     *data = &handler_data->handler + 1;
     return STATUS_SUCCESS;
 }
@@ -2308,8 +2373,7 @@ EXCEPTION_DISPOSITION WINAPI __C_specific_handler( EXCEPTION_RECORD *rec, void *
             }
             TRACE( "unwinding to target %Ix\n", base + table->ScopeRecord[i].JumpTarget );
             RtlUnwindEx( frame, (char *)base + table->ScopeRecord[i].JumpTarget,
-                         rec, ULongToPtr(rec->ExceptionCode), dispatch->ContextRecord,
-                         dispatch->HistoryTable );
+                         rec, 0, dispatch->ContextRecord, dispatch->HistoryTable );
         }
     }
     return ExceptionContinueSearch;
@@ -2385,6 +2449,16 @@ __ASM_GLOBAL_IMPORT(RtlUnwind)
 void WINAPI _local_unwind( void *frame, void *target_ip )
 {
     RtlUnwind( frame, target_ip, NULL, NULL );
+}
+
+#else
+
+void register_module_exception_directory( void *module )
+{
+}
+
+void unregister_module_exception_directory( void *module )
+{
 }
 
 #endif  /* !__i386__ */

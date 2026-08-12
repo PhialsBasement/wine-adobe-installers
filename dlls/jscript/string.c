@@ -89,7 +89,7 @@ static HRESULT stringobj_to_string(jsval_t vthis, jsval_t *r)
 
     if(!(string = string_this(vthis))) {
         WARN("this is not a string object\n");
-        return JS_E_STRING_EXPECTED;
+        return E_FAIL;
     }
 
     if(r)
@@ -1501,7 +1501,7 @@ static void String_destructor(jsdisp_t *dispex)
     jsstr_release(This->str);
 }
 
-static HRESULT String_lookup_prop(jsdisp_t *jsdisp, const WCHAR *name, unsigned flags, struct property_info *desc)
+static unsigned String_indexed_len(jsdisp_t *jsdisp)
 {
     StringInstance *string = string_from_jsdisp(jsdisp);
 
@@ -1512,34 +1512,46 @@ static HRESULT String_lookup_prop(jsdisp_t *jsdisp, const WCHAR *name, unsigned 
      * properly.
      */
     if(string->dispex.ctx->version < 2)
-        return DISP_E_UNKNOWNNAME;
+        return 0;
 
-    return jsdisp_index_lookup(&string->dispex, name, jsstr_length(string->str), desc);
+    return jsstr_length(string->str);
 }
 
-static HRESULT String_prop_get(jsdisp_t *jsdisp, unsigned idx, jsval_t *r)
+static HRESULT String_prop_get(jsdisp_t *jsdisp, DISPID id, jsval_t *r)
 {
     StringInstance *string = string_from_jsdisp(jsdisp);
     jsstr_t *ret;
 
-    ret = jsstr_substr(string->str, idx, 1);
+    if(!is_indexed_prop_id(id))
+        return S_FALSE;
+
+    ret = jsstr_substr(string->str, indexed_prop_id_to_idx(id), 1);
     if(!ret)
         return E_OUTOFMEMORY;
 
-    TRACE("%p[%u] = %s\n", string, idx, debugstr_jsstr(ret));
+    TRACE("%p[%u] = %s\n", string, indexed_prop_id_to_idx(id), debugstr_jsstr(ret));
 
     *r = jsval_string(ret);
     return S_OK;
 }
 
-static HRESULT String_fill_props(jsdisp_t *jsdisp)
+static HRESULT String_prop_put(jsdisp_t *jsdisp, DISPID id, jsval_t val)
 {
-    StringInstance *string = string_from_jsdisp(jsdisp);
+    return is_indexed_prop_id(id) ? S_OK : S_FALSE;
+}
 
-    if(string->dispex.ctx->version < 2)
-        return S_OK;
+static HRESULT String_prop_get_desc(jsdisp_t *jsdisp, DISPID id, BOOL flags_only, property_desc_t *desc)
+{
+    if(!flags_only) {
+        HRESULT hres = String_prop_get(jsdisp, id, &desc->value);
+        if(hres != S_OK)
+            return hres;
+    }else if(!is_indexed_prop_id(id)) {
+        return S_FALSE;
+    }
 
-    return jsdisp_fill_indices(&string->dispex, jsstr_length(string->str));
+    desc->flags = PROPF_ENUMERABLE;
+    return S_OK;
 }
 
 static const builtin_prop_t String_props[] = {
@@ -1591,13 +1603,14 @@ static const builtin_prop_t StringInst_props[] = {
 };
 
 static const builtin_info_t StringInst_info = {
-    .class       = JSCLASS_STRING,
-    .props_cnt   = ARRAY_SIZE(StringInst_props),
-    .props       = StringInst_props,
-    .destructor  = String_destructor,
-    .lookup_prop = String_lookup_prop,
-    .prop_get    = String_prop_get,
-    .fill_props  = String_fill_props,
+    .class         = JSCLASS_STRING,
+    .props_cnt     = ARRAY_SIZE(StringInst_props),
+    .props         = StringInst_props,
+    .destructor    = String_destructor,
+    .indexed_len   = String_indexed_len,
+    .prop_get      = String_prop_get,
+    .prop_put      = String_prop_put,
+    .prop_get_desc = String_prop_get_desc,
 };
 
 /* ECMA-262 3rd Edition    15.5.3.2 */

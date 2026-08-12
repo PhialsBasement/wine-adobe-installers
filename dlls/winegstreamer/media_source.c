@@ -1380,6 +1380,7 @@ static ULONG WINAPI media_source_Release(IMFMediaSource *iface)
     {
         IMFMediaSource_Shutdown(iface);
         IMFMediaEventQueue_Release(source->event_queue);
+        IMFByteStream_Release(source->byte_stream);
         wg_parser_destroy(source->wg_parser);
         source->cs.DebugInfo->Spare[0] = 0;
         DeleteCriticalSection(&source->cs);
@@ -1485,9 +1486,6 @@ static HRESULT WINAPI media_source_Start(IMFMediaSource *iface, IMFPresentationD
 
     TRACE("%p, %p, %p, %p.\n", iface, descriptor, time_format, position);
 
-    if (!time_format)
-        time_format = &GUID_NULL;
-
     EnterCriticalSection(&source->cs);
 
     if (source->state == SOURCE_SHUTDOWN)
@@ -1584,7 +1582,6 @@ static HRESULT WINAPI media_source_Shutdown(IMFMediaSource *iface)
     IMFMediaEventQueue_QueueEventParamVar(source->event_queue, MEError, &GUID_NULL, MF_E_SHUTDOWN, NULL);
     IMFMediaEventQueue_Shutdown(source->event_queue);
     IMFByteStream_Close(source->byte_stream);
-    IMFByteStream_Release(source->byte_stream);
 
     while (source->stream_count--)
     {
@@ -1670,7 +1667,7 @@ static HRESULT media_source_create(struct object_context *context, IMFMediaSourc
     if (FAILED(hr = MFAllocateWorkQueue(&object->async_commands_queue)))
         goto fail;
 
-    if (!(parser = wg_parser_create(FALSE)))
+    if (!(parser = wg_parser_create(FALSE, FALSE)))
     {
         hr = E_OUTOFMEMORY;
         goto fail;
@@ -1714,6 +1711,28 @@ static HRESULT media_source_create(struct object_context *context, IMFMediaSourc
         object->descriptors[i] = descriptor;
         object->streams[i] = stream;
         object->stream_count++;
+    }
+
+    /* Hack for bug 19766 - Biomutant (597820) [T5] Title Hangs After Intro Cut Scene Unless Skipped.
+     *
+     * Unreal Engine 4 games expect presentation clock correlated time to run past media source
+     * duration[1], which assumes that all streams in a media source have the same duration.
+     * Biomutant_Trailer.mp4 from Biomutant(597820) has a 1:27.734s video stream and a 1:27.776s
+     * audio stream so the media source duration is reported to be 1:27.776s. However, the game
+     * builds a topology that only uses the video stream. So the last presentation clock correlated
+     * time could be something before the media source duration 1:27.776s before it's stopped. In
+     * Unreal Engine 4.18 source, on every frame FWmfMediaSession::GetEvents()[2] checks
+     * "Time > CurrentDuration" to decide whether to stop its media session. With the time check
+     * fails, the game will hang forever waiting for the session to stop. This hack shortens the
+     * media source duration to satisfy the condition check. The reason why it works on Windows is
+     * probably due to a delay caused a busy CPU and different scheduling.
+     *
+     * [1][2]: UnrealEngine-4.18/Engine/Plugins/Media/WmfMedia/Source/WmfMedia/Private/Wmf/WmfMediaSession.cpp#FWmfMediaSession::GetEvents()
+     */
+    {
+        const char *id = getenv("SteamGameId");
+        if (id && !strcmp(id, "597820") && object->duration == 877760000) /* Biomutant_Trailer.mp4 */
+            object->duration = 877340000;
     }
 
     media_source_init_descriptors(object);
@@ -2075,6 +2094,268 @@ HRESULT gstreamer_byte_stream_handler_create(REFIID riid, void **obj)
 
     hr = IMFByteStreamHandler_QueryInterface(&handler->IMFByteStreamHandler_iface, riid, obj);
     IMFByteStreamHandler_Release(&handler->IMFByteStreamHandler_iface);
+
+    return hr;
+}
+
+struct scheme_handler
+{
+    IMFSchemeHandler IMFSchemeHandler_iface;
+    IMFAsyncCallback IMFAsyncCallback_iface;
+    LONG refcount;
+    struct list results;
+    CRITICAL_SECTION cs;
+};
+
+static struct scheme_handler *impl_from_IMFSchemeHandler(IMFSchemeHandler *iface)
+{
+    return CONTAINING_RECORD(iface, struct scheme_handler, IMFSchemeHandler_iface);
+}
+
+static struct scheme_handler *scheme_handler_from_IMFAsyncCallback(IMFAsyncCallback *iface)
+{
+    return CONTAINING_RECORD(iface, struct scheme_handler, IMFAsyncCallback_iface);
+}
+
+static struct result_entry *scheme_handler_find_result_entry(struct scheme_handler *handler, IMFAsyncResult *result)
+{
+    struct result_entry *entry;
+
+    EnterCriticalSection(&handler->cs);
+    LIST_FOR_EACH_ENTRY(entry, &handler->results, struct result_entry, entry)
+    {
+        if (result == entry->result)
+        {
+            list_remove(&entry->entry);
+            LeaveCriticalSection(&handler->cs);
+            return entry;
+        }
+    }
+    LeaveCriticalSection(&handler->cs);
+
+    return NULL;
+}
+
+
+static HRESULT WINAPI scheme_handler_QueryIntace(IMFSchemeHandler *iface, REFIID riid, void **obj)
+{
+    TRACE("%p, %s, %p.\n", iface, debugstr_guid(riid), obj);
+
+    if (IsEqualIID(riid, &IID_IMFSchemeHandler) ||
+            IsEqualIID(riid, &IID_IUnknown))
+    {
+        *obj = iface;
+        IMFSchemeHandler_AddRef(iface);
+        return S_OK;
+    }
+
+    WARN("Unsupported %s.\n", debugstr_guid(riid));
+    *obj = NULL;
+    return E_NOINTERFACE;
+}
+
+static ULONG WINAPI scheme_handler_AddRef(IMFSchemeHandler *iface)
+{
+    struct scheme_handler *handler = impl_from_IMFSchemeHandler(iface);
+    ULONG refcount = InterlockedIncrement(&handler->refcount);
+
+    TRACE("%p, refcount %lu.\n", handler, refcount);
+
+    return refcount;
+}
+
+static ULONG WINAPI scheme_handler_Release(IMFSchemeHandler *iface)
+{
+    struct scheme_handler *handler = impl_from_IMFSchemeHandler(iface);
+    ULONG refcount = InterlockedDecrement(&handler->refcount);
+    struct result_entry *result, *next;
+
+    TRACE("%p, refcount %lu.\n", iface, refcount);
+
+    if (!refcount)
+    {
+        LIST_FOR_EACH_ENTRY_SAFE(result, next, &handler->results, struct result_entry, entry)
+            result_entry_destroy(result);
+        DeleteCriticalSection(&handler->cs);
+        free(handler);
+    }
+
+    return refcount;
+}
+
+static HRESULT WINAPI scheme_handler_BeginCreateObject(IMFSchemeHandler *iface, const WCHAR *url, DWORD flags,
+        IPropertyStore *props, IUnknown **cancel_cookie, IMFAsyncCallback *callback, IUnknown *state)
+{
+    struct scheme_handler *handler = impl_from_IMFSchemeHandler(iface);
+    IMFByteStream *bytestream;
+    IMFAsyncResult *result;
+    IUnknown *context;
+    IStream *stream;
+    HRESULT hr;
+
+    TRACE("%p, %s, %#lx, %p, %p, %p, %p.\n", iface, debugstr_w(url), flags, props, cancel_cookie, callback, state);
+
+    if (cancel_cookie)
+        *cancel_cookie = NULL;
+
+    if (FAILED(hr = CreateStreamOnHGlobal(0, TRUE, &stream)))
+        return hr;
+
+    hr = MFCreateMFByteStreamOnStream(stream, &bytestream);
+    IStream_Release(stream);
+    if (FAILED(hr))
+        return hr;
+
+    if (FAILED(hr = MFCreateAsyncResult(NULL, callback, state, &result)))
+        return hr;
+    if (FAILED(hr = object_context_create(flags, bytestream, url, -1, result, &context)))
+    {
+        IMFAsyncResult_Release(result);
+        return hr;
+    }
+
+    hr = MFPutWorkItem(MFASYNC_CALLBACK_QUEUE_IO, &handler->IMFAsyncCallback_iface, context);
+    IUnknown_Release(context);
+    IMFAsyncResult_Release(result);
+
+    return hr;
+}
+
+static HRESULT WINAPI scheme_handler_EndCreateObject(IMFSchemeHandler *iface, IMFAsyncResult *result,
+        MF_OBJECT_TYPE *obj_type, IUnknown **object)
+{
+    struct scheme_handler *handler = impl_from_IMFSchemeHandler(iface);
+    struct result_entry *entry;
+    HRESULT hr;
+
+    TRACE("%p, %p, %p, %p.\n", iface, result, obj_type, object);
+
+    if (!(entry = scheme_handler_find_result_entry(handler, result)))
+    {
+        *obj_type = MF_OBJECT_INVALID;
+        *object = NULL;
+        return MF_E_UNEXPECTED;
+    }
+
+    hr = IMFAsyncResult_GetStatus(entry->result);
+    *obj_type = MF_OBJECT_MEDIASOURCE;
+    *object = entry->object;
+    IUnknown_AddRef(*object);
+    result_entry_destroy(entry);
+
+    return hr;
+}
+
+static HRESULT WINAPI scheme_handler_CancelObjectCreation(IMFSchemeHandler *iface, IUnknown *cancel_cookie)
+{
+    /* Cancellation is not supported. */
+    TRACE("%p, %p.\n", iface, cancel_cookie);
+    return MF_E_UNEXPECTED;
+}
+
+static const IMFSchemeHandlerVtbl scheme_handler_vtbl =
+{
+    scheme_handler_QueryIntace,
+    scheme_handler_AddRef,
+    scheme_handler_Release,
+    scheme_handler_BeginCreateObject,
+    scheme_handler_EndCreateObject,
+    scheme_handler_CancelObjectCreation,
+};
+
+static HRESULT WINAPI scheme_handler_callback_QueryInterface(IMFAsyncCallback *iface, REFIID riid, void **obj)
+{
+    if (IsEqualIID(riid, &IID_IMFAsyncCallback) ||
+            IsEqualIID(riid, &IID_IUnknown))
+    {
+        *obj = iface;
+        IMFAsyncCallback_AddRef(iface);
+        return S_OK;
+    }
+
+    WARN("Unsupported %s.\n", debugstr_guid(riid));
+    *obj = NULL;
+    return E_NOINTERFACE;
+}
+
+static ULONG WINAPI scheme_handler_callback_AddRef(IMFAsyncCallback *iface)
+{
+    struct scheme_handler *handler = scheme_handler_from_IMFAsyncCallback(iface);
+    return IMFSchemeHandler_AddRef(&handler->IMFSchemeHandler_iface);
+}
+
+static ULONG WINAPI scheme_handler_callback_Release(IMFAsyncCallback *iface)
+{
+    struct scheme_handler *handler = scheme_handler_from_IMFAsyncCallback(iface);
+    return IMFSchemeHandler_Release(&handler->IMFSchemeHandler_iface);
+}
+
+static HRESULT WINAPI scheme_handler_callback_GetParameters(IMFAsyncCallback *iface, DWORD *flags, DWORD *queue)
+{
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI scheme_handler_callback_Invoke(IMFAsyncCallback *iface, IMFAsyncResult *result)
+{
+    struct scheme_handler *handler = scheme_handler_from_IMFAsyncCallback(iface);
+    IUnknown *object, *state = IMFAsyncResult_GetStateNoAddRef(result);
+    struct object_context *context;
+    struct result_entry *entry;
+    HRESULT hr;
+
+    if (!state || !(context = impl_from_IUnknown(state)))
+        return E_INVALIDARG;
+
+    if (FAILED(hr = media_source_create(context, (IMFMediaSource **)&object)))
+        WARN("Failed to create media source, hr %#lx\n", hr);
+    else
+    {
+        if (FAILED(hr = result_entry_create(context->result, MF_OBJECT_MEDIASOURCE, object, &entry)))
+            WARN("Failed to create handler result, hr %#lx\n", hr);
+        else
+        {
+            EnterCriticalSection(&handler->cs);
+            list_add_tail(&handler->results, &entry->entry);
+            LeaveCriticalSection(&handler->cs);
+        }
+
+        IUnknown_Release(object);
+    }
+
+    IMFAsyncResult_SetStatus(context->result, hr);
+    MFInvokeCallback(context->result);
+
+    return S_OK;
+}
+
+static const IMFAsyncCallbackVtbl scheme_handler_callback_vtbl =
+{
+    scheme_handler_callback_QueryInterface,
+    scheme_handler_callback_AddRef,
+    scheme_handler_callback_Release,
+    scheme_handler_callback_GetParameters,
+    scheme_handler_callback_Invoke,
+};
+
+HRESULT gstreamer_scheme_handler_create(REFIID riid, void **obj)
+{
+    struct scheme_handler *handler;
+    HRESULT hr;
+
+    TRACE("%s, %p.\n", debugstr_guid(riid), obj);
+
+    if (!(handler = calloc(1, sizeof(*handler))))
+        return E_OUTOFMEMORY;
+
+    list_init(&handler->results);
+    InitializeCriticalSection(&handler->cs);
+
+    handler->IMFSchemeHandler_iface.lpVtbl = &scheme_handler_vtbl;
+    handler->IMFAsyncCallback_iface.lpVtbl = &scheme_handler_callback_vtbl;
+    handler->refcount = 1;
+
+    hr = IMFSchemeHandler_QueryInterface(&handler->IMFSchemeHandler_iface, riid, obj);
+    IMFSchemeHandler_Release(&handler->IMFSchemeHandler_iface);
 
     return hr;
 }

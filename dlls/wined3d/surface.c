@@ -609,7 +609,6 @@ static HRESULT surface_cpu_blt(struct wined3d_texture *dst_texture, unsigned int
     struct wined3d_context *context;
     struct wined3d_range dst_range;
     unsigned int texture_level;
-    BYTE *tmp_buffer = NULL;
     HRESULT hr = WINED3D_OK;
     BOOL same_sub_resource;
     BOOL upload = FALSE;
@@ -809,17 +808,6 @@ static HRESULT surface_cpu_blt(struct wined3d_texture *dst_texture, unsigned int
             else
             {
                 /* Stretching in y direction only. */
-
-                if (same_sub_resource)
-                {
-                    /* Use a temporary buffer if blitting a surface to itself. */
-                    if ((tmp_buffer = malloc(src_height * src_map.row_pitch)))
-                    {
-                        memcpy(tmp_buffer, sbase, src_height * src_map.row_pitch);
-                        sbase = tmp_buffer;
-                    }
-                }
-
                 for (y = sy = 0; y < dst_height; ++y, sy += yinc)
                 {
                     sbuf = sbase + (sy >> 16) * src_map.row_pitch;
@@ -832,17 +820,6 @@ static HRESULT surface_cpu_blt(struct wined3d_texture *dst_texture, unsigned int
         {
             /* Stretching in X direction. */
             unsigned int last_sy = ~0u;
-
-            if (same_sub_resource)
-            {
-                /* Use a temporary buffer if blitting a surface to itself. */
-                if ((tmp_buffer = malloc(src_height * src_map.row_pitch)))
-                {
-                    memcpy(tmp_buffer, sbase, src_height * src_map.row_pitch);
-                    sbase = tmp_buffer;
-                }
-            }
-
             for (y = sy = 0; y < dst_height; ++y, sy += yinc)
             {
                 sbuf = sbase + (sy >> 16) * src_map.row_pitch;
@@ -957,19 +934,6 @@ do { \
             dTopRight    = dbuf + ((dst_width - 1) * bpp);
             dBottomLeft  = dTopLeft + ((dst_height - 1) * dst_map.row_pitch);
             dBottomRight = dBottomLeft + ((dst_width - 1) * bpp);
-
-            if (same_sub_resource &&
-                    !(dst_box->bottom <= src_box->top || src_box->bottom <= dst_box->top
-                    || dst_box->right <= src_box->left || src_box->right <= dst_box->left)
-                    && fx->fx & (WINEDDBLTFX_MIRRORLEFTRIGHT | WINEDDBLTFX_MIRRORUPDOWN | WINEDDBLTFX_ROTATE180
-                    | WINEDDBLTFX_ROTATE270 | WINEDDBLTFX_ROTATE90))
-            {
-                if ((tmp_buffer = malloc(src_height * src_map.row_pitch)))
-                {
-                    memcpy(tmp_buffer, sbase, src_height * src_map.row_pitch);
-                    sbase = tmp_buffer;
-                }
-            }
 
             if (fx->fx & WINEDDBLTFX_ARITHSTRETCHY)
             {
@@ -1119,8 +1083,6 @@ error:
         FIXME("    Unsupported flags %#x.\n", flags);
 
 release:
-    free(tmp_buffer);
-
     if (upload && hr == WINED3D_OK)
     {
         struct wined3d_bo_address data;
@@ -1388,7 +1350,7 @@ HRESULT texture2d_blt(struct wined3d_texture *dst_texture, unsigned int dst_sub_
     BOOL scale, convert, resolve, resolve_typeless = FALSE;
     const struct wined3d_format *resolve_format = NULL;
     const struct wined3d_color_key *colour_key = NULL;
-    DWORD dst_location, valid_locations;
+    DWORD src_location, dst_location, valid_locations;
     struct wined3d_context *context;
     enum wined3d_blit_op blit_op;
     RECT src_rect, dst_rect;
@@ -1536,15 +1498,6 @@ HRESULT texture2d_blt(struct wined3d_texture *dst_texture, unsigned int dst_sub_
     {
         blit_op = WINED3D_BLIT_OP_COLOR_BLIT_ALPHATEST;
     }
-    else if ((src_sub_resource->locations & WINED3D_LOCATION_CLEARED)
-            && wined3d_texture_is_full_rect(dst_texture, dst_sub_resource_idx % dst_texture->level_count, &dst_rect))
-    {
-        TRACE("Source is cleared.\n");
-        wined3d_texture_validate_location(dst_texture, dst_sub_resource_idx, WINED3D_LOCATION_CLEARED);
-        wined3d_texture_invalidate_location(dst_texture, dst_sub_resource_idx, ~WINED3D_LOCATION_CLEARED);
-        dst_sub_resource->clear_value.colour = src_sub_resource->clear_value.colour;
-        return WINED3D_OK;
-    }
     else if (sub_resource_is_on_cpu(src_texture, src_sub_resource_idx)
             && !sub_resource_is_on_cpu(dst_texture, dst_sub_resource_idx)
             && (dst_texture->resource.access & WINED3D_RESOURCE_ACCESS_GPU))
@@ -1570,7 +1523,7 @@ HRESULT texture2d_blt(struct wined3d_texture *dst_texture, unsigned int dst_sub_
             return WINED3D_OK;
         }
     }
-    else if (!(src_sub_resource->locations & (WINED3D_LOCATION_BUFFER | WINED3D_LOCATION_SYSMEM))
+    else if (!sub_resource_is_on_cpu(src_texture, src_sub_resource_idx)
             && !(dst_texture->resource.access & WINED3D_RESOURCE_ACCESS_GPU))
     {
         /* Download */
@@ -1622,6 +1575,13 @@ HRESULT texture2d_blt(struct wined3d_texture *dst_texture, unsigned int dst_sub_
 
     context = context_acquire(device, dst_texture, dst_sub_resource_idx);
 
+    if (src_texture->resource.multisample_type != WINED3D_MULTISAMPLE_NONE && !resolve_typeless
+            && ((scale && !context->d3d_info->scaled_resolve)
+            || convert || !wined3d_is_colour_blit(blit_op)))
+        src_location = WINED3D_LOCATION_RB_RESOLVED;
+    else
+        src_location = src_texture->resource.draw_binding;
+
     if (!(dst_texture->resource.access & WINED3D_RESOURCE_ACCESS_GPU))
         dst_location = dst_texture->resource.map_binding;
     else if (dst_texture->resource.multisample_type != WINED3D_MULTISAMPLE_NONE
@@ -1631,7 +1591,7 @@ HRESULT texture2d_blt(struct wined3d_texture *dst_texture, unsigned int dst_sub_
         dst_location = dst_texture->resource.draw_binding;
 
     valid_locations = device->blitter->ops->blitter_blit(device->blitter, blit_op, context,
-            src_texture, src_sub_resource_idx, src_texture->resource.draw_binding, &src_rect,
+            src_texture, src_sub_resource_idx, src_location, &src_rect,
             dst_texture, dst_sub_resource_idx, dst_location, &dst_rect, colour_key, filter, resolve_format);
 
     context_release(context);

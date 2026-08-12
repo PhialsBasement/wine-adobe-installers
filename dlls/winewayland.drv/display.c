@@ -25,6 +25,7 @@
 #include "config.h"
 
 #include "ntstatus.h"
+#define WIN32_NO_STATUS
 #include "waylanddrv.h"
 
 #include "wine/debug.h"
@@ -192,7 +193,7 @@ static void wayland_add_device_gpu(const struct gdi_device_manager *device_manag
 
     TRACE("\n");
 
-    device_manager->add_gpu(NULL, &pci_id, NULL, param);
+    device_manager->add_gpu("Wine GPU", &pci_id, NULL, param);
 }
 
 static void wayland_add_device_source(const struct gdi_device_manager *device_manager,
@@ -231,8 +232,7 @@ static void populate_devmode(struct wayland_output_mode *output_mode, DEVMODEW *
     mode->dmBitsPerPel = 32;
     mode->dmPelsWidth = output_mode->width;
     mode->dmPelsHeight = output_mode->height;
-    /* Round the refresh rate to calculate the win32 display frequency. */
-    mode->dmDisplayFrequency = (output_mode->refresh + 500) / 1000;
+    mode->dmDisplayFrequency = output_mode->refresh / 1000;
 }
 
 static void wayland_add_device_modes(const struct gdi_device_manager *device_manager,

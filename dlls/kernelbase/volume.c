@@ -27,6 +27,7 @@
 #include <stdio.h>
 
 #include "ntstatus.h"
+#define WIN32_NO_STATUS
 #include "windef.h"
 #include "winbase.h"
 #include "winnls.h"
@@ -71,7 +72,12 @@ static NTSTATUS read_nt_symlink( const WCHAR *name, WCHAR *target, DWORD size )
     UNICODE_STRING nameW;
     HANDLE handle;
 
-    InitializeObjectAttributes( &attr, &nameW, OBJ_CASE_INSENSITIVE, 0, NULL );
+    attr.Length = sizeof(attr);
+    attr.RootDirectory = 0;
+    attr.Attributes = OBJ_CASE_INSENSITIVE;
+    attr.ObjectName = &nameW;
+    attr.SecurityDescriptor = NULL;
+    attr.SecurityQualityOfService = NULL;
     RtlInitUnicodeString( &nameW, name );
 
     if (!(status = NtOpenSymbolicLinkObject( &handle, SYMBOLIC_LINK_QUERY, &attr )))
@@ -100,7 +106,13 @@ static BOOL open_device_root( LPCWSTR root, HANDLE *handle )
         SetLastError( ERROR_PATH_NOT_FOUND );
         return FALSE;
     }
-    InitializeObjectAttributes( &attr, &nt_name, OBJ_CASE_INSENSITIVE, 0, NULL );
+    attr.Length = sizeof(attr);
+    attr.RootDirectory = 0;
+    attr.Attributes = OBJ_CASE_INSENSITIVE;
+    attr.ObjectName = &nt_name;
+    attr.SecurityDescriptor = NULL;
+    attr.SecurityQualityOfService = NULL;
+
     status = NtOpenFile( handle, SYNCHRONIZE, &attr, &io, 0,
                          FILE_DIRECTORY_FILE | FILE_SYNCHRONOUS_IO_NONALERT );
     RtlFreeUnicodeString( &nt_name );
@@ -172,7 +184,13 @@ BOOL WINAPI DECLSPEC_HOTPATCH GetVolumeInformationW( LPCWSTR root, LPWSTR label,
         goto done;
     }
 
-    InitializeObjectAttributes( &attr, &nt_name, OBJ_CASE_INSENSITIVE, 0, NULL );
+    attr.Length = sizeof(attr);
+    attr.RootDirectory = 0;
+    attr.Attributes = OBJ_CASE_INSENSITIVE;
+    attr.ObjectName = &nt_name;
+    attr.SecurityDescriptor = NULL;
+    attr.SecurityQualityOfService = NULL;
+
     nt_name.Length -= sizeof(WCHAR);  /* without trailing slash */
     status = NtOpenFile( &handle, GENERIC_READ | SYNCHRONIZE, &attr, &io, FILE_SHARE_READ | FILE_SHARE_WRITE,
                          FILE_NON_DIRECTORY_FILE | FILE_SYNCHRONOUS_IO_NONALERT );
@@ -364,7 +382,7 @@ err_ret:
  */
 BOOL WINAPI DECLSPEC_HOTPATCH DefineDosDeviceW( DWORD flags, const WCHAR *device, const WCHAR *target )
 {
-    WCHAR *link_name;
+    WCHAR link_name[15] = L"\\DosDevices\\";
     UNICODE_STRING nt_name, nt_target;
     OBJECT_ATTRIBUTES attr;
     NTSTATUS status;
@@ -375,38 +393,33 @@ BOOL WINAPI DECLSPEC_HOTPATCH DefineDosDeviceW( DWORD flags, const WCHAR *device
     if (flags & ~(DDD_RAW_TARGET_PATH | DDD_REMOVE_DEFINITION))
         FIXME("Ignoring flags %#lx.\n", flags & ~(DDD_RAW_TARGET_PATH | DDD_REMOVE_DEFINITION));
 
-    if (!(link_name = HeapAlloc( GetProcessHeap(), 0, sizeof(L"\\DosDevices\\") + lstrlenW(device) * sizeof(WCHAR) )))
-    {
-        SetLastError(ERROR_OUTOFMEMORY);
-        return FALSE;
-    }
-
-    lstrcpyW( link_name, L"\\DosDevices\\" );
     lstrcatW( link_name, device );
     RtlInitUnicodeString( &nt_name, link_name );
     InitializeObjectAttributes( &attr, &nt_name, OBJ_CASE_INSENSITIVE | OBJ_PERMANENT, 0, NULL );
     if (flags & DDD_REMOVE_DEFINITION)
     {
-        if (!(status = NtOpenSymbolicLinkObject( &handle, DELETE, &attr )))
-        {
-            status = NtMakeTemporaryObject( handle );
-            NtClose( handle );
-        }
-        goto done;
+        if (!set_ntstatus( NtOpenSymbolicLinkObject( &handle, DELETE, &attr ) ))
+            return FALSE;
+
+        status = NtMakeTemporaryObject( handle );
+        NtClose( handle );
+
+        return set_ntstatus( status );
     }
 
     if (!(flags & DDD_RAW_TARGET_PATH))
     {
-        status = RtlDosPathNameToNtPathName_U_WithStatus( target, &nt_target, NULL, NULL );
-        if (status) goto done;
+        if (!RtlDosPathNameToNtPathName_U( target, &nt_target, NULL, NULL))
+        {
+            SetLastError( ERROR_PATH_NOT_FOUND );
+            return FALSE;
+        }
     }
     else
         RtlInitUnicodeString( &nt_target, target );
 
     if (!(status = NtCreateSymbolicLinkObject( &handle, SYMBOLIC_LINK_ALL_ACCESS, &attr, &nt_target )))
         NtClose( handle );
- done:
-    HeapFree( GetProcessHeap(), 0, link_name );
     return set_ntstatus( status );
 }
 
@@ -460,7 +473,12 @@ DWORD WINAPI QueryDosDeviceW( LPCWSTR devname, LPWSTR target, DWORD bufsize )
         HANDLE handle;
         WCHAR *p = target;
 
-        InitializeObjectAttributes( &attr, &nt_name, OBJ_CASE_INSENSITIVE, 0, NULL );
+        attr.Length = sizeof(attr);
+        attr.RootDirectory = 0;
+        attr.ObjectName = &nt_name;
+        attr.Attributes = OBJ_CASE_INSENSITIVE;
+        attr.SecurityDescriptor = NULL;
+        attr.SecurityQualityOfService = NULL;
         status = NtOpenDirectoryObject( &handle, FILE_LIST_DIRECTORY, &attr );
         if (!status)
         {
@@ -501,7 +519,12 @@ DWORD WINAPI DECLSPEC_HOTPATCH GetLogicalDrives(void)
     HANDLE handle;
 
     nt_name.Length -= sizeof(WCHAR);  /* without trailing slash */
-    InitializeObjectAttributes( &attr, &nt_name, OBJ_CASE_INSENSITIVE, 0, NULL );
+    attr.Length = sizeof(attr);
+    attr.RootDirectory = 0;
+    attr.ObjectName = &nt_name;
+    attr.Attributes = OBJ_CASE_INSENSITIVE;
+    attr.SecurityDescriptor = NULL;
+    attr.SecurityQualityOfService = NULL;
     status = NtOpenDirectoryObject( &handle, FILE_LIST_DIRECTORY, &attr );
     if (!status)
     {

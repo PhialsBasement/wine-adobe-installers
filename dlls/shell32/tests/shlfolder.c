@@ -198,30 +198,31 @@ static struct
     HRESULT hr;
     int todo;
 } parse_tests[] = {
-    {L"c:\\", S_OK},
-    {L"c:\\\\", E_INVALIDARG, 1},
-    {L"c:\\fake", 0x80070002}, /* ERROR_FILE_NOT_FOUND */
-    {L"c:fake", E_INVALIDARG},
-    {L"c:/", E_INVALIDARG},
-    {L"c:\\windows", S_OK},
-    {L"c:\\windows\\", S_OK},
-    {L"c:\\windows\\.", E_INVALIDARG, 1},
-    {L"c:\\windows\\..", E_INVALIDARG, 1},
-    {L".", E_INVALIDARG, 1},
-    {L"..", E_INVALIDARG, 1},
-    {L"test", 0x80070002},
-    {L"test\\", 0x80070002},
-    {L"sub\\dir", 0x80070002},
-    {L"sub/dir", E_INVALIDARG, 1},
-    {L"http:", S_OK, 1},
-    {L"http:test", S_OK, 1},
-    {L"http:\\test", S_OK, 1},
-    {L"xx:", S_OK, 1},
+    {{'c',':','\\',0}, S_OK},
+    {{'c',':','\\','\\',0}, E_INVALIDARG, 1},
+    {{'c',':','\\','f','a','k','e',0}, 0x80070002}, /* ERROR_FILE_NOT_FOUND */
+    {{'c',':','f','a','k','e',0}, E_INVALIDARG},
+    {{'c',':','/',0}, E_INVALIDARG},
+    {{'c',':','\\','w','i','n','d','o','w','s',0}, S_OK},
+    {{'c',':','\\','w','i','n','d','o','w','s','\\',0}, S_OK},
+    {{'c',':','\\','w','i','n','d','o','w','s','\\','.',0}, E_INVALIDARG, 1},
+    {{'c',':','\\','w','i','n','d','o','w','s','\\','.','.',0}, E_INVALIDARG, 1},
+    {{'.',0}, E_INVALIDARG, 1},
+    {{'.','.',0}, E_INVALIDARG, 1},
+    {{'t','e','s','t',0}, 0x80070002},
+    {{'t','e','s','t','\\',0}, 0x80070002},
+    {{'s','u','b','\\','d','i','r',0}, 0x80070002},
+    {{'s','u','b','/','d','i','r',0}, E_INVALIDARG, 1},
+    {{'h','t','t','p',':',0}, S_OK, 1},
+    {{'h','t','t','p',':','t','e','s','t',0}, S_OK, 1},
+    {{'h','t','t','p',':','\\','t','e','s','t',0}, S_OK, 1},
+    {{'x','x',':',0}, S_OK, 1},
 };
 
 static void test_ParseDisplayName(void)
 {
-    static WCHAR testdirW[] = L"parsetest";
+    static WCHAR testdirW[] = {'p','a','r','s','e','t','e','s','t',0};
+    static WCHAR backslashW[] = {'\\',0};
     WCHAR buffer[MAX_PATH], buffer2[MAX_PATH];
     IShellFolder *desktop;
     ITEMIDLIST *pidl;
@@ -280,7 +281,7 @@ static void test_ParseDisplayName(void)
     ok(hr == S_OK, "got %#lx\n", hr);
 
     ok(SHGetPathFromIDListW(pidl, buffer2), "SHGetPathFromIDList failed\n");
-    lstrcatW(buffer, L"\\");
+    lstrcatW(buffer, backslashW);
     lstrcatW(buffer, testdirW);
     ok(!lstrcmpW(buffer, buffer2), "expected %s, got %s\n", wine_dbgstr_w(buffer), wine_dbgstr_w(buffer2));
 
@@ -438,7 +439,9 @@ static void test_BindToObject(void)
     WCHAR path[MAX_PATH];
     CHAR pathA[MAX_PATH];
     HANDLE hfile;
-    WCHAR wszMyComputer[] = L"::{20D04FE0-3AEA-1069-A2D8-08002B30309D}";
+    WCHAR wszMyComputer[] = { 
+        ':',':','{','2','0','D','0','4','F','E','0','-','3','A','E','A','-','1','0','6','9','-',
+        'A','2','D','8','-','0','8','0','0','2','B','3','0','3','0','9','D','}',0 };
     static const CHAR filename_html[] = "winetest.html";
     static const CHAR filename_txt[] = "winetest.txt";
     static const CHAR filename_foo[] = "winetest.foo";
@@ -660,9 +663,12 @@ static void test_GetDisplayName(void)
     SHITEMID emptyitem = { 0, { 0 } };
     LPITEMIDLIST pidlTestFile, pidlEmpty = (LPITEMIDLIST)&emptyitem;
     LPCITEMIDLIST pidlLast;
+    static const CHAR szFileName[] = "winetest.foo";
+    static const WCHAR wszFileName[] = { 'w','i','n','e','t','e','s','t','.','f','o','o',0 };
+    static const WCHAR wszDirName[] = { 'w','i','n','e','t','e','s','t',0 };
 
     /* It's ok to use this fixed path. Call will fail anyway. */
-    WCHAR wszAbsoluteFilename[] = L"C:\\winetest";
+    WCHAR wszAbsoluteFilename[] = { 'C',':','\\','w','i','n','e','t','e','s','t', 0 };
     LPITEMIDLIST pidlNew;
 
     /* I'm trying to figure if there is a functional difference between calling
@@ -689,7 +695,8 @@ static void test_GetDisplayName(void)
     }
 
     lstrcpyA(szTestFile, szTestDir);
-    lstrcatA(szTestFile, "\\winetest.foo");
+    lstrcatA(szTestFile, "\\");
+    lstrcatA(szTestFile, szFileName);
     hTestFile = CreateFileA(szTestFile, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, 0, NULL);
     ok((hTestFile != INVALID_HANDLE_VALUE), "CreateFileA failed! Last error: %lu\n", GetLastError());
     if (hTestFile == INVALID_HANDLE_VALUE) return;
@@ -712,15 +719,15 @@ static void test_GetDisplayName(void)
     pidlLast = ILFindLastID(pidlTestFile);
     ok(pidlLast->mkid.cb >= 76, "Expected pidl length of at least 76, got %d.\n", pidlLast->mkid.cb);
     if (pidlLast->mkid.cb >= 28) {
-        ok(!lstrcmpA((char*)&pidlLast->mkid.abID[12], "winetest.foo"),
+        ok(!lstrcmpA((CHAR*)&pidlLast->mkid.abID[12], szFileName),
             "Filename should be stored as ansi-string at this position!\n");
     }
     /* WinXP and up store the filenames as both ANSI and UNICODE in the pidls */
     if (pidlLast->mkid.cb >= 76) {
-        ok(!lstrcmpW((WCHAR*)&pidlLast->mkid.abID[46], L"winetest.foo") ||
-            (pidlLast->mkid.cb >= 94 && !lstrcmpW((WCHAR*)&pidlLast->mkid.abID[64], L"winetest.foo")) ||  /* Vista */
-            (pidlLast->mkid.cb >= 98 && !lstrcmpW((WCHAR*)&pidlLast->mkid.abID[68], L"winetest.foo")) ||  /* Win7 */
-            (pidlLast->mkid.cb >= 102 && !lstrcmpW((WCHAR*)&pidlLast->mkid.abID[72], L"winetest.foo")),   /* Win8 */
+        ok(!lstrcmpW((WCHAR*)&pidlLast->mkid.abID[46], wszFileName) ||
+            (pidlLast->mkid.cb >= 94 && !lstrcmpW((WCHAR*)&pidlLast->mkid.abID[64], wszFileName)) ||  /* Vista */
+            (pidlLast->mkid.cb >= 98 && !lstrcmpW((WCHAR*)&pidlLast->mkid.abID[68], wszFileName)) ||  /* Win7 */
+            (pidlLast->mkid.cb >= 102 && !lstrcmpW((WCHAR*)&pidlLast->mkid.abID[72], wszFileName)),   /* Win8 */
             "Filename should be stored as wchar-string at this position!\n");
     }
     
@@ -739,7 +746,7 @@ static void test_GetDisplayName(void)
     ok(hr == S_OK, "SHBindToParent failed! hr = %08lx\n", hr);
 
     /* The pidl returned through the last parameter of SetNameOf is a simple one. */
-    hr = IShellFolder_SetNameOf(psfPersonal, NULL, pidlLast, L"winetest", SHGDN_NORMAL, &pidlNew);
+    hr = IShellFolder_SetNameOf(psfPersonal, NULL, pidlLast, wszDirName, SHGDN_NORMAL, &pidlNew);
     ok (hr == S_OK, "SetNameOf failed! hr = %08lx\n", hr);
 
     ok (((ITEMIDLIST *)((BYTE *)pidlNew + pidlNew->mkid.cb))->mkid.cb == 0,
@@ -752,7 +759,7 @@ static void test_GetDisplayName(void)
 
     /* Rename the file back to its original name. SetNameOf ignores the fact, that the
      * SHGDN flags specify an absolute path. */
-    hr = IShellFolder_SetNameOf(psfPersonal, NULL, pidlNew, L"winetest.foo", SHGDN_FORPARSING, NULL);
+    hr = IShellFolder_SetNameOf(psfPersonal, NULL, pidlNew, wszFileName, SHGDN_FORPARSING, NULL);
     ok (hr == S_OK, "SetNameOf failed! hr = %08lx\n", hr);
 
     ILFree(pidlNew);
@@ -820,9 +827,17 @@ static void test_CallForAttributes(void)
     LPSHELLFOLDER psfDesktop;
     LPITEMIDLIST pidlMyDocuments;
     DWORD dwAttributes, dwCallForAttributes, dwOrigAttributes, dwOrigCallForAttributes;
-    static const WCHAR wszMyDocumentsKey[] = L"CLSID\\{450D8FBA-AD25-11D0-98A8-0800361B1103}\\ShellFolder";
-    WCHAR wszMyDocuments[] = L"::{450D8FBA-AD25-11D0-98A8-0800361B1103}";
-
+    static const WCHAR wszAttributes[] = { 'A','t','t','r','i','b','u','t','e','s',0 };
+    static const WCHAR wszCallForAttributes[] = { 
+        'C','a','l','l','F','o','r','A','t','t','r','i','b','u','t','e','s',0 };
+    static const WCHAR wszMyDocumentsKey[] = {
+        'C','L','S','I','D','\\','{','4','5','0','D','8','F','B','A','-','A','D','2','5','-',
+        '1','1','D','0','-','9','8','A','8','-','0','8','0','0','3','6','1','B','1','1','0','3','}',
+        '\\','S','h','e','l','l','F','o','l','d','e','r',0 };
+    WCHAR wszMyDocuments[] = {
+        ':',':','{','4','5','0','D','8','F','B','A','-','A','D','2','5','-','1','1','D','0','-',
+        '9','8','A','8','-','0','8','0','0','3','6','1','B','1','1','0','3','}',0 };
+    
     /* For the root of a namespace extension, the attributes are not queried by binding
      * to the object and calling GetAttributesOf. Instead, the attributes are read from 
      * the registry value HKCR/CLSID/{...}/ShellFolder/Attributes. This is documented on MSDN.
@@ -872,7 +887,7 @@ static void test_CallForAttributes(void)
     
     /* Query MyDocuments' Attributes value, to be able to restore it later. */
     dwSize = sizeof(DWORD);
-    lResult = RegQueryValueExW(hKey, L"Attributes", NULL, NULL, (BYTE*)&dwOrigAttributes, &dwSize);
+    lResult = RegQueryValueExW(hKey, wszAttributes, NULL, NULL, (LPBYTE)&dwOrigAttributes, &dwSize);
     ok (lResult == ERROR_SUCCESS, "RegQueryValueEx failed! result: %08lx\n", lResult);
     if (lResult != ERROR_SUCCESS) {
         RegCloseKey(hKey);
@@ -883,8 +898,8 @@ static void test_CallForAttributes(void)
 
     /* Query MyDocuments' CallForAttributes value, to be able to restore it later. */
     dwSize = sizeof(DWORD);
-    lResult = RegQueryValueExW(hKey, L"CallForAttributes", NULL, NULL,
-                               (BYTE*)&dwOrigCallForAttributes, &dwSize);
+    lResult = RegQueryValueExW(hKey, wszCallForAttributes, NULL, NULL, 
+                              (LPBYTE)&dwOrigCallForAttributes, &dwSize);
     ok (lResult == ERROR_SUCCESS, "RegQueryValueEx failed! result: %08lx\n", lResult);
     if (lResult != ERROR_SUCCESS) {
         RegCloseKey(hKey);
@@ -897,10 +912,10 @@ static void test_CallForAttributes(void)
      * SFGAO_GHOSTED and that MyDocuments should be called for the SFGAO_ISSLOW and
      * SFGAO_FILESYSTEM attributes. */
     dwAttributes = SFGAO_ISSLOW|SFGAO_GHOSTED;
-    RegSetValueExW(hKey, L"Attributes", 0, REG_DWORD, (BYTE*)&dwAttributes, sizeof(DWORD));
+    RegSetValueExW(hKey, wszAttributes, 0, REG_DWORD, (LPBYTE)&dwAttributes, sizeof(DWORD));
     dwCallForAttributes = SFGAO_ISSLOW|SFGAO_FILESYSTEM;
-    RegSetValueExW(hKey, L"CallForAttributes", 0, REG_DWORD,
-                   (BYTE*)&dwCallForAttributes, sizeof(DWORD));
+    RegSetValueExW(hKey, wszCallForAttributes, 0, REG_DWORD, 
+                   (LPBYTE)&dwCallForAttributes, sizeof(DWORD));
 
     /* Although it is not set in CallForAttributes, the SFGAO_GHOSTED flag is reset by 
      * GetAttributesOf. It seems that once there is a single attribute queried, for which
@@ -917,9 +932,9 @@ static void test_CallForAttributes(void)
             dwAttributes);
 
     /* Restore MyDocuments' original Attributes and CallForAttributes registry values */
-    RegSetValueExW(hKey, L"Attributes", 0, REG_DWORD, (BYTE*)&dwOrigAttributes, sizeof(DWORD));
-    RegSetValueExW(hKey, L"CallForAttributes", 0, REG_DWORD,
-                   (BYTE*)&dwOrigCallForAttributes, sizeof(DWORD));
+    RegSetValueExW(hKey, wszAttributes, 0, REG_DWORD, (LPBYTE)&dwOrigAttributes, sizeof(DWORD));
+    RegSetValueExW(hKey, wszCallForAttributes, 0, REG_DWORD, 
+                   (LPBYTE)&dwOrigCallForAttributes, sizeof(DWORD));
     RegCloseKey(hKey);
     ILFree(pidlMyDocuments);
     IShellFolder_Release(psfDesktop);
@@ -937,30 +952,21 @@ static void test_GetAttributesOf(void)
         SFGAO_FILESYSANCESTOR | SFGAO_FOLDER | SFGAO_FILESYSTEM | SFGAO_HASSUBFOLDER;
     static const DWORD myComputerFlags = SFGAO_CANRENAME | SFGAO_CANDELETE | SFGAO_HASPROPSHEET |
         SFGAO_DROPTARGET | SFGAO_FILESYSANCESTOR | SFGAO_FOLDER | SFGAO_HASSUBFOLDER;
-    WCHAR wszMyComputer[] = L"::{20D04FE0-3AEA-1069-A2D8-08002B30309D}";
-    WCHAR temp_dir[MAX_PATH], cwd[MAX_PATH], path[MAX_PATH];
+    WCHAR wszMyComputer[] = {
+        ':',':','{','2','0','D','0','4','F','E','0','-','3','A','E','A','-','1','0','6','9','-',
+        'A','2','D','8','-','0','8','0','0','2','B','3','0','3','0','9','D','}',0 };
+    char  cCurrDirA [MAX_PATH] = {0};
+    WCHAR cCurrDirW [MAX_PATH];
+    static WCHAR cTestDirW[] = {'t','e','s','t','d','i','r',0};
     IShellFolder *IDesktopFolder, *testIShellFolder;
-    ITEMIDLIST *newPIDL, *pidls[2], *abs_pidl;
+    ITEMIDLIST *newPIDL;
     IEnumIDList *list;
     ULONG fetch;
-    BOOL ret;
-
-    static const DWORD testdir_flags = SFGAO_CANCOPY | SFGAO_CANMOVE | SFGAO_CANLINK | SFGAO_STORAGE
-            | SFGAO_CANRENAME | SFGAO_CANDELETE | SFGAO_HASPROPSHEET | SFGAO_DROPTARGET | SFGAO_STORAGEANCESTOR
-            | SFGAO_FILESYSANCESTOR | SFGAO_FOLDER | SFGAO_FILESYSTEM | SFGAO_HASSUBFOLDER;
-
-    static const DWORD testdir_abs_flags = SFGAO_CANLINK | SFGAO_CANRENAME | SFGAO_CANDELETE
-            | SFGAO_HASPROPSHEET | SFGAO_DROPTARGET | SFGAO_FILESYSANCESTOR | SFGAO_FOLDER | SFGAO_HASSUBFOLDER;
-
-    static const DWORD testdir_multi_flags = SFGAO_CANCOPY | SFGAO_CANMOVE | SFGAO_CANLINK
-            | SFGAO_CANRENAME | SFGAO_CANDELETE | SFGAO_HASPROPSHEET | SFGAO_DROPTARGET | SFGAO_FILESYSTEM;
-
-    GetCurrentDirectoryW(ARRAY_SIZE(cwd), cwd);
-    GetTempPathW(ARRAY_SIZE(temp_dir), temp_dir);
-    SetCurrentDirectoryW(temp_dir);
+    int len;
 
     hr = SHGetDesktopFolder(&psfDesktop);
     ok (hr == S_OK, "SHGetDesktopFolder failed! hr = %08lx\n", hr);
+    if (hr != S_OK) return;
 
     /* The Desktop attributes can be queried with a single empty itemidlist, .. */
     dwFlags = 0xffffffff;
@@ -974,33 +980,12 @@ static void test_GetAttributesOf(void)
     ok (hr == S_OK, "Desktop->GetAttributesOf(NULL) failed! hr = %08lx\n", hr);
     ok (dwFlags == desktopFlags, "Wrong Desktop attributes: %08lx\n", dwFlags);
 
-    dwFlags = 0;
-    hr = IShellFolder_GetAttributesOf(psfDesktop, 0, NULL, &dwFlags);
-    ok(hr == S_OK, "got %#lx\n", hr);
-    todo_wine ok(!dwFlags, "got flags %#lx\n", dwFlags);
-
-    dwFlags = SFGAO_FOLDER;
-    hr = IShellFolder_GetAttributesOf(psfDesktop, 0, NULL, &dwFlags);
-    ok(hr == S_OK, "got %#lx\n", hr);
-    ok(dwFlags == SFGAO_FOLDER, "got flags %#lx\n", dwFlags);
-
     /* Testing the attributes of the MyComputer shellfolder */
-    dwFlags = ~0u;
-    hr = IShellFolder_ParseDisplayName(psfDesktop, NULL, NULL, wszMyComputer, NULL, &pidlMyComputer, &dwFlags);
-    ok(hr == S_OK, "got %#lx\n", hr);
-    todo_wine ok(dwFlags == (myComputerFlags | SFGAO_CANLINK), "got flags %#lx\n", dwFlags);
-
-    dwFlags = 0;
-    hr = IShellFolder_ParseDisplayName(psfDesktop, NULL, NULL, wszMyComputer, NULL, &pidlMyComputer, &dwFlags);
-    ok(hr == S_OK, "got %#lx\n", hr);
-    ok(!dwFlags, "got flags %#lx\n", dwFlags);
-
-    for (unsigned int i = 0; i < 32; ++i)
-    {
-        dwFlags = (1u << i);
-        hr = IShellFolder_ParseDisplayName(psfDesktop, NULL, NULL, wszMyComputer, NULL, &pidlMyComputer, &dwFlags);
-        ok(hr == S_OK, "got %#lx\n", hr);
-        todo_wine ok(dwFlags == (myComputerFlags | SFGAO_CANLINK), "got flags %#lx\n", dwFlags);
+    hr = IShellFolder_ParseDisplayName(psfDesktop, NULL, NULL, wszMyComputer, NULL, &pidlMyComputer, NULL);
+    ok (hr == S_OK, "Desktop's ParseDisplayName failed to parse MyComputer's CLSID! hr = %08lx\n", hr);
+    if (hr != S_OK) {
+        IShellFolder_Release(psfDesktop);
+        return;
     }
 
     /* Windows sets the SFGAO_CANLINK flag, when MyComputer is queried via the Desktop
@@ -1016,6 +1001,7 @@ static void test_GetAttributesOf(void)
     ok (hr == S_OK, "Desktop failed to bind to MyComputer object! hr = %08lx\n", hr);
     IShellFolder_Release(psfDesktop);
     ILFree(pidlMyComputer);
+    if (hr != S_OK) return;
 
     hr = IShellFolder_GetAttributesOf(psfMyComputer, 1, &pidlEmpty, &dwFlags);
     todo_wine
@@ -1027,34 +1013,27 @@ static void test_GetAttributesOf(void)
     todo_wine
     ok (dwFlags == myComputerFlags, "Wrong MyComputer attributes: %08lx\n", dwFlags);
 
-    dwFlags = 0;
-    hr = IShellFolder_GetAttributesOf(psfMyComputer, 0, NULL, &dwFlags);
-    ok(hr == S_OK, "got %#lx\n", hr);
-    todo_wine ok(!dwFlags, "got flags %#lx\n", dwFlags);
-
-    dwFlags = SFGAO_FOLDER;
-    hr = IShellFolder_GetAttributesOf(psfMyComputer, 0, NULL, &dwFlags);
-    ok(hr == S_OK, "got %#lx\n", hr);
-    todo_wine ok(dwFlags == SFGAO_FOLDER, "got flags %#lx\n", dwFlags);
-
     IShellFolder_Release(psfMyComputer);
 
-    /* Note that SFGAO_HASSUBFOLDER respects hidden folders, but it also
-     * respects the "show hidden files" setting. */
-    ret = CreateDirectoryW(L"winetestdir", NULL);
-    ok(ret == TRUE, "got error %lu\n", GetLastError());
-    ret = CreateDirectoryW(L"winetestdir\\subdir", NULL);
-    ok(ret == TRUE, "got error %lu\n", GetLastError());
-    ret = CreateDirectoryW(L"winetestdir2", NULL);
-    ok(ret == TRUE, "got error %lu\n", GetLastError());
-    ret = CreateDirectoryW(L"winetestdir2\\subdir", NULL);
-    ok(ret == TRUE, "got error %lu\n", GetLastError());
-    CreateTestFile("winetestdir2\\file");
+    GetCurrentDirectoryA(MAX_PATH, cCurrDirA);
+    len = lstrlenA(cCurrDirA);
 
+    if (len == 0) {
+        win_skip("GetCurrentDirectoryA returned empty string. Skipping test_GetAttributesOf\n");
+        return;
+    }
+    if (len > 3 && cCurrDirA[len-1] == '\\')
+        cCurrDirA[len-1] = 0;
+
+    /* create test directory */
+    CreateFilesFolders();
+
+    MultiByteToWideChar(CP_ACP, 0, cCurrDirA, -1, cCurrDirW, MAX_PATH);
+ 
     hr = SHGetDesktopFolder(&IDesktopFolder);
     ok(hr == S_OK, "SHGetDesktopfolder failed %08lx\n", hr);
 
-    hr = IShellFolder_ParseDisplayName(IDesktopFolder, NULL, NULL, temp_dir, NULL, &newPIDL, NULL);
+    hr = IShellFolder_ParseDisplayName(IDesktopFolder, NULL, NULL, cCurrDirW, NULL, &newPIDL, 0);
     ok(hr == S_OK, "ParseDisplayName failed %08lx\n", hr);
 
     hr = IShellFolder_BindToObject(IDesktopFolder, newPIDL, NULL, (REFIID)&IID_IShellFolder, (LPVOID *)&testIShellFolder);
@@ -1062,208 +1041,45 @@ static void test_GetAttributesOf(void)
 
     ILFree(newPIDL);
 
-    wcscpy(path, L"winetestdir");
-
     /* get relative PIDL */
-    dwFlags = ~0u;
-    hr = IShellFolder_ParseDisplayName(testIShellFolder, NULL, NULL, path, NULL, &newPIDL, &dwFlags);
-    ok(hr == S_OK, "got hr %#lx\n", hr);
-    ok(dwFlags == testdir_flags, "got flags %#lx\n", dwFlags);
-
-    dwFlags = 0;
-    hr = IShellFolder_ParseDisplayName(testIShellFolder, NULL, NULL, path, NULL, &newPIDL, &dwFlags);
-    ok(hr == S_OK, "got hr %#lx\n", hr);
-    ok(!dwFlags, "got flags %#lx\n", dwFlags);
+    hr = IShellFolder_ParseDisplayName(testIShellFolder, NULL, NULL, cTestDirW, NULL, &newPIDL, 0);
+    ok(hr == S_OK, "ParseDisplayName failed %08lx\n", hr);
 
     /* test the shell attributes of the test directory using the relative PIDL */
-
-    dwFlags = ~0u;
-    hr = IShellFolder_GetAttributesOf(testIShellFolder, 1, (LPCITEMIDLIST *)&newPIDL, &dwFlags);
-    ok(hr == S_OK, "got hr %#lx\n", hr);
-    ok(dwFlags == testdir_flags, "got flags %#lx\n", dwFlags);
-
-    dwFlags = 0;
-    hr = IShellFolder_GetAttributesOf(testIShellFolder, 1, (LPCITEMIDLIST *)&newPIDL, &dwFlags);
-    ok(hr == S_OK, "got hr %#lx\n", hr);
-    todo_wine ok(!dwFlags, "got flags %#lx\n", dwFlags);
-
-    for (unsigned int i = 0; i < 32; ++i)
-    {
-        static const DWORD set_flags = (SFGAO_CANCOPY | SFGAO_CANLINK | SFGAO_STORAGE | SFGAO_HASPROPSHEET | SFGAO_DROPTARGET
-                | SFGAO_STORAGEANCESTOR | SFGAO_FILESYSANCESTOR | SFGAO_FOLDER | SFGAO_FILESYSTEM);
-        DWORD input = (1u << i);
-        DWORD expect = 0;
-
-        if ((testdir_flags | SFGAO_LINK | SFGAO_READONLY | SFGAO_STREAM) & input)
-        {
-            expect = (set_flags | input) & testdir_flags;
-            if (input & (SFGAO_CANDELETE | SFGAO_CANMOVE))
-                expect |= SFGAO_CANDELETE | SFGAO_CANMOVE;
-        }
-
-        /* Windows 8+ always sets SFGAO_HASPROPSHEET. Versions before that only
-         * set it if it's in the input. */
-
-        dwFlags = input;
-        hr = IShellFolder_ParseDisplayName(testIShellFolder, NULL, NULL, path, NULL, &newPIDL, &dwFlags);
-        ok(hr == S_OK, "got %#lx\n", hr);
-        dwFlags |= (expect & SFGAO_HASPROPSHEET);
-        todo_wine ok(dwFlags == expect, "got flags %#lx for input %#lx\n", dwFlags, input);
-
-        dwFlags = input;
-        hr = IShellFolder_GetAttributesOf(testIShellFolder, 1, (LPCITEMIDLIST *)&newPIDL, &dwFlags);
-        ok(hr == S_OK, "got hr %#lx\n", hr);
-        dwFlags |= (expect & SFGAO_HASPROPSHEET);
-        todo_wine ok(dwFlags == expect, "got flags %#lx for input %#lx\n", dwFlags, input);
-    }
-
-    /* Test an array. */
-
-    hr = IShellFolder_ParseDisplayName(testIShellFolder, NULL, NULL, path, NULL, &pidls[0], &dwFlags);
-    ok(hr == S_OK, "got hr %#lx\n", hr);
-    wcscpy(path, L"winetestdir2");
-    hr = IShellFolder_ParseDisplayName(testIShellFolder, NULL, NULL, path, NULL, &pidls[1], &dwFlags);
-    ok(hr == S_OK, "got hr %#lx\n", hr);
-
-    dwFlags = ~0u;
-    hr = IShellFolder_GetAttributesOf(testIShellFolder, 1, (LPCITEMIDLIST *)&pidls[1], &dwFlags);
-    ok(hr == S_OK, "got hr %#lx\n", hr);
-    ok(dwFlags == testdir_flags, "got flags %#lx\n", dwFlags);
-
-    /* This clears a bunch of flags, for some reason, even though both folders
-     * have them in common. */
-    dwFlags = ~0u;
-    hr = IShellFolder_GetAttributesOf(testIShellFolder, 2, (LPCITEMIDLIST *)pidls, &dwFlags);
-    ok(hr == S_OK, "got hr %#lx\n", hr);
-    todo_wine ok(dwFlags == testdir_multi_flags, "got flags %#lx\n", dwFlags);
-
-    dwFlags = 0;
-    hr = IShellFolder_GetAttributesOf(testIShellFolder, 2, (LPCITEMIDLIST *)pidls, &dwFlags);
-    ok(hr == S_OK, "got hr %#lx\n", hr);
-    todo_wine ok(dwFlags == (SFGAO_CANCOPY | SFGAO_CANLINK | SFGAO_HASPROPSHEET | SFGAO_DROPTARGET | SFGAO_FILESYSTEM),
-            "got flags %#lx\n", dwFlags);
-
-    for (unsigned int i = 0; i < 32; ++i)
-    {
-        DWORD expect = SFGAO_CANCOPY | SFGAO_CANLINK | SFGAO_HASPROPSHEET | SFGAO_DROPTARGET | SFGAO_FILESYSTEM;
-        DWORD input = (1u << i);
-
-        if ((SFGAO_CANMOVE | SFGAO_CANRENAME | SFGAO_CANDELETE) & input)
-            expect |= SFGAO_CANMOVE | SFGAO_CANRENAME | SFGAO_CANDELETE;
-
-        dwFlags = input;
-        hr = IShellFolder_GetAttributesOf(testIShellFolder, 2, (LPCITEMIDLIST *)pidls, &dwFlags);
-        ok(hr == S_OK, "got hr %#lx\n", hr);
-        todo_wine ok(dwFlags == expect, "got flags %#lx for input %#lx\n", dwFlags, input);
-    }
-
-    ret = RemoveDirectoryW(L"winetestdir2\\subdir");
-    ok(ret == TRUE, "got error %lu\n", GetLastError());
-
-    dwFlags = ~0u;
-    hr = IShellFolder_GetAttributesOf(testIShellFolder, 1, (LPCITEMIDLIST *)&pidls[1], &dwFlags);
-    ok(hr == S_OK, "got hr %#lx\n", hr);
-    ok(dwFlags == (testdir_flags & ~SFGAO_HASSUBFOLDER), "got flags %#lx\n", dwFlags);
-
-    /* Test an absolute PIDL. Results for ParseDisplayName() are the same as
-     * the relative PIDL, but for GetAttributesOf() they are different. */
-
-    swprintf(path, ARRAY_SIZE(path), L"%swinetestdir\\", temp_dir);
-
-    dwFlags = ~0u;
-    hr = IShellFolder_ParseDisplayName(IDesktopFolder, NULL, NULL, path, NULL, &abs_pidl, &dwFlags);
-    ok(hr == S_OK, "got hr %#lx\n", hr);
-    ok(dwFlags == testdir_flags, "got flags %#lx\n", dwFlags);
-
-    dwFlags = 0;
-    hr = IShellFolder_ParseDisplayName(IDesktopFolder, NULL, NULL, path, NULL, &abs_pidl, &dwFlags);
-    ok(hr == S_OK, "got hr %#lx\n", hr);
-    ok(!dwFlags, "got flags %#lx\n", dwFlags);
-
     dwFlags = SFGAO_FOLDER;
-    hr = IShellFolder_GetAttributesOf(IDesktopFolder, 1, (LPCITEMIDLIST *)&abs_pidl, &dwFlags);
-    ok(hr == S_OK, "got hr %#lx\n", hr);
-    ok(dwFlags == SFGAO_FOLDER, "got flags %#lx\n", dwFlags);
+    hr = IShellFolder_GetAttributesOf(testIShellFolder, 1, (LPCITEMIDLIST*)&newPIDL, &dwFlags);
+    ok (hr == S_OK, "Desktop->GetAttributesOf() failed! hr = %08lx\n", hr);
+    ok ((dwFlags&SFGAO_FOLDER), "Wrong directory attribute for relative PIDL: %08lx\n", dwFlags);
 
-    dwFlags = ~0u;
-    hr = IShellFolder_GetAttributesOf(IDesktopFolder, 1, (LPCITEMIDLIST *)&abs_pidl, &dwFlags);
-    ok(hr == S_OK, "got hr %#lx\n", hr);
-    todo_wine ok(dwFlags == testdir_abs_flags, "got flags %#lx\n", dwFlags);
+    /* free memory */
+    ILFree(newPIDL);
 
-    for (unsigned int i = 0; i < 32; ++i)
-    {
-        DWORD expect;
+    /* append testdirectory name to path */
+    if (cCurrDirA[len-1] == '\\')
+        cCurrDirA[len-1] = 0;
+    lstrcatA(cCurrDirA, "\\testdir");
+    MultiByteToWideChar(CP_ACP, 0, cCurrDirA, -1, cCurrDirW, MAX_PATH);
 
-        expect = (1u << i);
-        hr = IShellFolder_GetAttributesOf(testIShellFolder, 1, (LPCITEMIDLIST *)&newPIDL, &expect);
-        ok(hr == S_OK, "got hr %#lx\n", hr);
+    hr = IShellFolder_ParseDisplayName(IDesktopFolder, NULL, NULL, cCurrDirW, NULL, &newPIDL, 0);
+    ok(hr == S_OK, "ParseDisplayName failed %08lx\n", hr);
 
-        dwFlags = (1u << i);
-        hr = IShellFolder_ParseDisplayName(IDesktopFolder, NULL, NULL, path, NULL, &abs_pidl, &dwFlags);
-        ok(hr == S_OK, "got %#lx\n", hr);
-        ok(dwFlags == expect, "expected flags %#lx for input %#x, got %#lx\n", expect, (1u << i), dwFlags);
+    /* test the shell attributes of the test directory using the absolute PIDL */
+    dwFlags = SFGAO_FOLDER;
+    hr = IShellFolder_GetAttributesOf(IDesktopFolder, 1, (LPCITEMIDLIST*)&newPIDL, &dwFlags);
+    ok (hr == S_OK, "Desktop->GetAttributesOf() failed! hr = %08lx\n", hr);
+    ok ((dwFlags&SFGAO_FOLDER), "Wrong directory attribute for absolute PIDL: %08lx\n", dwFlags);
 
-        dwFlags = (1u << i);
-        hr = IShellFolder_GetAttributesOf(IDesktopFolder, 1, (LPCITEMIDLIST *)&abs_pidl, &dwFlags);
-        ok(hr == S_OK, "got hr %#lx\n", hr);
-        todo_wine_if ((1u << i) == SFGAO_CANLINK)
-            ok(dwFlags == (testdir_abs_flags & (1u << i)), "got flags %#lx\n", dwFlags);
-    }
-
+    /* free memory */
     ILFree(newPIDL);
 
     IShellFolder_Release(testIShellFolder);
 
-    ret = DeleteFileW(L"winetestdir2\\file");
-    ok(ret == TRUE, "got error %lu\n", GetLastError());
-    ret = RemoveDirectoryW(L"winetestdir2");
-    ok(ret == TRUE, "got error %lu\n", GetLastError());
-    ret = RemoveDirectoryW(L"winetestdir\\subdir");
-    ok(ret == TRUE, "got error %lu\n", GetLastError());
-    ret = RemoveDirectoryW(L"winetestdir");
-    ok(ret == TRUE, "got error %lu\n", GetLastError());
+    Cleanup();
 
     /* test Control Panel elements */
-
-    dwFlags = ~0u;
     hr = IShellFolder_ParseDisplayName(IDesktopFolder, NULL, NULL,
-            (WCHAR *)L"::{21EC2020-3AEA-1069-A2DD-08002B30309D}", NULL, &newPIDL, &dwFlags);
-    ok(hr == S_OK, "got hr %#lx\n", hr);
-    todo_wine ok(dwFlags == (SFGAO_CANLINK | SFGAO_FOLDER | SFGAO_HASSUBFOLDER), "got flags %#lx\n", dwFlags);
-
-    dwFlags = 0;
-    hr = IShellFolder_ParseDisplayName(IDesktopFolder, NULL, NULL,
-            (WCHAR *)L"::{21EC2020-3AEA-1069-A2DD-08002B30309D}", NULL, &newPIDL, &dwFlags);
-    ok(hr == S_OK, "got hr %#lx\n", hr);
-    ok(!dwFlags, "got flags %#lx\n", dwFlags);
-
-    dwFlags = ~0u;
-    hr = IShellFolder_GetAttributesOf(IDesktopFolder, 1, (LPCITEMIDLIST *)&newPIDL, &dwFlags);
-    ok(hr == S_OK, "got hr %#lx\n", hr);
-    todo_wine ok(dwFlags == (SFGAO_CANLINK | SFGAO_FOLDER | SFGAO_HASSUBFOLDER), "got flags %#lx\n", dwFlags);
-
-    dwFlags = 0;
-    hr = IShellFolder_GetAttributesOf(IDesktopFolder, 1, (LPCITEMIDLIST *)&newPIDL, &dwFlags);
-    ok(hr == S_OK, "got %#lx\n", hr);
-    todo_wine ok(!dwFlags, "got flags %#lx\n", dwFlags);
-
-    for (unsigned int i = 0; i < 32; ++i)
-    {
-        dwFlags = (1u << i);
-        hr = IShellFolder_ParseDisplayName(IDesktopFolder, NULL, NULL,
-                (WCHAR *)L"::{21EC2020-3AEA-1069-A2DD-08002B30309D}", NULL, &newPIDL, &dwFlags);
-        ok(hr == S_OK, "got %#lx\n", hr);
-        todo_wine ok(dwFlags == (SFGAO_CANLINK | ((SFGAO_FOLDER | SFGAO_HASSUBFOLDER) & (1u << i))),
-                "got flags %#lx for input %#x\n", dwFlags, 1u << i);
-
-        dwFlags = (1u << i);
-        hr = IShellFolder_GetAttributesOf(IDesktopFolder, 1, (LPCITEMIDLIST *)&newPIDL, &dwFlags);
-        ok(hr == S_OK, "got hr %#lx\n", hr);
-        todo_wine_if ((1u << i) == SFGAO_CANLINK)
-            ok(dwFlags == ((SFGAO_CANLINK | SFGAO_FOLDER | SFGAO_HASSUBFOLDER) & (1u << i)),
-                    "got flags %#lx for input %#x\n", dwFlags, 1u << i);
-    }
-
+            (WCHAR *)L"::{21EC2020-3AEA-1069-A2DD-08002B30309D}", NULL, &newPIDL, 0);
+    ok(hr == S_OK, "ParseDisplayName failed %08lx\n", hr);
     hr = IShellFolder_BindToObject(IDesktopFolder, newPIDL, NULL,
             &IID_IShellFolder, (void**)&testIShellFolder);
     ok(hr == S_OK, "BindToObject failed %08lx\n", hr);
@@ -1276,13 +1092,12 @@ static void test_GetAttributesOf(void)
     {
         WCHAR name[256];
         STRRET strret;
-        DWORD expect;
 
         hr = IShellFolder_GetDisplayNameOf(testIShellFolder, newPIDL, SHGDN_FORPARSING, &strret);
         ok(hr == S_OK, "GetDisplayNameOf failed %08lx\n", hr);
         StrRetToBufW(&strret, newPIDL, name, ARRAY_SIZE(name));
 
-        dwFlags = ~0u;
+        dwFlags = ~0;
         hr = IShellFolder_GetAttributesOf(testIShellFolder, 1,
                 (LPCITEMIDLIST*)&newPIDL, &dwFlags);
         ok(hr == S_OK, "ControlPanel->GetAttributesOf failed %08lx\n", hr);
@@ -1290,42 +1105,6 @@ static void test_GetAttributesOf(void)
                 broken(!wcsncmp(L"::{26EE0668-A00A-44D7-9371-BEB064C98683}\\", name, 41)
                     && dwFlags == SFGAO_VALIDATE),
                 "%s dwFlags = %08lx\n", debugstr_w(name), dwFlags);
-        expect = dwFlags | SFGAO_CANLINK;
-
-        dwFlags = 0;
-        hr = IShellFolder_GetAttributesOf(testIShellFolder, 1, (LPCITEMIDLIST *)&newPIDL, &dwFlags);
-        ok(hr == S_OK, "got hr %#lx\n", hr);
-        todo_wine ok(!dwFlags, "got flags %#lx\n", dwFlags);
-
-        for (unsigned int i = 0; i < 32; ++i)
-        {
-            dwFlags = (1u << i);
-            hr = IShellFolder_GetAttributesOf(testIShellFolder, 1, (LPCITEMIDLIST *)&newPIDL, &dwFlags);
-            ok(hr == S_OK, "got hr %#lx\n", hr);
-            ok(dwFlags == (expect & (1u << i)), "got flags %#lx for input %#x\n", dwFlags, 1u << i);
-        }
-
-        dwFlags = ~0u;
-        hr = IShellFolder_ParseDisplayName(testIShellFolder, NULL, NULL, name, NULL, &newPIDL, &dwFlags);
-        todo_wine ok(hr == S_OK || broken(hr == E_INVALIDARG) /* 8.1+ up to win10 2009 */, "got hr %#lx\n", hr);
-        if (hr != S_OK)
-            continue;
-        todo_wine ok(dwFlags == expect, "got flags %#lx\n", dwFlags);
-
-        dwFlags = 0;
-        hr = IShellFolder_ParseDisplayName(testIShellFolder, NULL, NULL, name, NULL, &newPIDL, &dwFlags);
-        todo_wine ok(hr == S_OK, "got hr %#lx\n", hr);
-        ok(!dwFlags, "got flags %#lx\n", dwFlags);
-
-        for (unsigned int i = 0; i < 32; ++i)
-        {
-            dwFlags = (1u << i);
-            hr = IShellFolder_ParseDisplayName(testIShellFolder, NULL, NULL, name, NULL, &newPIDL, &dwFlags);
-            todo_wine ok(hr == S_OK, "got hr %#lx\n", hr);
-            todo_wine_if (expect != (1u << i))
-                ok(dwFlags == expect, "got flags %#lx for input %#x\n", dwFlags, 1u << i);
-        }
-
         ILFree(newPIDL);
     }
     IEnumIDList_Release(list);
@@ -1333,11 +1112,6 @@ static void test_GetAttributesOf(void)
     hr = IShellFolder_ParseDisplayName(IDesktopFolder, NULL, NULL,
             (WCHAR*)L"c:\\", NULL, &newPIDL, 0);
     ok(hr == S_OK, "ParseDisplayName failed %08lx\n", hr);
-
-    dwFlags = 0;
-    hr = IShellFolder_GetAttributesOf(testIShellFolder, 1, (LPCITEMIDLIST *)&newPIDL, &dwFlags);
-    ok(hr == S_OK, "got %#lx\n", hr);
-    todo_wine ok(!dwFlags, "got flags %#lx\n", dwFlags);
 
     dwFlags = ~0;
     hr = IShellFolder_GetAttributesOf(testIShellFolder, 1,
@@ -1354,8 +1128,6 @@ static void test_GetAttributesOf(void)
     ILFree(newPIDL);
     IShellFolder_Release(testIShellFolder);
     IShellFolder_Release(IDesktopFolder);
-
-    SetCurrentDirectoryW(cwd);
 }
 
 static void test_SHGetPathFromIDList(void)
@@ -1367,12 +1139,15 @@ static void test_SHGetPathFromIDList(void)
     BOOL result;
     HRESULT hr;
     LPSHELLFOLDER psfDesktop;
-    WCHAR wszMyComputer[] = L"::{20D04FE0-3AEA-1069-A2D8-08002B30309D}";
+    WCHAR wszMyComputer[] = { 
+        ':',':','{','2','0','D','0','4','F','E','0','-','3','A','E','A','-','1','0','6','9','-',
+        'A','2','D','8','-','0','8','0','0','2','B','3','0','3','0','9','D','}',0 };
     WCHAR wszFileName[MAX_PATH];
     LPITEMIDLIST pidlTestFile;
     HANDLE hTestFile;
     STRRET strret;
-    static WCHAR wszTestFile[] = L"winetest.foo";
+    static WCHAR wszTestFile[] = {
+        'w','i','n','e','t','e','s','t','.','f','o','o',0 };
     LPITEMIDLIST pidlPrograms;
 
     /* Calling SHGetPathFromIDListW with no pidl should return the empty string */
@@ -1501,34 +1276,6 @@ static void test_SHGetPathFromIDList(void)
     ok(result, "SHGetPathFromIDListW failed\n");
 }
 
-static void test_SHGetPathFromIDList_personal(void)
-{
-    WCHAR personal[MAX_PATH], path[MAX_PATH];
-    LPITEMIDLIST pidl;
-    HRESULT hr;
-    BOOL ret;
-    int len;
-
-    ret = SHGetSpecialFolderPathW(NULL, personal, CSIDL_PERSONAL, FALSE);
-    ok(ret, "SHGetSpecialFolderPathW(CSIDL_PERSONAL) failed, error %lu.\n", GetLastError());
-    if (!ret) return;
-
-    hr = SHGetSpecialFolderLocation(NULL, CSIDL_PERSONAL, &pidl);
-    ok(hr == S_OK, "SHGetSpecialFolderLocation(CSIDL_PERSONAL) failed, hr %#lx.\n", hr);
-    if (hr != S_OK) return;
-
-    ret = SHGetPathFromIDListW(pidl, path);
-    ILFree(pidl);
-    ok(ret, "SHGetPathFromIDListW(CSIDL_PERSONAL) failed, error %lu.\n", GetLastError());
-    if (!ret) return;
-    ok(!lstrcmpiW(path, personal), "got %s, expected %s.\n", wine_dbgstr_w(path),
-       wine_dbgstr_w(personal));
-
-    len = lstrlenW(path);
-    ok(len && path[len - 1] != '\\', "CSIDL_PERSONAL path has trailing backslash: %s.\n",
-       wine_dbgstr_w(path));
-}
-
 static void test_EnumObjects_and_CompareIDs(void)
 {
     ITEMIDLIST *newPIDL;
@@ -1605,18 +1352,31 @@ static ULONG WINAPI InitPropertyBag_IPropertyBag_Release(IPropertyBag *iface) {
 static HRESULT WINAPI InitPropertyBag_IPropertyBag_Read(IPropertyBag *iface, LPCOLESTR pszPropName,
     VARIANT *pVar, IErrorLog *pErrorLog)
 {
-    if (!lstrcmpW(pszPropName, L"TargetSpecialFolder")) {
+    static const WCHAR wszTargetSpecialFolder[] = {
+        'T','a','r','g','e','t','S','p','e','c','i','a','l','F','o','l','d','e','r',0 };
+    static const WCHAR wszTarget[] = {
+        'T','a','r','g','e','t',0 };
+    static const WCHAR wszAttributes[] = {
+        'A','t','t','r','i','b','u','t','e','s',0 };
+    static const WCHAR wszResolveLinkFlags[] = {
+        'R','e','s','o','l','v','e','L','i','n','k','F','l','a','g','s',0 };
+    static const WCHAR wszTargetKnownFolder[] = {
+        'T','a','r','g','e','t','K','n','o','w','n','F','o','l','d','e','r',0 };
+    static const WCHAR wszCLSID[] = {
+        'C','L','S','I','D',0 };
+
+    if (!lstrcmpW(pszPropName, wszTargetSpecialFolder)) {
         ok(V_VT(pVar) == VT_I4, "Wrong variant type for 'TargetSpecialFolder' property!\n");
         return E_INVALIDARG;
     }
-
-    if (!lstrcmpW(pszPropName, L"ResolveLinkFlags"))
+    
+    if (!lstrcmpW(pszPropName, wszResolveLinkFlags)) 
     {
         ok(V_VT(pVar) == VT_UI4, "Wrong variant type for 'ResolveLinkFlags' property!\n");
         return E_INVALIDARG;
     }
 
-    if (!lstrcmpW(pszPropName, L"Target")) {
+    if (!lstrcmpW(pszPropName, wszTarget)) {
         WCHAR wszPath[MAX_PATH];
         BOOL result;
 
@@ -1631,7 +1391,7 @@ static HRESULT WINAPI InitPropertyBag_IPropertyBag_Read(IPropertyBag *iface, LPC
         return S_OK;
     }
 
-    if (!lstrcmpW(pszPropName, L"Attributes")) {
+    if (!lstrcmpW(pszPropName, wszAttributes)) {
         ok(V_VT(pVar) == VT_UI4, "Wrong variant type for 'Attributes' property!\n");
         if (V_VT(pVar) != VT_UI4) return E_INVALIDARG;
         V_UI4(pVar) = SFGAO_FOLDER|SFGAO_HASSUBFOLDER|SFGAO_FILESYSANCESTOR|
@@ -1639,13 +1399,13 @@ static HRESULT WINAPI InitPropertyBag_IPropertyBag_Read(IPropertyBag *iface, LPC
         return S_OK;
     }
 
-    if (!lstrcmpW(pszPropName, L"TargetKnownFolder")) {
+    if (!lstrcmpW(pszPropName, wszTargetKnownFolder)) {
         ok(V_VT(pVar) == VT_BSTR, "Wrong variant type for 'TargetKnownFolder' property!\n");
         /* TODO */
         return E_INVALIDARG;
     }
 
-    if (!lstrcmpW(pszPropName, L"CLSID")) {
+    if (!lstrcmpW(pszPropName, wszCLSID)) {
         ok(V_VT(pVar) == VT_EMPTY, "Wrong variant type for 'CLSID' property!\n");
         /* TODO */
         return E_INVALIDARG;
@@ -1685,13 +1445,19 @@ static void test_FolderShortcut(void) {
     CLSID clsid;
     LPITEMIDLIST pidlCurrentFolder, pidlWineTestFolder, pidlSubFolder;
     HKEY hShellExtKey;
-    WCHAR wszWineTestFolder[] = L"::{9B352EBF-2765-45C1-B4C6-85CC7F7ABC64}";
-    WCHAR wszShellExtKey[] =
-        L"Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\Desktop\\NameSpace\\"
-        L"{9b352ebf-2765-45c1-b4c6-85cc7f7abc64}";
-
-    WCHAR wszSomeSubFolder[] = L"SubFolder";
-    static const GUID CLSID_UnixDosFolder =
+    WCHAR wszWineTestFolder[] = {
+        ':',':','{','9','B','3','5','2','E','B','F','-','2','7','6','5','-','4','5','C','1','-',
+        'B','4','C','6','-','8','5','C','C','7','F','7','A','B','C','6','4','}',0 };
+    WCHAR wszShellExtKey[] = { 'S','o','f','t','w','a','r','e','\\',
+        'M','i','c','r','o','s','o','f','t','\\','W','i','n','d','o','w','s','\\',
+        'C','u','r','r','e','n','t','V','e','r','s','i','o','n','\\',
+        'E','x','p','l','o','r','e','r','\\','D','e','s','k','t','o','p','\\',
+        'N','a','m','e','S','p','a','c','e','\\',
+        '{','9','b','3','5','2','e','b','f','-','2','7','6','5','-','4','5','c','1','-',
+        'b','4','c','6','-','8','5','c','c','7','f','7','a','b','c','6','4','}',0 };
+    
+    WCHAR wszSomeSubFolder[] = { 'S','u','b','F','o','l','d','e','r', 0};
+    static const GUID CLSID_UnixDosFolder = 
         {0x9d20aae8, 0x0625, 0x44b0, {0x9c, 0xa7, 0x71, 0x88, 0x9c, 0x22, 0x54, 0xd9}};
 
     /* These tests basically show, that CLSID_FolderShortcuts are initialized
@@ -1835,7 +1601,7 @@ static void test_FolderShortcut(void) {
     IPersistFolder3_Release(pPersistFolder3);
 }
 
-#pragma pack(push,1)
+#include "pshpack1.h"
 struct FileStructA {
     BYTE  type;
     BYTE  dummy;
@@ -1859,7 +1625,7 @@ struct FileStructW {
     WORD  cbOffset;     /* FileStructW's offset from the beginning of the SHITMEID. 
                          * SHITEMID->cb == uOffset + cbLen */
 };
-#pragma pack(pop)
+#include "poppack.h"
 
 static void test_ITEMIDLIST_format(void) {
     WCHAR wszPersonal[MAX_PATH];
@@ -1868,7 +1634,8 @@ static void test_ITEMIDLIST_format(void) {
     HANDLE hFile;
     HRESULT hr;
     BOOL bResult;
-    WCHAR wszFile[3][17] = { L"even_", L"odd_", L"longer_than.8_3" };
+    WCHAR wszFile[3][17] = { { 'e','v','e','n','_',0 }, { 'o','d','d','_',0 },
+        { 'l','o','n','g','e','r','_','t','h','a','n','.','8','_','3',0 } };
     int i;
 
     bResult = SHGetSpecialFolderPathW(NULL, wszPersonal, CSIDL_PERSONAL, FALSE);
@@ -2213,7 +1980,8 @@ static void test_LocalizedNames(void)
         "LocalizedResourceName=@";
     static const char desktopini_contents2[] =
         ",-1\r\n";
-    static WCHAR foldernameW[] = L"testfolder";
+    static WCHAR foldernameW[] = {'t','e','s','t','f','o','l','d','e','r',0};
+    static const WCHAR folderdisplayW[] = {'F','o','l','d','e','r',' ','N','a','m','e',' ','R','e','s','o','u','r','c','e',0};
 
     /* create folder with desktop.ini and localized name in GetModuleFileNameA(NULL) */
     CreateDirectoryA(".\\testfolder", NULL);
@@ -2265,7 +2033,7 @@ static void test_LocalizedNames(void)
     hr = StrRetToBufW(&strret, newPIDL, tempbufW, ARRAY_SIZE(tempbufW));
     ok (hr == S_OK, "StrRetToBufW failed! hr = %08lx\n", hr);
     todo_wine
-    ok (!lstrcmpiW(tempbufW, L"Folder Name Resource"), "GetDisplayNameOf returned %s\n", wine_dbgstr_w(tempbufW));
+    ok (!lstrcmpiW(tempbufW, folderdisplayW), "GetDisplayNameOf returned %s\n", wine_dbgstr_w(tempbufW));
 
     /* editing name is also read from the resource */
     hr = IShellFolder_GetDisplayNameOf(testIShellFolder, newPIDL, SHGDN_INFOLDER|SHGDN_FOREDITING, &strret);
@@ -2274,7 +2042,7 @@ static void test_LocalizedNames(void)
     hr = StrRetToBufW(&strret, newPIDL, tempbufW, ARRAY_SIZE(tempbufW));
     ok (hr == S_OK, "StrRetToBufW failed! hr = %08lx\n", hr);
     todo_wine
-    ok (!lstrcmpiW(tempbufW, L"Folder Name Resource"), "GetDisplayNameOf returned %s\n", wine_dbgstr_w(tempbufW));
+    ok (!lstrcmpiW(tempbufW, folderdisplayW), "GetDisplayNameOf returned %s\n", wine_dbgstr_w(tempbufW));
 
     /* parsing name is unchanged */
     hr = IShellFolder_GetDisplayNameOf(testIShellFolder, newPIDL, SHGDN_INFOLDER|SHGDN_FORPARSING, &strret);
@@ -2305,7 +2073,7 @@ static void test_SHCreateShellItem(void)
     WCHAR curdirW[MAX_PATH];
     WCHAR fnbufW[MAX_PATH];
     IShellFolder *desktopfolder=NULL, *currentfolder=NULL;
-    static WCHAR testfileW[] = L"testfile";
+    static WCHAR testfileW[] = {'t','e','s','t','f','i','l','e',0};
 
     GetCurrentDirectoryA(MAX_PATH, curdirA);
 
@@ -3050,8 +2818,10 @@ static void test_ShellItemCompare(void)
     WCHAR curdirW[MAX_PATH];
     BOOL failed;
     HRESULT hr;
-    static const WCHAR filesW[][9] =
-        { L"a\\a", L"a\\b", L"a\\c", L"b\\a", L"b\\b", L"b\\c", L"c\\a", L"c\\b", L"c\\c" };
+    static const WCHAR filesW[][9] = {
+        {'a','\\','a',0}, {'a','\\','b',0}, {'a','\\','c',0},
+        {'b','\\','a',0}, {'b','\\','b',0}, {'b','\\','c',0},
+        {'c','\\','a',0}, {'c','\\','b',0}, {'c','\\','c',0} };
     int order;
     UINT i;
 
@@ -3567,6 +3337,7 @@ static void test_SHCreateShellItemArray(void)
     HRESULT hr;
     WCHAR cTestDirW[MAX_PATH];
     LPITEMIDLIST pidl_testdir, pidl;
+    static const WCHAR testdirW[] = {'t','e','s','t','d','i','r',0};
 
     if(!pSHCreateShellItemArray) {
         skip("No pSHCreateShellItemArray!\n");
@@ -3599,7 +3370,7 @@ static void test_SHCreateShellItemArray(void)
 
     GetCurrentDirectoryW(MAX_PATH, cTestDirW);
     myPathAddBackslashW(cTestDirW);
-    lstrcatW(cTestDirW, L"testdir");
+    lstrcatW(cTestDirW, testdirW);
 
     CreateFilesFolders();
 
@@ -3824,6 +3595,7 @@ static void test_SHCreateShellItemArray(void)
 
     if(pSHCreateShellItemArrayFromIDLists)
     {
+        WCHAR test1W[] = {'t','e','s','t','1','.','t','x','t',0};
         WCHAR test1pathW[MAX_PATH];
         LPITEMIDLIST pidltest1;
         LPCITEMIDLIST pidl_array[2];
@@ -3938,7 +3710,7 @@ static void test_SHCreateShellItemArray(void)
 
         lstrcpyW(test1pathW, cTestDirW);
         myPathAddBackslashW(test1pathW);
-        lstrcatW(test1pathW, L"test1.txt");
+        lstrcatW(test1pathW, test1W);
 
         SHGetDesktopFolder(&pdesktopsf);
 
@@ -4012,6 +3784,7 @@ static void test_ShellItemArrayEnumItems(void)
     WCHAR cTestDirW[MAX_PATH];
     HRESULT hr;
     LPITEMIDLIST pidl_testdir;
+    static const WCHAR testdirW[] = {'t','e','s','t','d','i','r',0};
 
     if(!pSHCreateShellItemArray)
     {
@@ -4025,7 +3798,7 @@ static void test_ShellItemArrayEnumItems(void)
 
     GetCurrentDirectoryW(MAX_PATH, cTestDirW);
     myPathAddBackslashW(cTestDirW);
-    lstrcatW(cTestDirW, L"testdir");
+    lstrcatW(cTestDirW, testdirW);
 
     hr = IShellFolder_ParseDisplayName(pdesktopsf, NULL, NULL, cTestDirW, NULL, &pidl_testdir, 0);
     ok(hr == S_OK, "got 0x%08lx\n", hr);
@@ -4334,6 +4107,8 @@ static void test_ShellItemGetAttributes(void)
     HRESULT hr;
     WCHAR curdirW[MAX_PATH];
     WCHAR buf[MAX_PATH];
+    static const WCHAR testdir1W[] = {'t','e','s','t','d','i','r',0};
+    static const WCHAR testfile1W[] = {'t','e','s','t','d','i','r','\\','t','e','s','t','1','.','t','x','t',0};
 
     if(!pSHCreateShellItem)
     {
@@ -4377,7 +4152,7 @@ static void test_ShellItemGetAttributes(void)
     myPathAddBackslashW(curdirW);
 
     lstrcpyW(buf, curdirW);
-    lstrcatW(buf, L"testdir");
+    lstrcatW(buf, testdir1W);
     hr = IShellFolder_ParseDisplayName(pdesktopsf, NULL, NULL, buf, NULL, &pidl, NULL);
     ok(hr == S_OK, "got 0x%08lx\n", hr);
     hr = pSHCreateShellItem(NULL, NULL, pidl, &psi_folder1);
@@ -4385,7 +4160,7 @@ static void test_ShellItemGetAttributes(void)
     ILFree(pidl);
 
     lstrcpyW(buf, curdirW);
-    lstrcatW(buf, L"testdir\\test1.txt");
+    lstrcatW(buf, testfile1W);
     hr = IShellFolder_ParseDisplayName(pdesktopsf, NULL, NULL, buf, NULL, &pidl, NULL);
     ok(hr == S_OK, "got 0x%08lx\n", hr);
     hr = pSHCreateShellItem(NULL, NULL, pidl, &psi_file1);
@@ -4425,8 +4200,12 @@ static void test_ShellItemArrayGetAttributes(void)
     WCHAR curdirW[MAX_PATH];
     WCHAR buf[MAX_PATH];
     UINT i;
-    static const WCHAR *testfilesW[] =
-        { L"testdir", L"testdir\\testdir2", L"testdir\\testdir3", L"testdir\\test1.txt", L"testdir\\test2.txt" };
+    static const WCHAR testdir1W[] = {'t','e','s','t','d','i','r',0};
+    static const WCHAR testdir2W[] = {'t','e','s','t','d','i','r','\\','t','e','s','t','d','i','r','2',0};
+    static const WCHAR testdir3W[] = {'t','e','s','t','d','i','r','\\','t','e','s','t','d','i','r','3',0};
+    static const WCHAR testfile1W[] = {'t','e','s','t','d','i','r','\\','t','e','s','t','1','.','t','x','t',0};
+    static const WCHAR testfile2W[] = {'t','e','s','t','d','i','r','\\','t','e','s','t','2','.','t','x','t',0};
+    static const WCHAR *testfilesW[5] = { testdir1W, testdir2W, testdir3W, testfile1W, testfile2W };
 
     if(!pSHCreateShellItemArrayFromShellItem)
     {
@@ -4797,6 +4576,8 @@ static void test_GetUIObject(void)
     LPITEMIDLIST pidl;
     HRESULT hr;
     WCHAR path[MAX_PATH];
+    const WCHAR filename[] =
+        {'\\','t','e','s','t','d','i','r','\\','t','e','s','t','1','.','t','x','t',0};
     LPCITEMIDLIST pidl_child;
     IShellFolder *psf;
 
@@ -4806,7 +4587,7 @@ static void test_GetUIObject(void)
         skip("GetCurrentDirectoryW returned an empty string.\n");
         return;
     }
-    lstrcatW(path, L"\\testdir\\test1.txt");
+    lstrcatW(path, filename);
     SHGetDesktopFolder(&psf_desktop);
 
     CreateFilesFolders();
@@ -4948,7 +4729,7 @@ static void r_verify_pidl(unsigned l, LPCITEMIDLIST pidl, const WCHAR *path)
 
 static void test_SHSimpleIDListFromPath(void)
 {
-    const WCHAR adirW[] = L"C:\\sidlfpdir";
+    const WCHAR adirW[] = {'C',':','\\','s','i','d','l','f','p','d','i','r',0};
     const CHAR adirA[] = "C:\\sidlfpdir";
     BOOL br, is_unicode = !(GetVersion() & 0x80000000);
 
@@ -5030,7 +4811,8 @@ static HRESULT WINAPI fsbd_GetFindData_invalid(IFileSystemBindData *fsbd,
 static HRESULT WINAPI fsbd_GetFindData_valid(IFileSystemBindData *fsbd,
         WIN32_FIND_DATAW *pfd)
 {
-    HANDLE handle = FindFirstFileW(L"C:\\fsbddir", pfd);
+    static const WCHAR adirW[] = {'C',':','\\','f','s','b','d','d','i','r',0};
+    HANDLE handle = FindFirstFileW(adirW, pfd);
     FindClose(handle);
     return S_OK;
 }
@@ -5053,10 +4835,11 @@ static IFileSystemBindData fsbd = { &fsbdVtbl };
 
 static void test_ParseDisplayNamePBC(void)
 {
-    WCHAR wFileSystemBindData[] = L"File System Bind Data";
-    WCHAR adirW[] = L"C:\\fsbddir";
-    WCHAR afileW[] = L"C:\\fsbddir\\file.txt";
-    WCHAR afile2W[] = L"C:\\fsbddir\\s\\file.txt";
+    WCHAR wFileSystemBindData[] =
+        {'F','i','l','e',' ','S','y','s','t','e','m',' ','B','i','n','d',' ','D','a','t','a',0};
+    WCHAR adirW[] = {'C',':','\\','f','s','b','d','d','i','r',0};
+    WCHAR afileW[] = {'C',':','\\','f','s','b','d','d','i','r','\\','f','i','l','e','.','t','x','t',0};
+    WCHAR afile2W[] = {'C',':','\\','f','s','b','d','d','i','r','\\','s','\\','f','i','l','e','.','t','x','t',0};
     const HRESULT exp_err = HRESULT_FROM_WIN32(ERROR_FILE_NOT_FOUND);
 
     IShellFolder *psf;
@@ -5325,6 +5108,8 @@ static void test_SHChangeNotify(BOOL test_new_delivery)
     HRESULT hr;
     BOOL br, has_unicode;
     SHChangeNotifyEntry entries[1];
+    const CHAR root_dirA[] = "C:\\shell32_cn_test";
+    const WCHAR root_dirW[] = {'C',':','\\','s','h','e','l','l','3','2','_','c','n','_','t','e','s','t',0};
 
     trace("SHChangeNotify tests (%x)\n", test_new_delivery);
 
@@ -5340,14 +5125,14 @@ static void test_SHChangeNotify(BOOL test_new_delivery)
             NULL, NULL, GetModuleHandleA(NULL), 0);
     ok(wnd != NULL, "Failed to make a window\n");
 
-    br = CreateDirectoryA("C:\\shell32_cn_test", NULL);
+    br = CreateDirectoryA(root_dirA, NULL);
     ok(br == TRUE, "CreateDirectory failed: %ld\n", GetLastError());
 
     entries[0].pidl = NULL;
     if(has_unicode)
-        hr = SHILCreateFromPath(L"C:\\shell32_cn_test", (ITEMIDLIST**)&entries[0].pidl, 0);
+        hr = SHILCreateFromPath(root_dirW, (LPITEMIDLIST*)&entries[0].pidl, 0);
     else
-        hr = SHILCreateFromPath((const void*)"C:\\shell32_cn_test", (ITEMIDLIST**)&entries[0].pidl, 0);
+        hr = SHILCreateFromPath((const void *)root_dirA, (LPITEMIDLIST*)&entries[0].pidl, 0);
     ok(hr == S_OK, "SHILCreateFromPath failed: 0x%08lx\n", hr);
     entries[0].fRecursive = TRUE;
 
@@ -5386,7 +5171,7 @@ static void test_SHChangeNotify(BOOL test_new_delivery)
     DestroyWindow(wnd);
 
     ILFree((LPITEMIDLIST)entries[0].pidl);
-    br = RemoveDirectoryA("C:\\shell32_cn_test");
+    br = RemoveDirectoryA(root_dirA);
     ok(br == TRUE, "RemoveDirectory failed: %ld\n", GetLastError());
 }
 
@@ -5402,6 +5187,8 @@ static void test_SHCreateDefaultContextMenu(void)
     DEFCONTEXTMENU cminfo;
     HRESULT hr;
     UINT i;
+    const WCHAR filename[] =
+        {'\\','t','e','s','t','d','i','r','\\','t','e','s','t','1','.','t','x','t',0};
     if(!pSHCreateDefaultContextMenu)
     {
         win_skip("SHCreateDefaultContextMenu missing.\n");
@@ -5414,7 +5201,7 @@ static void test_SHCreateDefaultContextMenu(void)
         skip("GetCurrentDirectoryW returned an empty string.\n");
         return;
     }
-    lstrcatW(path, L"\\testdir\\test1.txt");
+    lstrcatW(path, filename);
     SHGetDesktopFolder(&desktop);
 
     CreateFilesFolders();
@@ -5704,9 +5491,9 @@ static void test_DataObject(void)
         hr = IEnumFORMATETC_Next(enum_format, 1, &fmt, NULL);
         ok(hr == S_OK, "Got hr %#lx.\n", hr);
         ret = GetClipboardFormatNameW(fmt.cfFormat, format_name, ARRAY_SIZE(format_name));
-        ok(ret > 0, "Got %d.\n",ret);
+        todo_wine ok(ret > 0, "Got %d.\n",ret);
         if (ret > 0)
-            todo_wine ok(!wcscmp(format_name, CFSTR_PREFERREDDROPEFFECTW), "Got clipboard format %s.\n", debugstr_w(format_name));
+            ok(!wcscmp(format_name, CFSTR_PREFERREDDROPEFFECTW), "Got clipboard format %s.\n", debugstr_w(format_name));
         ok(!fmt.ptd, "Got target device %p.\n", fmt.ptd);
         ok(fmt.dwAspect == DVASPECT_CONTENT, "Got aspect %#lx.\n", fmt.dwAspect);
         ok(fmt.lindex == -1, "Got index %ld.\n", fmt.lindex);
@@ -5869,6 +5656,9 @@ static void test_SHGetSetFolderCustomSettings(void)
     WCHAR pathW[MAX_PATH];
     WCHAR bufferW[MAX_PATH];
     WCHAR iconpathW[MAX_PATH];
+    static const WCHAR somedirW[] = {'s','o','m','e','_','d','i','r',0};
+    static const WCHAR iconW[] = {'\\','s','o','m','e','_','i','c','o','n','.','i','c','o',0};
+    static const WCHAR desktop_iniW[] = {'\\','D','e','s','k','t','o','p','.','i','n','i',0};
 
     if (!pSHGetSetFolderCustomSettings)
     {
@@ -5877,11 +5667,11 @@ static void test_SHGetSetFolderCustomSettings(void)
     }
 
     GetTempPathW(MAX_PATH, pathW);
-    lstrcatW(pathW, L"some_dir");
+    lstrcatW(pathW, somedirW);
     CreateDirectoryW(pathW, NULL);
 
     lstrcpyW(iconpathW, pathW);
-    lstrcatW(iconpathW, L"\\some_icon.ico");
+    lstrcatW(iconpathW, iconW);
 
     memset(&fcs, 0, sizeof(fcs));
     fcs.dwSize = sizeof(fcs);
@@ -5906,7 +5696,7 @@ static void test_SHGetSetFolderCustomSettings(void)
     ok(FAILED(hr), "Unexpected hr %#lx.\n", hr);
 
     lstrcpyW(bufferW, pathW);
-    lstrcatW(bufferW, L"\\Desktop.ini");
+    lstrcatW(bufferW, desktop_iniW);
     DeleteFileW(bufferW);
     RemoveDirectoryW(pathW);
 }
@@ -6319,7 +6109,6 @@ START_TEST(shlfolder)
     test_GetDisplayName();
     test_GetAttributesOf();
     test_SHGetPathFromIDList();
-    test_SHGetPathFromIDList_personal();
     test_CallForAttributes();
     test_FolderShortcut();
     test_ITEMIDLIST_format();

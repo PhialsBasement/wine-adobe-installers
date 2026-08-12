@@ -21,7 +21,7 @@
 
 import "wtypes.idl";
 
-#pragma pack(push,1)
+cpp_quote("#include <pshpack1.h>")
 typedef struct
 {
     WORD cb;      /* nr of bytes in this item */
@@ -42,7 +42,7 @@ typedef LPCITEMIDLIST PCUIDLIST_RELATIVE;
 typedef LPITEMIDLIST PIDLIST_ABSOLUTE;
 typedef LPCITEMIDLIST PCIDLIST_ABSOLUTE;
 typedef LPCITEMIDLIST *PCIDLIST_ABSOLUTE_ARRAY;
-#pragma pack(pop)
+cpp_quote("#include <poppack.h>")
 
 #ifndef MAX_PATH
 #define MAX_PATH 260
@@ -59,7 +59,7 @@ typedef enum tagSTRRET_TYPE
     STRRET_CSTR = 2
 } STRRET_TYPE;
 
-#pragma pack(push,8)
+cpp_quote("#include <pshpack8.h>")
 typedef struct _STRRET
 {
     UINT uType;			/* STRRET_xxx */
@@ -70,16 +70,16 @@ typedef struct _STRRET
     [case(STRRET_CSTR)]         char      cStr[MAX_PATH]; /* ANSI Buffer */
     } DUMMYUNIONNAME;
 } STRRET, *LPSTRRET;
-#pragma pack(pop)
+cpp_quote("#include <poppack.h>")
 
-#pragma pack(push,1)
+cpp_quote("#include <pshpack1.h>")
 typedef struct
 {
     int fmt;
     int cxChar;
     STRRET str;
 } SHELLDETAILS, *LPSHELLDETAILS;
-#pragma pack(pop)
+cpp_quote("#include <poppack.h>")
 
 typedef struct _COMDLG_FILTERSPEC
 {

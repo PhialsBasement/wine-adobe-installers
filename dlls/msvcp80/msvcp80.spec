@@ -2898,9 +2898,9 @@
 @ cdecl -arch=win64 ?_Copy_s@?$char_traits@G@std@@SAPEAGPEAG_KPEBG1@Z(ptr long ptr long) MSVCP_char_traits_short__Copy_s
 @ cdecl -arch=win32 ?_Copy_s@?$char_traits@_W@std@@SAPA_WPA_WIPB_WI@Z(ptr long ptr long) MSVCP_char_traits_wchar__Copy_s
 @ cdecl -arch=win64 ?_Copy_s@?$char_traits@_W@std@@SAPEA_WPEA_W_KPEB_W1@Z(ptr long ptr long) MSVCP_char_traits_wchar__Copy_s
-@ cdecl ?_Cosh@?$_Ctraits@M@std@@SAMMM@Z(float float) _FCosh
-@ cdecl ?_Cosh@?$_Ctraits@N@std@@SANNN@Z(double double) _Cosh
-@ cdecl ?_Cosh@?$_Ctraits@O@std@@SAOOO@Z(double double) _Cosh
+@ stub ?_Cosh@?$_Ctraits@M@std@@SAMMM@Z
+@ stub ?_Cosh@?$_Ctraits@N@std@@SANNN@Z
+@ stub ?_Cosh@?$_Ctraits@O@std@@SAOOO@Z
 @ cdecl -arch=win32 ?_Cout_func@std@@YAAAV?$basic_ostream@DU?$char_traits@D@std@@@1@XZ() _Cout_func
 @ cdecl -arch=win64 ?_Cout_func@std@@YAAEAV?$basic_ostream@DU?$char_traits@D@std@@@1@XZ() _Cout_func
 @ stub -arch=win32 ?_Debug_message@std@@YAXPBD0@Z
@@ -3662,9 +3662,9 @@
 @ cdecl -arch=arm ?_Sgetn_s@?$basic_streambuf@_WU?$char_traits@_W@std@@@std@@QAAHPA_WIH@Z(ptr ptr long long) basic_streambuf_wchar__Sgetn_s
 @ thiscall -arch=i386 ?_Sgetn_s@?$basic_streambuf@_WU?$char_traits@_W@std@@@std@@QAEHPA_WIH@Z(ptr ptr long long) basic_streambuf_wchar__Sgetn_s
 @ cdecl -arch=win64 ?_Sgetn_s@?$basic_streambuf@_WU?$char_traits@_W@std@@@std@@QEAA_JPEA_W_K_J@Z(ptr ptr long long) basic_streambuf_wchar__Sgetn_s
-@ cdecl ?_Sinh@?$_Ctraits@M@std@@SAMMM@Z(float float) _FSinh
-@ cdecl ?_Sinh@?$_Ctraits@N@std@@SANNN@Z(double double) _Sinh
-@ cdecl ?_Sinh@?$_Ctraits@O@std@@SAOOO@Z(double double) _Sinh
+@ stub ?_Sinh@?$_Ctraits@M@std@@SAMMM@Z
+@ stub ?_Sinh@?$_Ctraits@N@std@@SANNN@Z
+@ stub ?_Sinh@?$_Ctraits@O@std@@SAOOO@Z
 @ extern -arch=arm ?_Stinit@?1??_Init@?$basic_filebuf@DU?$char_traits@D@std@@@std@@IAAXPAU_iobuf@@W4_Initfl@23@@Z@4HA basic_filebuf_char__Init__Stinit
 @ extern -arch=i386 ?_Stinit@?1??_Init@?$basic_filebuf@DU?$char_traits@D@std@@@std@@IAEXPAU_iobuf@@W4_Initfl@23@@Z@4HA basic_filebuf_char__Init__Stinit
 @ extern -arch=win64 ?_Stinit@?1??_Init@?$basic_filebuf@DU?$char_traits@D@std@@@std@@IEAAXPEAU_iobuf@@W4_Initfl@23@@Z@4HA basic_filebuf_char__Init__Stinit
@@ -7829,7 +7829,7 @@
 @ cdecl -arch=arm ?xsputn@?$basic_streambuf@_WU?$char_traits@_W@std@@@std@@MAAHPB_WH@Z(ptr ptr long) basic_streambuf_wchar_xsputn
 @ thiscall -arch=i386 ?xsputn@?$basic_streambuf@_WU?$char_traits@_W@std@@@std@@MAEHPB_WH@Z(ptr ptr long) basic_streambuf_wchar_xsputn
 @ cdecl -arch=win64 ?xsputn@?$basic_streambuf@_WU?$char_traits@_W@std@@@std@@MEAA_JPEB_W_J@Z(ptr ptr long) basic_streambuf_wchar_xsputn
-@ cdecl _Cosh(double double)
+@ stub _Cosh
 @ extern _Denorm
 @ stub _Dnorm
 @ cdecl _Dscale(ptr long)
@@ -7838,7 +7838,7 @@
 @ stub _Dunscale
 @ extern _Eps
 @ cdecl _Exp(ptr double long)
-@ cdecl _FCosh(float float)
+@ stub _FCosh
 @ extern _FDenorm
 @ stub _FDnorm
 @ cdecl _FDscale(ptr long)
@@ -7850,7 +7850,7 @@
 @ extern _FInf
 @ extern _FNan
 # extern _FRteps
-@ cdecl _FSinh(float float)
+@ stub _FSinh
 @ extern _FSnan
 # extern _FXbig
 @ cdecl -norelay _Getcoll()
@@ -7861,7 +7861,7 @@
 @ cdecl _Getwctypes(ptr ptr ptr ptr)
 @ extern _Hugeval
 @ extern _Inf
-@ cdecl _LCosh(double double) _Cosh
+@ stub _LCosh
 @ extern _LDenorm
 @ cdecl _LDscale(ptr long) _Dscale
 @ stub _LDtentox
@@ -7873,7 +7873,7 @@
 @ extern _LNan
 @ stub _LPoly
 # extern _LRteps
-@ cdecl _LSinh(double double) _Sinh
+@ stub _LSinh
 @ extern _LSnan
 # extern _LXbig
 @ extern _LZero
@@ -7886,7 +7886,7 @@
 @ stub _Once
 @ stub _Poly
 # extern _Rteps
-@ cdecl _Sinh(double double)
+@ stub _Sinh
 @ extern _Snan
 @ cdecl _Stod(ptr ptr long)
 @ cdecl _Stodx(ptr ptr long ptr)

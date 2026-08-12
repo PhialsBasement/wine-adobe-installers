@@ -36,8 +36,9 @@
 #include "winternl.h"
 #include "winerror.h"
 #include "ntgdi_private.h"
+#include "wine/wgl.h"
+#include "wine/wgl_driver.h"
 
-#include "wine/opengl_driver.h"
 #include "wine/debug.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(dc);
@@ -153,6 +154,8 @@ static void free_dc_attr( DC_ATTR *dc_attr )
  */
 static void set_initial_dc_state( DC *dc )
 {
+    if (dc->dce && dc->dpi_from && dc->dpi_to) dc->dirty = 1;
+
     dc->attr->wnd_org.x     = 0;
     dc->attr->wnd_org.y     = 0;
     dc->attr->wnd_ext.cx    = 1;
@@ -194,6 +197,8 @@ static void set_initial_dc_state( DC *dc )
     dc->xformWorld2Vport    = dc->xformWorld2Wnd;
     dc->xformVport2World    = dc->xformWorld2Wnd;
     dc->vport2WorldValid    = TRUE;
+    dc->dpi_from            = 0;
+    dc->dpi_to              = 0;
 
     reset_bounds( &dc->bounds );
 }
@@ -248,7 +253,6 @@ DC *alloc_dc_ptr( DWORD magic )
  */
 static void free_dc_state( DC *dc )
 {
-    if (dc->opengl_drawable) opengl_drawable_release( dc->opengl_drawable );
     if (dc->hClipRgn) NtGdiDeleteObjectApp( dc->hClipRgn );
     if (dc->hMetaRgn) NtGdiDeleteObjectApp( dc->hMetaRgn );
     if (dc->hVisRgn) NtGdiDeleteObjectApp( dc->hVisRgn );
@@ -326,29 +330,6 @@ void release_dc_ptr( DC *dc )
     if (ref) dc->thread = GetCurrentThreadId();  /* we still own it */
 }
 
-BOOL is_dc_display( HDC hdc )
-{
-    int ret;
-    DC *dc;
-
-    if (!(dc = get_dc_ptr( hdc ))) return FALSE;
-    ret = dc->is_display;
-    release_dc_ptr( dc );
-
-    return ret;
-}
-
-int get_dc_pixel_format( HDC hdc )
-{
-    int ret;
-    DC *dc;
-
-    if (!(dc = get_dc_ptr( hdc ))) return -1;
-    ret = dc->pixel_format;
-    release_dc_ptr( dc );
-
-    return ret;
-}
 
 static void set_bk_color( DC *dc, COLORREF color )
 {
@@ -511,7 +492,6 @@ static BOOL reset_dc_state( HDC hdc )
     dc->saved_dc = NULL;
     dc->attr->save_level = 0;
     release_dc_ptr( dc );
-
     return TRUE;
 }
 
@@ -528,7 +508,7 @@ static BOOL DC_DeleteObject( HGDIOBJ handle )
     if (!(dc = get_dc_ptr( handle ))) return FALSE;
     if (dc->refcount != 1)
     {
-        FIXME( "not deleting busy DC %p refcount %u\n", dc->hSelf, dc->refcount );
+        FIXME( "not deleting busy DC %p refcount %u\n", dc->hSelf, (int)dc->refcount );
         release_dc_ptr( dc );
         return FALSE;
     }
@@ -736,7 +716,7 @@ HDC WINAPI NtGdiOpenDCW( UNICODE_STRING *device, const DEVMODEW *devmode, UNICOD
     if (is_display)
         funcs = get_display_driver();
     else if (type != WINE_GDI_DRIVER_VERSION)
-        ERR( "version mismatch: %u\n", type );
+        ERR( "version mismatch: %u\n", (unsigned int)type );
     else
         funcs = hspool;
     if (!funcs)
@@ -926,7 +906,7 @@ BOOL WINAPI NtGdiGetAndSetDCDword( HDC hdc, UINT method, DWORD value, DWORD *pre
 {
     PHYSDEV physdev;
     BOOL ret = TRUE;
-    DWORD prev = 0;
+    DWORD prev;
     DC *dc;
 
     if (!(dc = get_dc_ptr( hdc ))) return 0;
@@ -1051,10 +1031,6 @@ BOOL WINAPI NtGdiGetDCDword( HDC hdc, UINT method, DWORD *result )
         *result = get_gdi_object_type( hdc ) == NTGDI_OBJ_MEMDC;
         break;
 
-    case NtGdiHasOpenGL:
-        *result = get_gdi_object_type( hdc ) == NTGDI_OBJ_MEMDC || dc->is_display;
-        break;
-
     default:
         WARN( "unknown method %u\n", method );
         ret = FALSE;
@@ -1118,48 +1094,6 @@ BOOL WINAPI NtGdiSetBrushOrg( HDC hdc, INT x, INT y, POINT *oldorg )
 }
 
 
-/***********************************************************************
- *           NtGdiGetMiterLimit  (win32u.@)
- */
-BOOL WINAPI NtGdiGetMiterLimit( HDC hdc, FLOAT *limit )
-{
-    DC *dc;
-
-    if (!(dc = get_dc_ptr( hdc ))) return FALSE;
-    if (limit) *limit = dc->attr->miter_limit;
-    release_dc_ptr( dc );
-    return TRUE;
-}
-
-
-/*******************************************************************
- *           NtGdiSetMiterLimit  (win32u.@)
- */
-BOOL WINAPI NtGdiSetMiterLimit( HDC hdc, DWORD limit, FLOAT *old_limit )
-{
-    DC *dc;
-
-    if (!(dc = get_dc_ptr( hdc ))) return FALSE;
-    if (old_limit) *old_limit = dc->attr->miter_limit;
-    dc->attr->miter_limit = *(FLOAT *)&limit;
-    release_dc_ptr( dc );
-    return TRUE;
-}
-
-
-BOOL offset_viewport_org( HDC hdc, INT x, INT y, POINT *point )
-{
-    DC *dc;
-
-    if (!(dc = get_dc_ptr( hdc ))) return FALSE;
-    if (point) *point = dc->attr->vport_org;
-    dc->attr->vport_org.x += x;
-    dc->attr->vport_org.y += y;
-    release_dc_ptr( dc );
-    return NtGdiComputeXformCoefficients( hdc );
-}
-
-
 BOOL set_viewport_org( HDC hdc, INT x, INT y, POINT *point )
 {
     DC *dc;
@@ -1215,7 +1149,7 @@ BOOL WINAPI NtGdiGetTransform( HDC hdc, DWORD which, XFORM *xform )
         break;
 
     default:
-        FIXME("Unknown code %x\n", which);
+        FIXME("Unknown code %x\n", (int)which);
         ret = FALSE;
     }
 
@@ -1386,6 +1320,16 @@ static BOOL check_gamma_ramps(void *ptr)
     return TRUE;
 }
 
+static void update_children_window_state( HWND hwnd )
+{
+    HWND *children;
+    int i;
+
+    if (!(children = list_window_children( hwnd ))) return;
+    for (i = 0; children[i]; i++) update_window_state( children[i] );
+    free( children );
+}
+
 /***********************************************************************
  *           NtGdiSetDeviceGammaRamp    (win32u.@)
  */
@@ -1403,6 +1347,8 @@ BOOL WINAPI NtGdiSetDeviceGammaRamp( HDC hdc, void *ptr )
 
             if (check_gamma_ramps(ptr))
                 ret = physdev->funcs->pSetDeviceGammaRamp( physdev, ptr );
+
+            update_children_window_state( get_desktop_window() );
         }
         else RtlSetLastWin32Error( ERROR_INVALID_PARAMETER );
 	release_dc_ptr( dc );
@@ -1522,7 +1468,54 @@ DWORD WINAPI NtGdiSetLayout( HDC hdc, LONG wox, DWORD layout )
         release_dc_ptr( dc );
     }
 
-    TRACE("hdc : %p, old layout : %08x, new layout : %08x\n", hdc, old_layout, layout);
+    TRACE("hdc : %p, old layout : %08x, new layout : %08x\n", hdc, old_layout, (int)layout);
 
     return old_layout;
+}
+
+/**********************************************************************
+ *           __wine_get_icm_profile     (win32u.@)
+ */
+BOOL WINAPI __wine_get_icm_profile( HDC hdc, BOOL allow_default, DWORD *size, WCHAR *filename )
+{
+    PHYSDEV physdev;
+    DC *dc;
+    BOOL ret;
+
+    if (!(dc = get_dc_ptr(hdc))) return FALSE;
+
+    physdev = GET_DC_PHYSDEV( dc, pGetICMProfile );
+    ret = physdev->funcs->pGetICMProfile( physdev, allow_default, size, filename );
+    release_dc_ptr(dc);
+    return ret;
+}
+
+/***********************************************************************
+ *      __wine_get_wgl_driver  (win32u.@)
+ */
+const struct opengl_funcs *__wine_get_wgl_driver( HDC hdc, UINT version )
+{
+    BOOL is_display, is_memdc;
+    DC *dc;
+
+    if (version != WINE_WGL_DRIVER_VERSION)
+    {
+        ERR( "version mismatch, opengl32 wants %u but dibdrv has %u\n",
+             version, WINE_WGL_DRIVER_VERSION );
+        return NULL;
+    }
+
+    if (!(dc = get_dc_obj( hdc ))) return NULL;
+    if (dc->attr->disabled)
+    {
+        GDI_ReleaseObj( hdc );
+        return NULL;
+    }
+    is_display = dc->is_display;
+    is_memdc = get_gdi_object_type( hdc ) == NTGDI_OBJ_MEMDC;
+    GDI_ReleaseObj( hdc );
+
+    if (is_display) return user_driver->pwine_get_wgl_driver( version );
+    if (is_memdc) return dibdrv_get_wgl_driver();
+    return (void *)-1;
 }

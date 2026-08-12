@@ -32,6 +32,7 @@ static BOOL (WINAPI *pCredEnumerateA)(LPCSTR,DWORD,DWORD *,PCREDENTIALA **);
 static VOID (WINAPI *pCredFree)(PVOID);
 static BOOL (WINAPI *pCredGetSessionTypes)(DWORD,LPDWORD);
 static BOOL (WINAPI *pCredReadA)(LPCSTR,DWORD,DWORD,PCREDENTIALA *);
+static BOOL (WINAPI *pCredRenameA)(LPCSTR,LPCSTR,DWORD,DWORD);
 static BOOL (WINAPI *pCredWriteA)(PCREDENTIALA,DWORD);
 static BOOL (WINAPI *pCredReadDomainCredentialsA)(PCREDENTIAL_TARGET_INFORMATIONA,DWORD,DWORD*,PCREDENTIALA**);
 static BOOL (WINAPI *pCredMarshalCredentialA)(CRED_MARSHAL_TYPE,PVOID,LPSTR *);
@@ -40,7 +41,7 @@ static BOOL (WINAPI *pCredIsMarshaledCredentialA)(LPCSTR);
 
 #define TEST_TARGET_NAME  "credtest.winehq.org"
 #define TEST_TARGET_NAME2 "credtest2.winehq.org"
-static const WCHAR TEST_PASSWORD[] = L"p4$$w0rd!";
+static const WCHAR TEST_PASSWORD[] = {'p','4','$','$','w','0','r','d','!',0};
 
 static void test_CredReadA(void)
 {
@@ -380,12 +381,12 @@ static void test_domain_password(DWORD cred_type)
 
 static void test_CredMarshalCredentialA(void)
 {
-    static WCHAR emptyW[] = L"";
-    static WCHAR tW[] = L"t";
-    static WCHAR teW[] = L"te";
-    static WCHAR tesW[] = L"tes";
-    static WCHAR testW[] = L"test";
-    static WCHAR test1W[] = L"test1";
+    static WCHAR emptyW[] = {0};
+    static WCHAR tW[] = {'t',0};
+    static WCHAR teW[] = {'t','e',0};
+    static WCHAR tesW[] = {'t','e','s',0};
+    static WCHAR testW[] = {'t','e','s','t',0};
+    static WCHAR test1W[] = {'t','e','s','t','1',0};
     CERT_CREDENTIAL_INFO cert;
     USERNAME_TARGET_CREDENTIAL_INFO username;
     DWORD error;
@@ -564,6 +565,10 @@ static void test_CredUnmarshalCredentialA(void)
 {
     static const UCHAR cert_empty[CERT_HASH_LENGTH] = {0};
     static const UCHAR cert_wine[CERT_HASH_LENGTH] = {'W','i','n','e',0};
+    static const WCHAR tW[] = {'t',0};
+    static const WCHAR teW[] = {'t','e',0};
+    static const WCHAR tesW[] = {'t','e','s',0};
+    static const WCHAR testW[] = {'t','e','s','t',0};
     void *p;
     CERT_CREDENTIAL_INFO *cert;
     const UCHAR *hash;
@@ -599,22 +604,22 @@ static void test_CredUnmarshalCredentialA(void)
         { "@@CAAAAAA", UsernameTargetCredential, NULL },
         { "@@CAAAAAA0B", UsernameTargetCredential, NULL },
         { "@@CAAAAAA0BA", UsernameTargetCredential, NULL },
-        { "@@CCAAAAA0BA", UsernameTargetCredential, L"t" },
+        { "@@CCAAAAA0BA", UsernameTargetCredential, tW },
         { "@@CEAAAAA0BA", UsernameTargetCredential, NULL },
         { "@@CEAAAAA0BAd", UsernameTargetCredential, NULL },
         { "@@CEAAAAA0BAdA", UsernameTargetCredential, NULL },
-        { "@@CEAAAAA0BQZAA", UsernameTargetCredential, L"te" },
-        { "@@CEAAAAA0BQZAQ", UsernameTargetCredential, L"te" },
-        { "@@CEAAAAA0BQZAg", UsernameTargetCredential, L"te" },
-        { "@@CEAAAAA0BQZAw", UsernameTargetCredential, L"te" },
+        { "@@CEAAAAA0BQZAA", UsernameTargetCredential, teW },
+        { "@@CEAAAAA0BQZAQ", UsernameTargetCredential, teW },
+        { "@@CEAAAAA0BQZAg", UsernameTargetCredential, teW },
+        { "@@CEAAAAA0BQZAw", UsernameTargetCredential, teW },
         { "@@CEAAAAA0BQZAAA", UsernameTargetCredential, NULL },
         { "@@CGAAAAA0BQZAMH", UsernameTargetCredential, NULL },
-        { "@@CGAAAAA0BQZAMHA", UsernameTargetCredential, L"tes" },
+        { "@@CGAAAAA0BQZAMHA", UsernameTargetCredential, tesW },
         { "@@CGAAAAA0BQZAMHAA", UsernameTargetCredential, NULL },
         { "@@CCAAAAA0BAA", UsernameTargetCredential, NULL },
         { "@@CBAAAAA0BAA", UsernameTargetCredential, NULL },
         { "@@CAgAAAA0BAA", UsernameTargetCredential, NULL },
-        { "@@CIAAAAA0BQZAMHA0BA", UsernameTargetCredential, L"test" },
+        { "@@CIAAAAA0BQZAMHA0BA", UsernameTargetCredential, testW },
         { "@@CA-----0BQZAMHA0BA", UsernameTargetCredential, NULL },
     };
 
@@ -767,6 +772,7 @@ START_TEST(cred)
     pCredWriteA = (void *)GetProcAddress(mod, "CredWriteA");
     pCredDeleteA = (void *)GetProcAddress(mod, "CredDeleteA");
     pCredReadA = (void *)GetProcAddress(mod, "CredReadA");
+    pCredRenameA = (void *)GetProcAddress(mod, "CredRenameA");
     pCredReadDomainCredentialsA = (void *)GetProcAddress(mod, "CredReadDomainCredentialsA");
     pCredMarshalCredentialA = (void *)GetProcAddress(mod, "CredMarshalCredentialA");
     pCredUnmarshalCredentialA = (void *)GetProcAddress(mod, "CredUnmarshalCredentialA");

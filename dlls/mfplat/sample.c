@@ -791,6 +791,65 @@ static HRESULT WINAPI sample_GetTotalLength(IMFSample *iface, DWORD *total_lengt
     return S_OK;
 }
 
+static HRESULT copy_2d_buffer_from_contiguous(IMFMediaBuffer *src, IMF2DBuffer *dst, DWORD *current_length)
+{
+    HRESULT hr, hr2;
+    BYTE *ptr;
+
+    hr = IMFMediaBuffer_Lock(src, &ptr, NULL, current_length);
+
+    if (SUCCEEDED(hr))
+    {
+        hr = IMF2DBuffer_ContiguousCopyFrom(dst, ptr, *current_length);
+
+        hr2 = IMFMediaBuffer_Unlock(src);
+        if (FAILED(hr2))
+            WARN("Unlocking source buffer %p failed with hr %#lx.\n", src, hr2);
+        if (FAILED(hr2) && SUCCEEDED(hr))
+            hr = hr2;
+    }
+
+    return hr;
+}
+
+static HRESULT copy_2d_buffer(IMFMediaBuffer *src, IMFMediaBuffer *dst)
+{
+    IMF2DBuffer2 *src2d2 = NULL, *dst2d2 = NULL;
+    IMF2DBuffer *dst2 = NULL;
+    HRESULT hr;
+    DWORD current_length;
+
+    hr = IMFMediaBuffer_QueryInterface(src, &IID_IMF2DBuffer2, (void **)&src2d2);
+
+    if (SUCCEEDED(hr))
+        hr = IMFMediaBuffer_QueryInterface(dst, &IID_IMF2DBuffer2, (void **)&dst2d2);
+
+    if (SUCCEEDED(hr))
+        hr = IMF2DBuffer2_Copy2DTo(src2d2, dst2d2);
+
+    if (src2d2)
+        IMF2DBuffer2_Release(src2d2);
+
+    if (dst2d2)
+        IMF2DBuffer2_Release(dst2d2);
+
+    if (SUCCEEDED(hr))
+        return hr;
+
+    hr = IMFMediaBuffer_QueryInterface(dst, &IID_IMF2DBuffer, (void **)&dst2);
+
+    if (SUCCEEDED(hr))
+        hr = copy_2d_buffer_from_contiguous(src, dst2, &current_length);
+
+    if (SUCCEEDED(hr))
+        IMFMediaBuffer_SetCurrentLength(dst, current_length);
+
+    if (dst2)
+        IMF2DBuffer_Release(dst2);
+
+    return hr;
+}
+
 static HRESULT WINAPI sample_CopyToBuffer(IMFSample *iface, IMFMediaBuffer *buffer)
 {
     struct sample *sample = impl_from_IMFSample(iface);
@@ -804,6 +863,15 @@ static HRESULT WINAPI sample_CopyToBuffer(IMFSample *iface, IMFMediaBuffer *buff
     TRACE("%p, %p.\n", iface, buffer);
 
     EnterCriticalSection(&sample->attributes.cs);
+
+    if (sample->buffer_count == 1)
+    {
+        if (SUCCEEDED(hr = copy_2d_buffer(sample->buffers[0], buffer)))
+        {
+            LeaveCriticalSection(&sample->attributes.cs);
+            return hr;
+        }
+    }
 
     total_length = sample_get_total_length(sample);
     dst_current_length = 0;

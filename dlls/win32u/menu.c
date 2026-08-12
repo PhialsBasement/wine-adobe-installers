@@ -54,7 +54,7 @@ struct menu_item
 /* menu user object */
 struct menu
 {
-    HMENU       handle;         /* menu full handle */
+    struct user_object obj;
     struct menu_item  *items;   /* array of menu items */
     WORD        wFlags;         /* menu flags (MF_POPUP, MF_SYSMENU) */
     WORD        Width;          /* width of the whole menu */
@@ -80,6 +80,7 @@ struct menu
 /* the accelerator user object */
 struct accelerator
 {
+    struct user_object obj;
     unsigned int       count;
     ACCEL              table[1];
 };
@@ -207,7 +208,7 @@ HACCEL WINAPI NtUserCreateAcceleratorTable( ACCEL *table, INT count )
     accel->count = count;
     memcpy( accel->table, table, count * sizeof(*table) );
 
-    if (!(handle = alloc_user_handle( accel, NTUSER_OBJ_ACCEL ))) free( accel );
+    if (!(handle = alloc_user_handle( &accel->obj, NTUSER_OBJ_ACCEL ))) free( accel );
     TRACE_(accel)("returning %p\n", handle );
     return handle;
 }
@@ -605,8 +606,7 @@ static HMENU create_menu( BOOL is_popup )
     menu->refcount = 1;
     if (is_popup) menu->wFlags |= MF_POPUP;
 
-    if (!(handle = alloc_user_handle( menu, NTUSER_OBJ_MENU ))) free( menu );
-    else menu->handle = handle;
+    if (!(handle = alloc_user_handle( &menu->obj, NTUSER_OBJ_MENU ))) free( menu );
 
     TRACE( "return %p\n", handle );
     return handle;
@@ -781,10 +781,8 @@ BOOL WINAPI NtUserEnableMenuItem( HMENU handle, UINT id, UINT flags )
     return oldflags;
 }
 
-/**********************************************************************
- *           NtUserDrawMenuBar    (win32u.@)
- */
-BOOL WINAPI NtUserDrawMenuBar( HWND hwnd )
+/* see DrawMenuBar */
+BOOL draw_menu_bar( HWND hwnd )
 {
     HMENU handle;
 
@@ -1184,7 +1182,7 @@ static BOOL check_menu_radio_item( HMENU handle, UINT first, UINT last, UINT che
         struct menu_item *item;
 
         if (!(check_menu = find_menu_item( handle, i, flags, &check_pos ))) continue;
-        if (!first_menu) first_menu = grab_menu_ptr( check_menu->handle );
+        if (!first_menu) first_menu = grab_menu_ptr( check_menu->obj.handle );
 
         if (first_menu != check_menu)
         {
@@ -1422,7 +1420,7 @@ BOOL WINAPI NtUserDeleteMenu( HMENU handle, UINT id, UINT flags )
     if (menu->items[pos].fType & MF_POPUP)
         NtUserDestroyMenu( menu->items[pos].hSubMenu );
 
-    NtUserRemoveMenu( menu->handle, pos, flags | MF_BYPOSITION );
+    NtUserRemoveMenu( menu->obj.handle, pos, flags | MF_BYPOSITION );
     release_menu_ptr( menu );
     return TRUE;
 }
@@ -1434,7 +1432,7 @@ BOOL WINAPI NtUserSetMenuContextHelpId( HMENU handle, DWORD id )
 {
     struct menu *menu;
 
-    TRACE( "(%p 0x%08x)\n", handle, id );
+    TRACE( "(%p 0x%08x)\n", handle, (int)id );
 
     if (!(menu = grab_menu_ptr( handle ))) return FALSE;
     menu->dwContextHelpID = id;
@@ -1760,7 +1758,7 @@ found:
         /* 1. in the system menu */
         if ((menu = find_menu_item( sys_menu, cmd, MF_BYCOMMAND, NULL )))
         {
-            submenu = menu->handle;
+            submenu = menu->obj.handle;
             release_menu_ptr( menu );
 
             if (get_capture())
@@ -1784,7 +1782,7 @@ found:
         {
             if ((menu = find_menu_item( menu_handle, cmd, MF_BYCOMMAND, NULL )))
             {
-                submenu = menu->handle;
+                submenu = menu->obj.handle;
                 release_menu_ptr( menu );
 
                 if (get_capture())
@@ -2045,8 +2043,8 @@ static void calc_menu_item_size( HDC hdc, struct menu_item *item, HWND owner, IN
         else
             item->rect.bottom += mis.itemHeight;
 
-        TRACE( "id=%04lx size=%dx%d\n", (long)item->wID, item->rect.right - item->rect.left,
-               item->rect.bottom - item->rect.top );
+        TRACE( "id=%04lx size=%dx%d\n", (long)item->wID, (int)(item->rect.right - item->rect.left),
+               (int)(item->rect.bottom - item->rect.top) );
         return;
     }
 
@@ -2313,7 +2311,7 @@ static void draw_bitmap_item( HWND hwnd, HDC hdc, struct menu_item *item, const 
                 if (item->fState & MF_DISABLED) drawItem.itemState |= ODS_DISABLED;
                 if (item->fState & MF_GRAYED)   drawItem.itemState |= ODS_GRAYED|ODS_DISABLED;
                 if (item->fState & MF_HILITE)   drawItem.itemState |= ODS_SELECTED;
-                drawItem.hwndItem = (HWND)menu->handle;
+                drawItem.hwndItem = (HWND)menu->obj.handle;
                 drawItem.hDC = hdc;
                 drawItem.itemData = item->dwItemData;
                 drawItem.rcItem = *rect;
@@ -2346,7 +2344,7 @@ static void draw_bitmap_item( HWND hwnd, HDC hdc, struct menu_item *item, const 
             LOGFONTW logfont = { 0, 0, 0, 0, FW_NORMAL, 0, 0, 0, SYMBOL_CHARSET, 0, 0, 0, 0,
                                  {'M','a','r','l','e','t','t'}};
             logfont.lfHeight =  min( h, w) - 5 ;
-            TRACE( " height %d rect %s\n", logfont.lfHeight, wine_dbgstr_rect( rect ));
+            TRACE( " height %d rect %s\n", (int)logfont.lfHeight, wine_dbgstr_rect( rect ));
             hfont = NtGdiHfontCreate( &logfont, sizeof(logfont), 0, 0, NULL );
             prev_font = NtGdiSelectFont( hdc, hfont );
             NtGdiExtTextOutW( hdc, rect->left, rect->top + 2, 0, NULL, &bmchr, 1, NULL, 0 );
@@ -2475,7 +2473,7 @@ static void draw_menu_item( HWND hwnd, struct menu *menu, HWND owner, HDC hdc,
         if (item->fState & MF_GRAYED)  dis.itemState |= ODS_GRAYED|ODS_DISABLED;
         if (item->fState & MF_HILITE)  dis.itemState |= ODS_SELECTED;
         dis.itemAction = odaction; /* ODA_DRAWENTIRE | ODA_SELECT | ODA_FOCUS; */
-        dis.hwndItem   = (HWND)menu->handle;
+        dis.hwndItem   = (HWND)menu->obj.handle;
         dis.hDC        = hdc;
         dis.rcItem     = rect;
         TRACE( "Ownerdraw: owner=%p itemID=%d, itemState=%d, itemAction=%d, "
@@ -3324,8 +3322,7 @@ static void init_sys_menu_popup( HMENU hmenu, DWORD style, DWORD class_style )
 
 static BOOL init_popup( HWND owner, HMENU hmenu, UINT flags )
 {
-    static const WCHAR atomW[] = {'#','3','2','7','6','8',0}; /* POPUPMENU_CLASS_ATOM */
-    UNICODE_STRING class_name = RTL_CONSTANT_STRING(atomW);
+    UNICODE_STRING class_name = { .Buffer = MAKEINTRESOURCEW( POPUPMENU_CLASS_ATOM ) };
     DWORD ex_style = 0;
     struct menu *menu;
 
@@ -3344,10 +3341,10 @@ static BOOL init_popup( HWND owner, HMENU hmenu, UINT flags )
     if (flags & TPM_LAYOUTRTL) ex_style = WS_EX_LAYOUTRTL;
 
     /* NOTE: In Windows, top menu popup is not owned. */
-    menu->hWnd = NtUserCreateWindowEx( ex_style, &class_name, NULL, NULL,
+    menu->hWnd = NtUserCreateWindowEx( ex_style, &class_name, &class_name, NULL,
                                        WS_POPUP, 0, 0, 0, 0, owner, 0,
                                        (HINSTANCE)get_window_long_ptr( owner, GWLP_HINSTANCE, FALSE ),
-                                       (void *)hmenu, 0, NULL, (WCHAR *)POPUPMENU_CLASS_ATOM, FALSE );
+                                       (void *)hmenu, 0, NULL, 0, FALSE );
     return !!menu->hWnd;
 }
 
@@ -4562,7 +4559,7 @@ BOOL WINAPI NtUserHiliteMenuItem( HWND hwnd, HMENU handle, UINT item, UINT hilit
     TRACE( "(%p, %p, %04x, %04x);\n", hwnd, handle, item, hilite );
 
     if (!(menu = find_menu_item(handle, item, hilite, &pos))) return FALSE;
-    handle_menu = menu->handle;
+    handle_menu = menu->obj.handle;
     focused_item = menu->FocusedItem;
     release_menu_ptr(menu);
 
@@ -4584,7 +4581,7 @@ BOOL WINAPI NtUserGetMenuBarInfo( HWND hwnd, LONG id, LONG item, MENUBARINFO *in
     struct menu *menu;
     ATOM class_atom;
 
-    TRACE( "(%p,0x%08x,0x%08x,%p)\n", hwnd, id, item, info );
+    TRACE( "(%p,0x%08x,0x%08x,%p)\n", hwnd, (int)id, (int)item, info );
 
     switch (id)
     {

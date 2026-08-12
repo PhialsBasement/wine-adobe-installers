@@ -6,13 +6,17 @@ DELAYIMPORTS = mfplat mf
 UNIX_CFLAGS  = $(GSTREAMER_CFLAGS)
 UNIX_LIBS    = $(GSTREAMER_LIBS) $(PTHREAD_LIBS)
 
-VER_FILEDESCRIPTION_STR = "Wine GStreamer"
-VER_OLESELFREGISTER     = 1
-
 SOURCES = \
-	aac_decoder.c \
+	audio_decoder.c \
 	color_convert.c \
 	main.c \
+	media-converter/audioconv.c \
+	media-converter/audioconvbin.c \
+	media-converter/fossilize.c \
+	media-converter/lib.c \
+	media-converter/murmur3.c \
+	media-converter/protondemuxer.c \
+	media-converter/videoconv.c \
 	media_sink.c \
 	media_source.c \
 	mfplat.c \
@@ -30,6 +34,7 @@ SOURCES = \
 	wg_muxer.c \
 	wg_parser.c \
 	wg_sample.c \
+	wg_task_pool.c \
 	wg_transform.c \
 	winegstreamer_classes.idl \
 	wm_reader.c \

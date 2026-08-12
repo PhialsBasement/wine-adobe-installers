@@ -22,7 +22,6 @@
 #define __WINE_SERVER_OBJECT_H
 
 #include <poll.h>
-#include <stdbool.h>
 #include <sys/time.h>
 #include "wine/server_protocol.h"
 #include "wine/list.h"
@@ -79,14 +78,16 @@ struct object_ops
     void (*remove_queue)(struct object *,struct wait_queue_entry *);
     /* is object signaled? */
     int  (*signaled)(struct object *,struct wait_queue_entry *);
+    /* return the esync fd for this object */
+    int (*get_esync_fd)(struct object *, enum esync_type *type);
+    /* return the fsync shm idx for this object */
+    unsigned int (*get_fsync_idx)(struct object *, enum fsync_type *type);
     /* wait satisfied */
     void (*satisfied)(struct object *,struct wait_queue_entry *);
-    /* signal/reset an object */
-    int  (*signal)(struct object *,unsigned int,int);
+    /* signal an object */
+    int  (*signal)(struct object *, unsigned int);
     /* return an fd object that can be used to read/write from the object */
     struct fd *(*get_fd)(struct object *);
-    /* return a sync that can be used to wait/signal the object */
-    struct object *(*get_sync)(struct object *);
     /* map access rights to the specific rights for this object */
     unsigned int (*map_access)(struct object *, unsigned int);
     /* returns the security descriptor of the object */
@@ -94,7 +95,7 @@ struct object_ops
     /* sets the security descriptor of the object */
     int (*set_sd)( struct object *, const struct security_descriptor *, unsigned int );
     /* get the object full name */
-    WCHAR *(*get_full_name)(struct object *, data_size_t, data_size_t *);
+    WCHAR *(*get_full_name)(struct object *, data_size_t *);
     /* lookup a name if an object has a namespace */
     struct object *(*lookup_name)(struct object *, struct unicode_str *,unsigned int,struct object *);
     /* link an object's name into a parent object */
@@ -149,7 +150,7 @@ extern void *memdup( const void *data, size_t len ) __WINE_ALLOC_SIZE(2) __WINE_
 extern void *alloc_object( const struct object_ops *ops );
 extern void namespace_add( struct namespace *namespace, struct object_name *ptr );
 extern const WCHAR *get_object_name( struct object *obj, data_size_t *len );
-extern WCHAR *default_get_full_name( struct object *obj, data_size_t max, data_size_t *ret_len ) __WINE_DEALLOC(free) __WINE_MALLOC;
+extern WCHAR *default_get_full_name( struct object *obj, data_size_t *ret_len ) __WINE_DEALLOC(free) __WINE_MALLOC;
 extern void dump_object_name( struct object *obj );
 extern struct object *lookup_named_object( struct object *root, const struct unicode_str *name,
                                            unsigned int attr, struct unicode_str *name_left );
@@ -171,16 +172,17 @@ extern struct object *find_object( const struct namespace *namespace, const stru
 extern struct object *find_object_index( const struct namespace *namespace, unsigned int index );
 extern int no_add_queue( struct object *obj, struct wait_queue_entry *entry );
 extern void no_satisfied( struct object *obj, struct wait_queue_entry *entry );
-extern int no_signal( struct object *obj, unsigned int access, int signal );
+extern int no_signal( struct object *obj, unsigned int access );
 extern struct fd *no_get_fd( struct object *obj );
-extern struct object *default_get_sync( struct object *obj );
-static inline struct object *get_obj_sync( struct object *obj ) { return obj->ops->get_sync( obj ); }
 extern unsigned int default_map_access( struct object *obj, unsigned int access );
 extern struct security_descriptor *default_get_sd( struct object *obj );
 extern int default_set_sd( struct object *obj, const struct security_descriptor *sd, unsigned int set_info );
+extern struct security_descriptor *set_sd_from_token_internal( const struct security_descriptor *sd,
+                                                               const struct security_descriptor *old_sd,
+                                                               unsigned int set_info, struct token *token );
 extern int set_sd_defaults_from_token( struct object *obj, const struct security_descriptor *sd,
                                        unsigned int set_info, struct token *token );
-extern WCHAR *no_get_full_name( struct object *obj, data_size_t max, data_size_t *ret_len );
+extern WCHAR *no_get_full_name( struct object *obj, data_size_t *ret_len );
 extern struct object *no_lookup_name( struct object *obj, struct unicode_str *name,
                                       unsigned int attributes, struct object *root );
 extern int no_link_name( struct object *obj, struct object_name *name, struct object *parent );
@@ -194,9 +196,6 @@ extern void no_destroy( struct object *obj );
 extern void dump_objects(void);
 extern void close_objects(void);
 #endif
-
-struct reserve *reserve_obj_associate_apc( struct process *process, obj_handle_t handle, struct object *apc );
-void reserve_obj_unbind( struct reserve *reserve );
 
 static inline void make_object_permanent( struct object *obj ) { obj->is_permanent = 1; }
 static inline void make_object_temporary( struct object *obj ) { obj->is_permanent = 0; }
@@ -220,13 +219,7 @@ static inline void *mem_append( void *ptr, const void *src, data_size_t len )
 /* event functions */
 
 struct event;
-struct event_sync;
 struct keyed_event;
-
-extern struct event_sync *create_server_internal_sync( int manual, int signaled );
-extern struct object *create_internal_sync( int manual, int signaled );
-extern void signal_sync( struct object *sync );
-extern void reset_sync( struct object *sync );
 
 extern struct event *create_event( struct object *root, const struct unicode_str *name,
                                    unsigned int attr, int manual_reset, int initial_state,
@@ -241,20 +234,6 @@ extern void reset_event( struct event *event );
 /* mutex functions */
 
 extern void abandon_mutexes( struct thread *thread );
-extern void abandon_d3dkmt_mutexes( struct thread *thread );
-
-/* in-process synchronization functions */
-
-struct inproc_sync;
-extern int get_inproc_device_fd(void);
-extern int get_inproc_sync_fd( struct inproc_sync *sync );
-extern struct inproc_sync *create_inproc_internal_sync( int manual, int signaled );
-extern struct inproc_sync *create_inproc_event_sync( int manual, int signaled );
-extern struct inproc_sync *create_inproc_semaphore_sync( unsigned int initial, unsigned int max );
-extern struct inproc_sync *create_inproc_mutex_sync( thread_id_t owner, unsigned int count );
-extern void abandon_inproc_mutexes( thread_id_t owner );
-extern void signal_inproc_sync( struct inproc_sync *sync );
-extern void reset_inproc_sync( struct inproc_sync *sync );
 
 /* serial functions */
 
@@ -288,8 +267,9 @@ static inline int is_machine_64bit( unsigned short machine )
 }
 static inline int is_machine_supported( unsigned short machine )
 {
-    for (unsigned int i = 0; i < supported_machines_count; i++)
-        if (supported_machines[i] == machine) return 1;
+    unsigned int i;
+    for (i = 0; i < supported_machines_count; i++) if (supported_machines[i] == machine) return 1;
+    if (native_machine == IMAGE_FILE_MACHINE_ARM64) return machine == IMAGE_FILE_MACHINE_AMD64;
     return 0;
 }
 
@@ -302,17 +282,10 @@ extern void init_signals(void);
 
 /* atom functions */
 
-extern struct object *create_atom_table(void);
-extern void set_global_atom_table( struct object *obj );
-extern void set_user_atom_table( struct object *obj );
-
-struct atom_table;
-extern struct atom_table *get_global_atom_table(void);
-extern struct atom_table *get_user_atom_table(void);
-extern atom_t add_atom( struct atom_table *table, const struct unicode_str *str );
-extern atom_t find_atom( struct atom_table *table, const struct unicode_str *str );
-extern atom_t grab_atom( struct atom_table *table, atom_t atom );
-extern void release_atom( struct atom_table *table, atom_t atom );
+extern atom_t add_global_atom( struct winstation *winstation, const struct unicode_str *str );
+extern atom_t find_global_atom( struct winstation *winstation, const struct unicode_str *str );
+extern int grab_global_atom( struct winstation *winstation, atom_t atom );
+extern void release_global_atom( struct winstation *winstation, atom_t atom );
 
 /* directory functions */
 

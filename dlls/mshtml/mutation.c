@@ -67,6 +67,53 @@ static BOOL is_iexplore(void)
     return ret;
 }
 
+/* Returns the compat mode requested via the FEATURE_BROWSER_EMULATION feature control
+ * registry key for the host process, or COMPAT_MODE_INVALID if not set. */
+static compat_mode_t get_browser_emulation_mode(void)
+{
+    static volatile char cache = -2;
+    char mode = cache;
+
+    if(mode == -2) {
+        static const WCHAR feature_keyW[] = L"Software\\Microsoft\\Internet Explorer\\Main"
+                                            L"\\FeatureControl\\FEATURE_BROWSER_EMULATION";
+        const WCHAR *p, *name = NtCurrentTeb()->Peb->ProcessParameters->ImagePathName.Buffer;
+        DWORD value, size = sizeof(value), type;
+        HKEY key;
+        LONG res;
+
+        if((p = wcsrchr(name, '/'))) name = p + 1;
+        if((p = wcsrchr(name, '\\'))) name = p + 1;
+
+        mode = -1;
+        res = RegOpenKeyExW(HKEY_CURRENT_USER, feature_keyW, 0, KEY_READ, &key);
+        if(res == ERROR_SUCCESS) {
+            res = RegQueryValueExW(key, name, NULL, &type, (BYTE*)&value, &size);
+            RegCloseKey(key);
+        }
+        if(res != ERROR_SUCCESS) {
+            res = RegOpenKeyExW(HKEY_LOCAL_MACHINE, feature_keyW, 0, KEY_READ, &key);
+            if(res == ERROR_SUCCESS) {
+                size = sizeof(value);
+                res = RegQueryValueExW(key, name, NULL, &type, (BYTE*)&value, &size);
+                RegCloseKey(key);
+            }
+        }
+
+        if(res == ERROR_SUCCESS && type == REG_DWORD) {
+            TRACE("FEATURE_BROWSER_EMULATION for %s: %lu\n", debugstr_w(name), value);
+            if(value >= 11000)     mode = COMPAT_MODE_IE11;
+            else if(value >= 10000) mode = COMPAT_MODE_IE10;
+            else if(value >= 9000)  mode = COMPAT_MODE_IE9;
+            else if(value >= 8000)  mode = COMPAT_MODE_IE8;
+            else if(value >= 7000)  mode = COMPAT_MODE_IE7;
+        }
+        cache = mode;
+    }
+
+    return mode == -1 ? COMPAT_MODE_INVALID : (compat_mode_t)mode;
+}
+
 static PRUnichar *handle_insert_comment(HTMLDocumentNode *doc, const PRUnichar *comment)
 {
     unsigned majorv = 0, minorv = 0, compat_version;
@@ -438,6 +485,7 @@ compat_mode_t lock_document_mode(HTMLDocumentNode *doc)
 static void set_document_mode(HTMLDocumentNode *doc, compat_mode_t document_mode, BOOL emulate_mode, BOOL lock)
 {
     compat_mode_t max_compat_mode;
+    const char *sgi;
 
     if(doc->document_mode_locked) {
         WARN("attempting to set document mode %d on locked document %p\n", document_mode, doc);
@@ -454,6 +502,9 @@ static void set_document_mode(HTMLDocumentNode *doc, compat_mode_t document_mode
              document_mode, max_compat_mode);
         document_mode = max_compat_mode;
     }
+
+    if ((sgi = getenv("SteamGameId")) && (!strcmp(sgi, "39210")))
+        document_mode = COMPAT_MODE_IE11;
 
     doc->document_mode = document_mode;
     doc->emulate_mode = emulate_mode;
@@ -936,9 +987,13 @@ static void NSAPI nsDocumentObserver_BindToDocument(nsIDocumentObserver *iface, 
 
         nsres = nsIContent_QueryInterface(aContent, &IID_nsIDOMDocumentType, (void**)&nsdoctype);
         if(NS_SUCCEEDED(nsres)) {
-            compat_mode_t mode = COMPAT_MODE_IE7;
+            compat_mode_t emulation_mode, mode = COMPAT_MODE_IE7;
 
             TRACE("doctype node\n");
+
+            /* FEATURE_BROWSER_EMULATION overrides the default embedded-host document mode. */
+            if((emulation_mode = get_browser_emulation_mode()) != COMPAT_MODE_INVALID)
+                mode = emulation_mode;
 
             /* Native mshtml hardcodes special behavior for iexplore.exe here. The feature control registry
                keys under HKLM or HKCU\Software\Microsoft\Internet Explorer\Main\FeatureControl are not used
@@ -1217,7 +1272,7 @@ static void mutation_observer_destructor(DispatchEx *dispex)
     free(This);
 }
 
-static HRESULT init_mutation_observer_ctor(struct constructor*);
+static HRESULT create_mutation_observer_ctor(HTMLInnerWindow *script_global, DispatchEx **ret);
 
 static const dispex_static_data_vtbl_t mutation_observer_dispex_vtbl = {
     .query_interface  = mutation_observer_query_interface,
@@ -1231,12 +1286,12 @@ static const tid_t mutation_observer_iface_tids[] = {
     0
 };
 dispex_static_data_t MutationObserver_dispex = {
-    .id               = OBJID_MutationObserver,
-    .init_constructor = init_mutation_observer_ctor,
+    .id               = PROT_MutationObserver,
+    .init_constructor = create_mutation_observer_ctor,
     .vtbl             = &mutation_observer_dispex_vtbl,
     .disp_tid         = IWineMSHTMLMutationObserver_tid,
     .iface_tids       = mutation_observer_iface_tids,
-    .min_compat_mode  = COMPAT_MODE_IE11,
+    .min_compat_mode  = COMPAT_MODE_IE11 + 1,  /* FIXME HACK: Not exposed as FFXIV Launcher breaks with MutationObserver stub */
 };
 
 static HRESULT create_mutation_observer(DispatchEx *owner, IDispatch *callback,
@@ -1262,11 +1317,26 @@ static HRESULT create_mutation_observer(DispatchEx *owner, IDispatch *callback,
     return S_OK;
 }
 
+struct mutation_observer_ctor {
+    DispatchEx dispex;
+};
+
+static inline struct mutation_observer_ctor *mutation_observer_ctor_from_DispatchEx(DispatchEx *iface)
+{
+    return CONTAINING_RECORD(iface, struct mutation_observer_ctor, dispex);
+}
+
+static void mutation_observer_ctor_destructor(DispatchEx *dispex)
+{
+    struct mutation_observer_ctor *This = mutation_observer_ctor_from_DispatchEx(dispex);
+    free(This);
+}
+
 static HRESULT mutation_observer_ctor_value(DispatchEx *dispex, LCID lcid,
         WORD flags, DISPPARAMS *params, VARIANT *res, EXCEPINFO *ei,
         IServiceProvider *caller)
 {
-    struct constructor *This = constructor_from_DispatchEx(dispex);
+    struct mutation_observer_ctor *This = mutation_observer_ctor_from_DispatchEx(dispex);
     VARIANT *callback;
     IWineMSHTMLMutationObserver *mutation_observer;
     HRESULT hres;
@@ -1309,21 +1379,30 @@ static HRESULT mutation_observer_ctor_value(DispatchEx *dispex, LCID lcid,
 }
 
 static const dispex_static_data_vtbl_t mutation_observer_ctor_dispex_vtbl = {
-    .destructor       = constructor_destructor,
-    .traverse         = constructor_traverse,
-    .unlink           = constructor_unlink,
+    .destructor       = mutation_observer_ctor_destructor,
     .value            = mutation_observer_ctor_value
 };
 
 static dispex_static_data_t mutation_observer_ctor_dispex = {
-    .name           = "MutationObserver",
-    .constructor_id = OBJID_MutationObserver,
+    .name           = "Function",
+    .constructor_id = PROT_MutationObserver,
     .vtbl           = &mutation_observer_ctor_dispex_vtbl,
 };
 
-static HRESULT init_mutation_observer_ctor(struct constructor *constr)
+static HRESULT create_mutation_observer_ctor(HTMLInnerWindow *script_global, DispatchEx **ret)
 {
-    init_dispatch(&constr->dispex, &mutation_observer_ctor_dispex, constr->window,
-                  dispex_compat_mode(&constr->window->event_target.dispex));
+    struct mutation_observer_ctor *obj;
+
+    obj = calloc(1, sizeof(*obj));
+    if(!obj)
+    {
+        ERR("No memory.\n");
+        return E_OUTOFMEMORY;
+    }
+
+    init_dispatch(&obj->dispex, &mutation_observer_ctor_dispex, script_global,
+                  dispex_compat_mode(&script_global->event_target.dispex));
+
+    *ret = &obj->dispex;
     return S_OK;
 }

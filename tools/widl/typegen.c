@@ -4909,7 +4909,7 @@ void declare_stub_args( FILE *file, int indent, const var_t *func )
                 fprintf(file, "(*%s)", var->name);
             } else
                 fprintf(file, "%s", var->name);
-            write_type_right( file, var->declspec.type, false );
+            write_type_right(file, var->declspec.type, FALSE);
             fprintf(file, ";\n");
 
             if (decl_indirect(var->declspec.type))
@@ -5031,20 +5031,12 @@ void assign_stub_out_args( FILE *file, int indent, const var_t *func, const char
         fprintf(file, "\n");
 }
 
-static void init_param_struct_declspec( decl_spec_t *dst, const decl_spec_t *src )
-{
-    *dst = *src;
-
-    if (!is_ptr( dst->type ) || type_is_alias( dst->type ))
-        dst->qualifier = 0;
-}
 
 void write_func_param_struct( FILE *file, const type_t *iface, const type_t *func,
                               const char *var_decl, int add_retval )
 {
     var_t *retval = type_function_get_retval( func );
     const var_list_t *args = type_function_get_args( func );
-    decl_spec_t declspec;
     const var_t *arg;
     int needs_packing;
     unsigned int align = 0;
@@ -5055,7 +5047,7 @@ void write_func_param_struct( FILE *file, const type_t *iface, const type_t *fun
 
     needs_packing = (align > pointer_size);
 
-    if (needs_packing) print_file( file, 0, "#pragma pack(push,%u)\n", pointer_size );
+    if (needs_packing) print_file( file, 0, "#include <pshpack%u.h>\n", pointer_size );
     print_file(file, 1, "struct _PARAM_STRUCT\n" );
     print_file(file, 1, "{\n" );
     if (is_object( iface )) print_file(file, 2, "%s *This;\n", iface->name );
@@ -5063,8 +5055,7 @@ void write_func_param_struct( FILE *file, const type_t *iface, const type_t *fun
     if (args) LIST_FOR_EACH_ENTRY( arg, args, const var_t, entry )
     {
         print_file(file, 2, "%s", "");
-        init_param_struct_declspec( &declspec, &arg->declspec );
-        write_type_left( file, &declspec, NAME_DEFAULT );
+        write_type_left( file, &arg->declspec, NAME_DEFAULT, false, TRUE );
         if (needs_space_after( arg->declspec.type )) fputc( ' ', file );
         if (is_array( arg->declspec.type ) && !type_array_is_decl_as_ptr( arg->declspec.type )) fputc( '*', file );
 
@@ -5080,8 +5071,7 @@ void write_func_param_struct( FILE *file, const type_t *iface, const type_t *fun
     if (add_retval && !is_void( retval->declspec.type ))
     {
         print_file(file, 2, "%s", "");
-        init_param_struct_declspec( &declspec, &retval->declspec );
-        write_type_left( file, &declspec, NAME_DEFAULT );
+        write_type_left( file, &retval->declspec, NAME_DEFAULT, false, TRUE );
         if (needs_space_after( retval->declspec.type )) fputc( ' ', file );
         if (!is_array( retval->declspec.type ) && !is_ptr( retval->declspec.type ) &&
             type_memsize( retval->declspec.type ) != pointer_size)
@@ -5091,7 +5081,7 @@ void write_func_param_struct( FILE *file, const type_t *iface, const type_t *fun
         fprintf( file, "%s;\n", retval->name );
     }
     print_file(file, 1, "} %s;\n", var_decl );
-    if (needs_packing) print_file( file, 0, "#pragma pack(pop)\n" );
+    if (needs_packing) print_file( file, 0, "#include <poppack.h>\n" );
     print_file( file, 0, "\n" );
 }
 
@@ -5132,9 +5122,9 @@ int write_expr_eval_routines(FILE *file, const char *iface)
         {
             decl_spec_t ds = {.type = (type_t *)eval->cont_type};
             print_file(file, 1, "%s", "");
-            write_type_left( file, &ds, NAME_DEFAULT );
+            write_type_left(file, &ds, NAME_DEFAULT, false, TRUE);
             fprintf(file, " *%s = (", var_name);
-            write_type_left( file, &ds, NAME_DEFAULT );
+            write_type_left(file, &ds, NAME_DEFAULT, false, TRUE);
             fprintf(file, " *)(pStubMsg->StackTop - %u);\n", eval->baseoff);
         }
         print_file(file, 1, "pStubMsg->Offset = 0;\n"); /* FIXME */
@@ -5249,7 +5239,9 @@ void write_client_call_routine( FILE *file, const type_t *iface, const var_t *fu
     }
     else if (has_ret) print_file( file, 1, "%s", "CLIENT_CALL_RETURN _RetVal;\n\n" );
 
-    len = fprintf( file, "    %sNdrClientCall2( ", has_ret ? "_RetVal = " : "" );
+    len = fprintf( file, "    %s%s( ",
+                   has_ret ? "_RetVal = " : "",
+                   interpreted_mode ? "NdrClientCall2" : "NdrClientCall" );
     fprintf( file, "&%s_StubDesc,", prefix );
     fprintf( file, "\n%*s&__MIDL_ProcFormatString.Format[%u]", len, "", proc_offset );
     if (needs_params)

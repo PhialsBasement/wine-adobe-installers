@@ -197,21 +197,18 @@ BOOL dxgi_validate_swapchain_desc(const DXGI_SWAP_CHAIN_DESC1 *desc);
 /* IDXGISurface/IDXGIResource */
 struct dxgi_resource
 {
-    IDXGISurface2 IDXGISurface2_iface;
-    IDXGIResource1 IDXGIResource1_iface;
+    IDXGISurface1 IDXGISurface1_iface;
+    IDXGIResource IDXGIResource_iface;
     IUnknown IUnknown_iface;
     IUnknown *outer_unknown;
     LONG refcount;
     struct wined3d_private_store private_store;
     IDXGIDevice *device;
-    IDXGIResource1 *parent_resource;
     struct wined3d_resource *wined3d_resource;
-    unsigned int subresource_idx;
     HDC dc;
 };
 
 HRESULT dxgi_resource_init(struct dxgi_resource *resource, IDXGIDevice *device,
-        IUnknown *outer, BOOL needs_surface, struct wined3d_resource *wined3d_resource,
-        IDXGIResource1 *parent_resource, unsigned int subresource_index);
+        IUnknown *outer, BOOL needs_surface, struct wined3d_resource *wined3d_resource);
 
 #endif /* __WINE_DXGI_PRIVATE_H */

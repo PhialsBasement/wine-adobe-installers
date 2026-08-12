@@ -1,0 +1,220 @@
+#define WIN32_LEAN_AND_MEAN
+#include <windows.h>
+#include <io.h>
+#include <shlwapi.h>
+#include <shellapi.h>
+
+#include "wine/debug.h"
+
+WINE_DEFAULT_DEBUG_CHANNEL(belauncher);
+
+int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE hPrevInst, LPWSTR cmdline, int cmdshow)
+{
+    char *configs, *config, *arch_32_exe = NULL, *arch_64_exe = NULL, *game_exe = NULL, *be_arg = NULL;
+    WCHAR orig_path[MAX_PATH], path[MAX_PATH], *p, config_path[MAX_PATH], game_exeW[MAX_PATH], **argvW;
+    LARGE_INTEGER launcher_cfg_size;
+    unsigned char battleye_status;
+    int game_exe_len, arg_len, path_len;
+    PROCESS_INFORMATION pi;
+    HANDLE launcher_cfg;
+    LPWSTR launch_cmd;
+    STARTUPINFOW si = { sizeof(si) };
+    HANDLE orig_launcher_process = NULL;
+    int i, argc;
+    DWORD size;
+    BOOL wow64;
+
+    battleye_status = 0x3; /* Starting */
+    _write(1, &battleye_status, 1);
+
+    *path = 0;
+    *orig_path = 0;
+    if ((size = GetEnvironmentVariableW(L"PROTON_ORIG_LAUNCHER_NAME", orig_path, ARRAY_SIZE(orig_path)))
+            && size <= ARRAY_SIZE(orig_path))
+    {
+        wcscpy(path, orig_path);
+        WINE_TRACE("PROTON_ORIG_LAUNCHER_NAME %s.\n", wine_dbgstr_w(path));
+
+        for (p = path + wcslen(path); p != path; --p)
+            if (*p == '\\') break;
+        if (*p == '\\')
+            ++p;
+        *p = 0;
+    }
+
+    wcscpy(config_path, path);
+    wcscat(config_path, L"Battleye\\BELauncher.ini");
+    launcher_cfg = CreateFileW(config_path, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+    if (launcher_cfg == INVALID_HANDLE_VALUE)
+    {
+        *path = 0;
+        launcher_cfg = CreateFileW(L"Battleye\\BELauncher.ini", GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+    }
+    if (launcher_cfg == INVALID_HANDLE_VALUE)
+    {
+        WINE_ERR("BELauncher.ini not found.\n");
+        goto start_failed;
+    }
+
+    if(!GetFileSizeEx(launcher_cfg, &launcher_cfg_size) || launcher_cfg_size.u.HighPart)
+    {
+        CloseHandle(launcher_cfg);
+        goto start_failed;
+    }
+
+    configs = HeapAlloc( GetProcessHeap(), 0, launcher_cfg_size.u.LowPart);
+
+    if (!ReadFile(launcher_cfg, configs, launcher_cfg_size.u.LowPart, &size, NULL) || size != launcher_cfg_size.u.LowPart)
+    {
+        CloseHandle(launcher_cfg);
+        HeapFree( GetProcessHeap(), 0, configs );
+        goto start_failed;
+    }
+
+    CloseHandle(launcher_cfg);
+
+    config = configs;
+    do
+    {
+        if (!strncmp(config, "32BitExe=", 9))
+            arch_32_exe = config + 9;
+
+        if (!strncmp(config, "64BitExe=", 9))
+            arch_64_exe = config + 9;
+
+        if (!strncmp(config, "BEArg=", 6))
+            be_arg = config + 6;
+    }
+    while ((config = strchr(config, '\n')) && *(config++));
+
+    *game_exeW = 0;
+    game_exe_len = 0;
+
+    WINE_TRACE("cmdline %s.\n", wine_dbgstr_w(cmdline));
+    if ((argvW = CommandLineToArgvW(cmdline, &argc)))
+    {
+        if (argc && iswdigit(argvW[0][0]) && _wtoi(argvW[0]) == 4)
+        {
+            WINE_TRACE("uninstall cmd, exiting.\n");
+            return 0;
+        }
+        if (argc && iswdigit(argvW[0][0]) && _wtoi(argvW[0]) == 1)
+        {
+            WINE_ERR("install cmd, exiting.\n");
+            return 0;
+        }
+
+        for (i = 0; i < argc; ++i)
+        {
+            if (!wcscmp(argvW[i], L"-exe") && i < argc - 1)
+            {
+                wcscpy(game_exeW, argvW[i + 1]);
+                game_exe_len = wcslen(game_exeW);
+                break;
+            }
+        }
+    }
+
+    if (!*game_exeW)
+    {
+        if (arch_64_exe && (sizeof(void *) == 8 || (IsWow64Process(GetCurrentProcess(), &wow64) && wow64)))
+            game_exe = arch_64_exe;
+        else if (arch_32_exe)
+            game_exe = arch_32_exe;
+        else
+        {
+            HeapFree( GetProcessHeap(), 0, configs );
+            WINE_ERR("Failed to find game executable name from BattlEye config.\n");
+            goto start_failed;
+        }
+
+        if (strchr(game_exe, '\r'))
+            *(strchr(game_exe, '\r')) = 0;
+        if (strchr(game_exe, '\n'))
+            *(strchr(game_exe, '\n')) = 0;
+        game_exe_len = MultiByteToWideChar(CP_ACP, 0, game_exe, -1, game_exeW, ARRAY_SIZE(game_exeW));
+        if (!game_exe_len)
+        {
+            WINE_ERR("Failed to convert game_exe %s.\n", wine_dbgstr_a(game_exe));
+            goto start_failed;
+        }
+        --game_exe_len;
+    }
+
+    if (!be_arg) arg_len = 0;
+    else
+    {
+        if (strchr(be_arg, '\r'))
+            *(strchr(be_arg, '\r')) = 0;
+        if (strchr(be_arg, '\n'))
+            *(strchr(be_arg, '\n')) = 0;
+        arg_len = MultiByteToWideChar(CP_ACP, 0, be_arg, -1, NULL, 0) - 1;
+    }
+
+    if (*orig_path)
+    {
+        WINE_TRACE("Launching original launcher %s.\n", debugstr_w(orig_path));
+        if (!CreateProcessW(orig_path, NULL, NULL, NULL, FALSE, CREATE_SUSPENDED, NULL, NULL, &si, &pi))
+        {
+            DWORD err = GetLastError();
+
+            WINE_ERR("CreateProcessW failed for original launcher %s, err %lu.\n", debugstr_w(orig_path), err);
+            return err;
+        }
+        CloseHandle(pi.hThread);
+        orig_launcher_process = pi.hProcess;
+    }
+
+    WINE_TRACE("Launching game executable %s for BattlEye.\n", game_exe);
+    battleye_status = 0x9; /* Launching Game */
+    _write(1, &battleye_status, 1);
+
+    if (PathIsRelativeW(game_exeW))
+        path_len = wcslen(path);
+    else
+        path_len = 0;
+
+    launch_cmd = HeapAlloc(GetProcessHeap(), 0, (path_len + game_exe_len + 1 + wcslen(cmdline) + 1 + arg_len + 1) * sizeof(WCHAR));
+
+    memcpy(launch_cmd, path, path_len * sizeof(*path));
+
+    memcpy(launch_cmd + path_len, game_exeW, game_exe_len * sizeof(*launch_cmd));
+    launch_cmd[path_len + game_exe_len] = ' ';
+
+    wcscpy(launch_cmd + path_len + game_exe_len + 1, cmdline);
+    launch_cmd[path_len + game_exe_len + 1 + wcslen(cmdline)] = ' ';
+
+    if (!MultiByteToWideChar(CP_ACP, 0, be_arg, -1, launch_cmd + path_len + game_exe_len + 1 + wcslen(cmdline) + 1, arg_len + 1))
+        launch_cmd[path_len + game_exe_len + 1 + wcslen(cmdline)] = 0;
+
+    WINE_TRACE("game_exe %s.\n", wine_dbgstr_w(game_exeW));
+    WINE_TRACE("path %s, be_arg %s.\n", wine_dbgstr_w(path), wine_dbgstr_a(be_arg));
+    WINE_TRACE("launch_cmd %s.\n", wine_dbgstr_w(launch_cmd));
+
+    if (!CreateProcessW(NULL, launch_cmd, NULL, NULL, FALSE, CREATE_NEW_CONSOLE, NULL, NULL, &si, &pi))
+    {
+        DWORD err = GetLastError();
+
+        WINE_ERR("CreateProcessW failed, error %lu.\n", err);
+        if (orig_launcher_process)
+            TerminateProcess(orig_launcher_process, err);
+        battleye_status = 0xA; /* Launch Failed */
+        _write(1, &battleye_status, 1);
+        return err;
+    }
+    HeapFree( GetProcessHeap(), 0, launch_cmd );
+    CloseHandle(pi.hThread);
+
+    WaitForSingleObject(pi.hProcess, INFINITE);
+    CloseHandle(pi.hProcess);
+
+    if (orig_launcher_process)
+        TerminateProcess(orig_launcher_process, 0);
+    return 0;
+
+start_failed:
+    WINE_ERR("Failed.\n");
+    battleye_status = 0x4; /* Start Failed */
+    _write(1, &battleye_status, 1);
+    return 0;
+}

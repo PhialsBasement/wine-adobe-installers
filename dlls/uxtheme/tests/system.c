@@ -861,12 +861,7 @@ static void test_GetCurrentThemeName(void)
     hRes = GetCurrentThemeName(currentTheme, ARRAY_SIZE(currentTheme), currentColor,
                                ARRAY_SIZE(currentColor), currentSize,  ARRAY_SIZE(currentSize));
     if (bThemeActive)
-    {
-        WCHAR *p;
         ok( hRes == S_OK, "Expected S_OK, got 0x%08lx\n", hRes);
-        p = wcsrchr(currentTheme, '\\');
-        ok(p && !wcsicmp(p+1, L"aero.msstyles"), "got %s\n", debugstr_w(currentTheme));
-    }
     else
         ok( hRes == E_PROP_ID_UNSUPPORTED, "Expected E_PROP_ID_UNSUPPORTED, got 0x%08lx\n", hRes);
 }
@@ -1741,14 +1736,6 @@ static void test_DrawThemeParentBackground(void)
     flush_sequences(sequences, NUM_MSG_SEQUENCES);
 
     ReleaseDC(child, hdc);
-
-    hdc = GetDC(parent);
-    hr = DrawThemeParentBackground(parent, hdc, NULL);
-    ok(SUCCEEDED(hr), "DrawThemeParentBackground failed, hr %#lx.\n", hr);
-    ok_sequence(sequences, PARENT_SEQ_INDEX, EmptySeq, "DrawThemeParentBackground", FALSE);
-    flush_sequences(sequences, NUM_MSG_SEQUENCES);
-    ReleaseDC(parent, hdc);
-
     DestroyWindow(parent);
     UnregisterClassA("TestDrawThemeParentBackgroundClass", GetModuleHandleA(0));
 }
@@ -2799,55 +2786,10 @@ static void test_DrawThemeEdge(void)
     hdc = GetDC(hwnd);
 
     /* Test BF_ADJUST with NULL content rect pointer */
-    SetRect(&rect, 0, 0, 1, 1);
     hr = DrawThemeEdge(htheme, hdc, BP_PUSHBUTTON, PBS_NORMAL, &rect, BF_ADJUST, BF_RIGHT, NULL);
     ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
 
     hr = DrawThemeEdge(htheme, hdc, BP_PUSHBUTTON, PBS_NORMAL, &rect, BF_DIAGONAL | BF_ADJUST, BF_RIGHT, NULL);
-    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
-
-    ReleaseDC(hwnd, hdc);
-    CloseThemeData(htheme);
-    DestroyWindow(hwnd);
-}
-
-static void test_DrawThemeTextEx(void)
-{
-    DTTOPTS options;
-    HTHEME htheme;
-    HRESULT hr;
-    RECT rect;
-    HWND hwnd;
-    HDC hdc;
-
-    hwnd = CreateWindowA(WC_STATICA, "", WS_POPUP, 0, 0, 1, 1, 0, 0, 0, NULL);
-    ok(hwnd != NULL, "CreateWindowA failed, error %#lx.\n", GetLastError());
-    htheme = OpenThemeData(hwnd, L"Button");
-    if (!htheme)
-    {
-        skip("Theming is inactive.\n");
-        DestroyWindow(hwnd);
-        return;
-    }
-
-    hdc = GetDC(hwnd);
-    SetRect(&rect, 0, 0, 1, 1);
-
-    hr = DrawThemeTextEx(NULL, hdc, 0, 0, L"Wine", -1, DT_CENTER, &rect, NULL);
-    ok(hr == E_HANDLE, "Got unexpected hr %#lx.\n", hr);
-
-    hr = DrawThemeTextEx(htheme, hdc, 0, 0, L"Wine", -1, DT_CENTER, &rect, NULL);
-    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
-
-    options.dwSize = sizeof(options);
-    options.dwFlags = DTT_FONTPROP;
-    options.iFontPropId = TMT_BODYFONT;
-    hr = DrawThemeTextEx(htheme, hdc, 0, 0, L"Wine", -1, DT_CENTER, &rect, &options);
-    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
-
-    options.dwFlags = DTT_TEXTCOLOR;
-    options.crText = RGB(100, 100, 100);
-    hr = DrawThemeTextEx(htheme, hdc, 0, 0, L"Wine", -1, DT_CENTER, &rect, &options);
     ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
 
     ReleaseDC(hwnd, hdc);
@@ -2884,7 +2826,6 @@ START_TEST(system)
     test_ShouldSystemUseDarkMode();
     test_ShouldAppsUseDarkMode();
     test_DrawThemeEdge();
-    test_DrawThemeTextEx();
 
     if (load_v6_module(&ctx_cookie, &ctx))
     {

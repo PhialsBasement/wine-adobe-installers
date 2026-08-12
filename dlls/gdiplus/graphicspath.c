@@ -202,7 +202,6 @@ static BOOL flatten_bezier(path_list_node_t *start, REAL x2, REAL y2, REAL x3, R
     struct list jobs;
     struct flatten_bezier_job *current, *next;
 
-    flatness = 0.62f * flatness;
     list_init( &jobs );
     flatten_bezier_add(&jobs, start, x2, y2, x3, y3, end);
     LIST_FOR_EACH_ENTRY( current, &jobs, struct flatten_bezier_job, entry )
@@ -239,7 +238,7 @@ static BOOL flatten_bezier(path_list_node_t *start, REAL x2, REAL y2, REAL x3, R
          * Also avoids limited-precision errors in flatness check
          */
         if((fabs(pt.X - mp[2].X) + fabs(pt.Y - mp[2].Y) +
-            fabs(pt_st.X - mp[2].X) + fabs(pt_st.Y - mp[2].Y) ) <= flatness)
+            fabs(pt_st.X - mp[2].X) + fabs(pt_st.Y - mp[2].Y) ) <= flatness * 0.5)
             continue;
 
         /* check flatness as a half of distance between middle point and a linearized path
@@ -251,7 +250,7 @@ static BOOL flatten_bezier(path_list_node_t *start, REAL x2, REAL y2, REAL x3, R
          */
         area_triangle = (pt.Y - pt_st.Y)*mp[2].X + (pt_st.X - pt.X)*mp[2].Y + (pt_st.Y*pt.X - pt_st.X*pt.Y);
         distance_start_end = hypotf(pt.Y - pt_st.Y, pt_st.X - pt.X);
-        if(fabs(area_triangle) <= flatness * distance_start_end){
+        if(fabs(area_triangle) <= (0.5 * flatness * distance_start_end)){
             continue;
         }
         else
@@ -324,28 +323,6 @@ static GpStatus extend_current_figure(GpPath *path, GDIPCONST PointF *points, IN
 
     return Ok;
 }
-
-static GpStatus add_closed_figure(GpPath *path, GDIPCONST PointF *points, INT count, BYTE type)
-{
-    INT insert_index = path->pathdata.Count;
-
-    if(!count)
-        return Ok;
-
-    if(!lengthen_path(path, count))
-        return OutOfMemory;
-
-    memcpy(path->pathdata.Points + insert_index, points, sizeof(GpPointF)*count);
-    path->pathdata.Types[insert_index] = PathPointTypeStart;
-    memset(path->pathdata.Types + insert_index + 1, type, count - 1);
-
-    path->newfigure = TRUE;
-    path->pathdata.Count += count;
-    path->pathdata.Types[path->pathdata.Count - 1] |= PathPointTypeCloseSubpath;
-
-    return Ok;
-}
-
 
 /*******************************************************************************
  * GdipAddPathArc   [GDIPLUS.1]
@@ -559,7 +536,13 @@ GpStatus WINGDIPAPI GdipAddPathClosedCurve2(GpPath *path, GDIPCONST GpPointF *po
     pt[len_pt-1].X = pt[0].X;
     pt[len_pt-1].Y = pt[0].Y;
 
-    stat = add_closed_figure(path, pt, len_pt, PathPointTypeBezier);
+    stat = extend_current_figure(path, pt, len_pt, PathPointTypeBezier);
+
+    /* close figure */
+    if(stat == Ok){
+        path->pathdata.Types[path->pathdata.Count - 1] |= PathPointTypeCloseSubpath;
+        path->newfigure = TRUE;
+    }
 
     free(pts);
     free(pt);
@@ -882,6 +865,7 @@ GpStatus WINGDIPAPI GdipAddPathPie(GpPath *path, REAL x, REAL y, REAL width, REA
     REAL startAngle, REAL sweepAngle)
 {
     GpPointF *ptf;
+    GpStatus status;
     INT i, count;
 
     TRACE("(%p, %.2f, %.2f, %.2f, %.2f, %.2f, %.2f)\n",
@@ -912,29 +896,28 @@ GpStatus WINGDIPAPI GdipAddPathPie(GpPath *path, REAL x, REAL y, REAL width, REA
 
     arc2polybezier(ptf, x, y, width, height, startAngle, sweepAngle);
 
-    if (!lengthen_path(path, count + 1))
-    {
+    status = GdipAddPathLine(path, x + width/2, y + height/2, ptf[0].X, ptf[0].Y);
+    if(status != Ok){
+        free(ptf);
+        return status;
+    }
+    /* one spline is already added as a line endpoint */
+    if(!lengthen_path(path, count - 1)){
         free(ptf);
         return OutOfMemory;
     }
 
-    path->pathdata.Points[path->pathdata.Count].X = x + width/2;
-    path->pathdata.Points[path->pathdata.Count].Y = y + height/2;
-    path->pathdata.Types[path->pathdata.Count] = PathPointTypeStart;
-
-    memcpy(&(path->pathdata.Points[path->pathdata.Count + 1]), ptf, sizeof(GpPointF)*(count));
-
-    path->pathdata.Types[path->pathdata.Count + 1] = PathPointTypeLine;
+    memcpy(&(path->pathdata.Points[path->pathdata.Count]), &(ptf[1]),sizeof(GpPointF)*(count-1));
     for(i = 0; i < count-1; i++)
-        path->pathdata.Types[path->pathdata.Count + 2 + i] = PathPointTypeBezier;
+        path->pathdata.Types[path->pathdata.Count+i] = PathPointTypeBezier;
 
-    path->pathdata.Count += count + 1;
+    path->pathdata.Count += count-1;
 
     GdipClosePathFigure(path);
 
     free(ptf);
 
-    return Ok;
+    return status;
 }
 
 GpStatus WINGDIPAPI GdipAddPathPieI(GpPath *path, INT x, INT y, INT width, INT height,
@@ -1624,7 +1607,7 @@ GpStatus WINGDIPAPI GdipGetPathWorldBounds(GpPath* path, GpRectF* bounds,
 
     /* If path is empty just return. */
     count = path->pathdata.Count;
-    if(count < 2){
+    if(count == 0){
         bounds->X = bounds->Y = bounds->Width = bounds->Height = 0.0;
         return Ok;
     }
@@ -1749,24 +1732,20 @@ GpStatus WINGDIPAPI GdipReversePath(GpPath* path)
     }
 
     for(i = 0; i < count; i++){
+
         /* find next start point */
         if(path->pathdata.Types[count-i-1] == PathPointTypeStart){
             INT j;
             for(j = start; j <= i; j++){
-                /* copy points coordinate of subpath in reverse order */
                 revpath.Points[j] = path->pathdata.Points[count-j-1];
-                /* copy points type shifted by one (j + 1), as the first point type is always PathPointTypeStart */
-                if (j < i)
-                    revpath.Types[j + 1] = path->pathdata.Types[count - j - 1];
+                revpath.Types[j] = path->pathdata.Types[count-j-1];
             }
-            /* first point of subpath is always Start point */
+            /* mark start point */
             revpath.Types[start] = PathPointTypeStart;
-            /* check if subpath contains more than 1 point */
+            /* set 'figure' endpoint type */
             if(i-start > 1){
-                /* add e.g. PathPointTypeCloseSubpath type to endpoint, if existing in original subpath */
-                revpath.Types[i] |= path->pathdata.Types[count - start - 1] & ~PathPointTypePathTypeMask;
-                /* remove e.g. PathPointTypeCloseSubpath type from second point */
-                revpath.Types[start + 1] &= PathPointTypePathTypeMask;
+                revpath.Types[i] = path->pathdata.Types[count-start-1] & ~PathPointTypePathTypeMask;
+                revpath.Types[i] |= revpath.Types[i-1];
             }
             else
                 revpath.Types[i] = path->pathdata.Types[start];
@@ -1929,10 +1908,6 @@ GpStatus WINGDIPAPI GdipWarpPath(GpPath *path, GpMatrix* matrix,
     FIXME("(%p,%s,%p,%i,%0.2f,%0.2f,%0.2f,%0.2f,%i,%0.2f)\n", path, debugstr_matrix(matrix),
         points, count, x, y, width, height, warpmode, flatness);
 
-    if (!path || !points || count < 1) {
-        return InvalidParameter;
-    }
-
     return NotImplemented;
 }
 
@@ -2046,8 +2021,8 @@ static void widen_cap(const GpPointF *endpoint, const GpPointF *nextpoint,
         }
         else if (cap == LineCapArrowAnchor)
         {
-            extend_dx = -2.0 * extend_dx;
-            extend_dy = -2.0 * extend_dy;
+            extend_dx = -3.0 * extend_dx;
+            extend_dy = -3.0 * extend_dy;
         }
 
         if (add_first_points)
@@ -2609,60 +2584,6 @@ GpStatus widen_flat_path_anchors(GpPath *flat_path, GpPen *pen, REAL pen_width, 
     return stat;
 }
 
-static BOOL points_equal(const PointF* points, int index1, int index2)
-{
-    return !memcmp(&points[index1], &points[index2], sizeof(*points));
-}
-
-static void remove_repeated_points(GpPath *path)
-{
-    int i, j=0, subpath_start=0, subpath_end=0, path_size = 0;
-
-    for (i = 0; i < path->pathdata.Count; i++)
-    {
-        BYTE t = path->pathdata.Types[i];
-
-        path->pathdata.Types[j] = path->pathdata.Types[i];
-        path->pathdata.Points[j] = path->pathdata.Points[i];
-
-        if ((t & PathPointTypePathTypeMask) == PathPointTypeStart)
-        {
-            subpath_start = j;
-            subpath_end = j;
-        }
-        else if ((t & PathPointTypeCloseSubpath) == PathPointTypeCloseSubpath)
-        {
-            if (i > 0 && !points_equal(path->pathdata.Points, i - 1, i) &&
-                !points_equal(path->pathdata.Points, subpath_start, i))
-                subpath_end = j;
-
-            if (subpath_end == subpath_start)
-            {
-                j = subpath_start;
-                continue;
-            }
-
-            path->pathdata.Types[subpath_end] |= PathPointTypeCloseSubpath;
-            j = path_size = subpath_end + 1;
-            continue;
-        }
-        else
-        {
-            if (i > 0 && points_equal(path->pathdata.Points, i - 1, i))
-                continue;
-
-            if (!points_equal(path->pathdata.Points, subpath_start, j))
-                subpath_end = j;
-
-            path_size = j + 1;
-        }
-
-        j++;
-    }
-
-    path->pathdata.Count = path_size;
-}
-
 GpStatus WINGDIPAPI GdipWidenPath(GpPath *path, GpPen *pen, GpMatrix *matrix,
     REAL flatness)
 {
@@ -2691,8 +2612,6 @@ GpStatus WINGDIPAPI GdipWidenPath(GpPath *path, GpPen *pen, GpMatrix *matrix,
     {
         REAL pen_width = (pen->unit == UnitWorld) ? max(pen->width, 1.0) : pen->width;
         BYTE *types = flat_path->pathdata.Types;
-
-        remove_repeated_points(flat_path);
 
         last_point = points;
 

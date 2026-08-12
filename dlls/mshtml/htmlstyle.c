@@ -409,11 +409,6 @@ static const style_tbl_entry_t style_tbl[] = {
         ATTR_COMPAT_IE10
     },
     {
-        L"content",
-        DISPID_IHTMLCSSSTYLEDECLARATION_CONTENT,
-        DISPID_IHTMLSTYLE6_CONTENT
-    },
-    {
         L"cursor",
         DISPID_IHTMLCSSSTYLEDECLARATION_CURSOR,
         DISPID_A_CURSOR,
@@ -2894,13 +2889,12 @@ static HRESULT WINAPI HTMLStyle_setAttribute(IHTMLStyle *iface, BSTR strAttribut
     if(hres == S_OK)
     {
         VARIANT ret;
-        DISPID dispidNamed = DISPID_PROPERTYPUT;
         DISPPARAMS params;
 
         params.cArgs = 1;
         params.rgvarg = &AttributeValue;
         params.cNamedArgs = 1;
-        params.rgdispidNamedArgs = &dispidNamed;
+        params.rgdispidNamedArgs = &propput_dispid;
 
         hres = HTMLStyle_Invoke(iface, dispid, &IID_NULL, LOCALE_SYSTEM_DEFAULT,
             DISPATCH_PROPERTYPUT, &params, &ret, NULL, NULL);
@@ -4187,15 +4181,15 @@ DISPEX_IDISPATCH_IMPL(HTMLStyle6, IHTMLStyle6, impl_from_IHTMLStyle6(iface)->css
 static HRESULT WINAPI HTMLStyle6_put_content(IHTMLStyle6 *iface, BSTR v)
 {
     HTMLStyle *This = impl_from_IHTMLStyle6(iface);
-    TRACE("(%p)->(%s)\n", This, debugstr_w(v));
-    return set_style_property(&This->css_style, STYLEID_CONTENT, v);
+    FIXME("(%p)->(%s)\n", This, debugstr_w(v));
+    return E_NOTIMPL;
 }
 
 static HRESULT WINAPI HTMLStyle6_get_content(IHTMLStyle6 *iface, BSTR *p)
 {
     HTMLStyle *This = impl_from_IHTMLStyle6(iface);
-    TRACE("(%p)->(%p)\n", This, p);
-    return get_style_property(&This->css_style, STYLEID_CONTENT, p);
+    FIXME("(%p)->(%p)\n", This, p);
+    return E_NOTIMPL;
 }
 
 static HRESULT WINAPI HTMLStyle6_put_contentSide(IHTMLStyle6 *iface, BSTR v)
@@ -6504,15 +6498,15 @@ static HRESULT WINAPI HTMLCSSStyleDeclaration_get_maxWidth(IHTMLCSSStyleDeclarat
 static HRESULT WINAPI HTMLCSSStyleDeclaration_put_content(IHTMLCSSStyleDeclaration *iface, BSTR v)
 {
     CSSStyle *This = impl_from_IHTMLCSSStyleDeclaration(iface);
-    TRACE("(%p)->(%s)\n", This, debugstr_w(v));
-    return set_style_property(This, STYLEID_CONTENT, v);
+    FIXME("(%p)->(%s)\n", This, debugstr_w(v));
+    return E_NOTIMPL;
 }
 
 static HRESULT WINAPI HTMLCSSStyleDeclaration_get_content(IHTMLCSSStyleDeclaration *iface, BSTR *p)
 {
     CSSStyle *This = impl_from_IHTMLCSSStyleDeclaration(iface);
-    TRACE("(%p)->(%p)\n", This, p);
-    return get_style_property(This, STYLEID_CONTENT, p);
+    FIXME("(%p)->(%p)\n", This, p);
+    return E_NOTIMPL;
 }
 
 static HRESULT WINAPI HTMLCSSStyleDeclaration_put_captionSide(IHTMLCSSStyleDeclaration *iface, BSTR v)
@@ -9734,8 +9728,8 @@ void MSCSSProperties_init_dispex_info(dispex_data_t *info, compat_mode_t mode)
 }
 
 dispex_static_data_t MSCSSProperties_dispex = {
-    .id           = OBJID_MSCSSProperties,
-    .prototype_id = OBJID_CSSStyleDeclaration,
+    .id           = PROT_MSCSSProperties,
+    .prototype_id = PROT_CSSStyleDeclaration,
     .init_info    = MSCSSProperties_init_dispex_info,
 };
 
@@ -9777,8 +9771,8 @@ static const tid_t MSStyleCSSProperties_iface_tids[] = {
     0
 };
 dispex_static_data_t MSStyleCSSProperties_dispex = {
-    .id           = OBJID_MSStyleCSSProperties,
-    .prototype_id = OBJID_MSCSSProperties,
+    .id           = PROT_MSStyleCSSProperties,
+    .prototype_id = PROT_MSCSSProperties,
     .vtbl         = &MSStyleCSSProperties_dispex_vtbl,
     .disp_tid     = DispHTMLStyle_tid,
     .iface_tids   = MSStyleCSSProperties_iface_tids,
@@ -9924,7 +9918,7 @@ static const dispex_static_data_vtbl_t CSSStyleDeclaration_dispex_vtbl = {
 };
 
 dispex_static_data_t CSSStyleDeclaration_dispex = {
-    .id        = OBJID_CSSStyleDeclaration,
+    .id        = PROT_CSSStyleDeclaration,
     .vtbl      = &CSSStyleDeclaration_dispex_vtbl,
     .disp_tid  = DispHTMLW3CComputedStyle_tid,
     .init_info = CSSStyleDeclaration_init_dispex_info,

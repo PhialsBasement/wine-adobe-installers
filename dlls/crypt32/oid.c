@@ -1716,13 +1716,7 @@ PCCRYPT_OID_INFO WINAPI CryptFindOIDInfo(DWORD dwKeyType, void *pvKey,
 {
     PCCRYPT_OID_INFO ret = NULL;
 
-    TRACE("(%#lx, %p, %lu)\n", dwKeyType, pvKey, dwGroupId);
-
-    if (dwKeyType & (CRYPT_OID_INFO_PUBKEY_ENCRYPT_KEY_FLAG | CRYPT_OID_INFO_PUBKEY_SIGN_KEY_FLAG))
-    {
-        FIXME("flags %#lx not supported\n", dwKeyType & (CRYPT_OID_INFO_PUBKEY_ENCRYPT_KEY_FLAG | CRYPT_OID_INFO_PUBKEY_SIGN_KEY_FLAG));
-        dwKeyType &= ~(CRYPT_OID_INFO_PUBKEY_ENCRYPT_KEY_FLAG | CRYPT_OID_INFO_PUBKEY_SIGN_KEY_FLAG);
-    }
+    TRACE("(%ld, %p, %ld)\n", dwKeyType, pvKey, dwGroupId);
 
     switch(dwKeyType)
     {
@@ -1752,7 +1746,7 @@ PCCRYPT_OID_INFO WINAPI CryptFindOIDInfo(DWORD dwKeyType, void *pvKey,
         EnterCriticalSection(&oidInfoCS);
         LIST_FOR_EACH_ENTRY(info, &oidInfo, struct OIDInfo, entry)
         {
-            if (!wcsicmp(info->info.pwszName, pvKey) &&
+            if (!wcscmp(info->info.pwszName, pvKey) &&
              (!dwGroupId || info->info.dwGroupId == dwGroupId))
             {
                 ret = &info->info;

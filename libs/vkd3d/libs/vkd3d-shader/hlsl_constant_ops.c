@@ -18,8 +18,9 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-#include "hlsl.h"
 #include <math.h>
+
+#include "hlsl.h"
 
 static bool fold_abs(struct hlsl_ctx *ctx, struct hlsl_constant_value *dst,
         const struct hlsl_type *dst_type, const struct hlsl_ir_constant *src)
@@ -141,7 +142,6 @@ static bool fold_cast(struct hlsl_ctx *ctx, struct hlsl_constant_value *dst,
         const struct hlsl_type *dst_type, const struct hlsl_ir_constant *src)
 {
     unsigned int k;
-    bool b = false;
     uint32_t u = 0;
     double d = 0.0;
     float f = 0.0f;
@@ -157,7 +157,6 @@ static bool fold_cast(struct hlsl_ctx *ctx, struct hlsl_constant_value *dst,
                 i = float_to_int(src->value.u[k].f);
                 f = src->value.u[k].f;
                 d = src->value.u[k].f;
-                b = src->value.u[k].f != 0.0f;
                 break;
 
             case HLSL_TYPE_DOUBLE:
@@ -165,7 +164,6 @@ static bool fold_cast(struct hlsl_ctx *ctx, struct hlsl_constant_value *dst,
                 i = double_to_int(src->value.u[k].d);
                 f = src->value.u[k].d;
                 d = src->value.u[k].d;
-                b = src->value.u[k].d != 0.0;
                 break;
 
             case HLSL_TYPE_INT:
@@ -173,7 +171,6 @@ static bool fold_cast(struct hlsl_ctx *ctx, struct hlsl_constant_value *dst,
                 i = src->value.u[k].i;
                 f = src->value.u[k].i;
                 d = src->value.u[k].i;
-                b = src->value.u[k].i;
                 break;
 
             case HLSL_TYPE_UINT:
@@ -182,7 +179,6 @@ static bool fold_cast(struct hlsl_ctx *ctx, struct hlsl_constant_value *dst,
                 i = src->value.u[k].u;
                 f = src->value.u[k].u;
                 d = src->value.u[k].u;
-                b = src->value.u[k].u;
                 break;
 
             case HLSL_TYPE_BOOL:
@@ -190,7 +186,6 @@ static bool fold_cast(struct hlsl_ctx *ctx, struct hlsl_constant_value *dst,
                 i = !!src->value.u[k].u;
                 f = !!src->value.u[k].u;
                 d = !!src->value.u[k].u;
-                b = !!src->value.u[k].u;
                 break;
         }
 
@@ -215,7 +210,7 @@ static bool fold_cast(struct hlsl_ctx *ctx, struct hlsl_constant_value *dst,
                 break;
 
             case HLSL_TYPE_BOOL:
-                dst->u[k].u = b ? ~0u : 0u;
+                dst->u[k].u = u ? ~0u : 0u;
                 break;
         }
     }
@@ -248,118 +243,6 @@ static bool fold_ceil(struct hlsl_ctx *ctx, struct hlsl_constant_value *dst,
 
             default:
                 FIXME("Fold 'ceil' for type %s.\n", debug_hlsl_type(ctx, dst_type));
-                return false;
-        }
-    }
-
-    return true;
-}
-
-static bool fold_clz(struct hlsl_ctx *ctx, struct hlsl_constant_value *dst,
-        const struct hlsl_type *dst_type, const struct hlsl_ir_constant *src)
-{
-    enum hlsl_base_type type = src->node.data_type->e.numeric.type;
-    unsigned int k, v;
-
-    for (k = 0; k < dst_type->e.numeric.dimx; ++k)
-    {
-        switch (type)
-        {
-            case HLSL_TYPE_INT:
-                v = src->value.u[k].i < 0 ? ~src->value.u[k].u : src->value.u[k].u;
-                break;
-
-            case HLSL_TYPE_UINT:
-                v = src->value.u[k].u;
-                break;
-
-            default:
-                FIXME("Fold 'clz' for type %s.\n", debug_hlsl_type(ctx, dst_type));
-                return false;
-        }
-
-        dst->u[k].u = v ? vkd3d_log2i(v) ^ 0x1f : ~0u;
-    }
-
-    return true;
-}
-
-static bool fold_cos(struct hlsl_ctx *ctx, struct hlsl_constant_value *dst,
-        const struct hlsl_type *dst_type, const struct hlsl_ir_constant *src)
-{
-    enum hlsl_base_type type = dst_type->e.numeric.type;
-    unsigned int k;
-
-    VKD3D_ASSERT(type == src->node.data_type->e.numeric.type);
-
-    for (k = 0; k < dst_type->e.numeric.dimx; ++k)
-    {
-        switch (type)
-        {
-            case HLSL_TYPE_FLOAT:
-            case HLSL_TYPE_HALF:
-                dst->u[k].f = cosf(src->value.u[k].f);
-                break;
-
-            case HLSL_TYPE_DOUBLE:
-                dst->u[k].d = cos(src->value.u[k].d);
-                break;
-
-            default:
-                FIXME("Fold 'cos' for type %s.\n", debug_hlsl_type(ctx, dst_type));
-                return false;
-        }
-    }
-
-    return true;
-}
-
-static bool fold_countbits(struct hlsl_ctx *ctx, struct hlsl_constant_value *dst,
-        const struct hlsl_type *dst_type, const struct hlsl_ir_constant *src)
-{
-    enum hlsl_base_type type = dst_type->e.numeric.type;
-    unsigned int k;
-
-    VKD3D_ASSERT(type == src->node.data_type->e.numeric.type);
-
-    for (k = 0; k < dst_type->e.numeric.dimx; ++k)
-    {
-        switch (type)
-        {
-            case HLSL_TYPE_UINT:
-                dst->u[k].u = vkd3d_popcount(src->value.u[k].u);
-                break;
-
-            default:
-                FIXME("Fold 'countbits' for type %s.\n", debug_hlsl_type(ctx, dst_type));
-                return false;
-        }
-    }
-
-    return true;
-}
-
-static bool fold_ctz(struct hlsl_ctx *ctx, struct hlsl_constant_value *dst,
-        const struct hlsl_type *dst_type, const struct hlsl_ir_constant *src)
-{
-    enum hlsl_base_type type = dst_type->e.numeric.type;
-    unsigned int k;
-
-    VKD3D_ASSERT(type == src->node.data_type->e.numeric.type);
-
-    for (k = 0; k < dst_type->e.numeric.dimx; ++k)
-    {
-        switch (type)
-        {
-            case HLSL_TYPE_UINT:
-                if (!src->value.u[k].u)
-                    dst->u[k].u = ~0u;
-                else
-                    dst->u[k].u = vkd3d_ctz(src->value.u[k].u);
-                break;
-
-            default:
-                FIXME("Fold 'ctz' for type %s.\n", debug_hlsl_type(ctx, dst_type));
                 return false;
         }
     }
@@ -595,48 +478,6 @@ static bool fold_rcp(struct hlsl_ctx *ctx, struct hlsl_constant_value *dst, cons
     return true;
 }
 
-static bool fold_reinterpret(struct hlsl_ctx *ctx, struct hlsl_constant_value *dst,
-        const struct hlsl_type *dst_type, const struct hlsl_ir_constant *src)
-{
-    unsigned int k;
-
-    for (k = 0; k < dst_type->e.numeric.dimx; ++k)
-    {
-        dst->u[k] = src->value.u[k];
-    }
-
-    return true;
-}
-
-static bool fold_round(struct hlsl_ctx *ctx, struct hlsl_constant_value *dst,
-        const struct hlsl_type *dst_type, const struct hlsl_ir_constant *src)
-{
-    enum hlsl_base_type type = dst_type->e.numeric.type;
-    unsigned int k;
-
-    VKD3D_ASSERT(type == src->node.data_type->e.numeric.type);
-
-    for (k = 0; k < dst_type->e.numeric.dimx; ++k)
-    {
-        switch (type)
-        {
-            case HLSL_TYPE_FLOAT:
-            case HLSL_TYPE_HALF:
-                /* Somewhat unfortunately, constant folded round() rounds
-                 * halfway cases towards positive infinity, as opposed to
-                 * nearest even like vsir/TPF round_ne. */
-                dst->u[k].f = floorf(src->value.u[k].f + 0.5f);
-                break;
-
-            default:
-                FIXME("Fold 'round' for type %s.\n", debug_hlsl_type(ctx, dst_type));
-                return false;
-        }
-    }
-
-    return true;
-}
-
 static bool fold_rsq(struct hlsl_ctx *ctx, struct hlsl_constant_value *dst, const struct hlsl_type *dst_type,
         const struct hlsl_ir_constant *src, const struct vkd3d_shader_location *loc)
 {
@@ -696,36 +537,6 @@ static bool fold_sat(struct hlsl_ctx *ctx, struct hlsl_constant_value *dst, cons
 
             default:
                 FIXME("Fold 'sat' for type %s.\n", debug_hlsl_type(ctx, dst_type));
-                return false;
-        }
-    }
-
-    return true;
-}
-
-static bool fold_sin(struct hlsl_ctx *ctx, struct hlsl_constant_value *dst,
-        const struct hlsl_type *dst_type, const struct hlsl_ir_constant *src)
-{
-    enum hlsl_base_type type = dst_type->e.numeric.type;
-    unsigned int k;
-
-    VKD3D_ASSERT(type == src->node.data_type->e.numeric.type);
-
-    for (k = 0; k < dst_type->e.numeric.dimx; ++k)
-    {
-        switch (type)
-        {
-            case HLSL_TYPE_FLOAT:
-            case HLSL_TYPE_HALF:
-                dst->u[k].f = sinf(src->value.u[k].f);
-                break;
-
-            case HLSL_TYPE_DOUBLE:
-                dst->u[k].d = sin(src->value.u[k].d);
-                break;
-
-            default:
-                FIXME("Fold 'sin' for type %s.\n", debug_hlsl_type(ctx, dst_type));
                 return false;
         }
     }
@@ -1163,44 +974,6 @@ static bool fold_lshift(struct hlsl_ctx *ctx, struct hlsl_constant_value *dst, c
     return true;
 }
 
-static bool fold_mad(struct hlsl_ctx *ctx, struct hlsl_constant_value *dst, const struct hlsl_type *dst_type,
-        const struct hlsl_ir_constant *src1, const struct hlsl_ir_constant *src2, const struct hlsl_ir_constant *src3)
-{
-    enum hlsl_base_type type = dst_type->e.numeric.type;
-    unsigned int k;
-
-    VKD3D_ASSERT(type == src1->node.data_type->e.numeric.type);
-    VKD3D_ASSERT(type == src2->node.data_type->e.numeric.type);
-    VKD3D_ASSERT(type == src3->node.data_type->e.numeric.type);
-
-    for (k = 0; k < dst_type->e.numeric.dimx; ++k)
-    {
-        switch (type)
-        {
-            case HLSL_TYPE_FLOAT:
-            case HLSL_TYPE_HALF:
-                dst->u[k].f = fmaf(src1->value.u[k].f, src2->value.u[k].f, src3->value.u[k].f);
-                break;
-
-            case HLSL_TYPE_DOUBLE:
-                dst->u[k].d = fma(src1->value.u[k].d, src2->value.u[k].d, src3->value.u[k].d);
-                break;
-
-            case HLSL_TYPE_INT:
-            case HLSL_TYPE_MIN16UINT:
-            case HLSL_TYPE_UINT:
-                dst->u[k].u = src1->value.u[k].u * src2->value.u[k].u + src3->value.u[k].u;
-                break;
-
-            default:
-                FIXME("Fold 'mad' for type %s.\n", debug_hlsl_type(ctx, dst_type));
-                return false;
-        }
-    }
-
-    return true;
-}
-
 static bool fold_max(struct hlsl_ctx *ctx, struct hlsl_constant_value *dst, const struct hlsl_type *dst_type,
         const struct hlsl_ir_constant *src1, const struct hlsl_ir_constant *src2)
 {
@@ -1285,7 +1058,6 @@ static bool fold_mod(struct hlsl_ctx *ctx, struct hlsl_constant_value *dst, cons
 {
     enum hlsl_base_type type = dst_type->e.numeric.type;
     unsigned int k;
-    float x, y;
 
     VKD3D_ASSERT(type == src1->node.data_type->e.numeric.type);
     VKD3D_ASSERT(type == src2->node.data_type->e.numeric.type);
@@ -1294,22 +1066,6 @@ static bool fold_mod(struct hlsl_ctx *ctx, struct hlsl_constant_value *dst, cons
     {
         switch (type)
         {
-            /* Explicitly disable floating-point contraction on Clang to
-             * prevent it from fusing the multiplication and the
-             * addition/subtraction below. Current versions of GCC
-             * unfortunately do no support the FP_CONTRACT pragma, but don't
-             * contract the expression either. */
-#ifdef __clang__
-#pragma STDC FP_CONTRACT OFF
-#endif
-            case HLSL_TYPE_FLOAT:
-            case HLSL_TYPE_HALF:
-                x = src1->value.u[k].f;
-                y = src2->value.u[k].f;
-                /* Explicit cast to float to avoid x87 excess precision. */
-                dst->u[k].f = x - (float)(truncf(x / y) * y);
-                break;
-
             case HLSL_TYPE_INT:
                 if (src2->value.u[k].i == 0)
                 {
@@ -1456,11 +1212,11 @@ static bool fold_rshift(struct hlsl_ctx *ctx, struct hlsl_constant_value *dst, c
     return true;
 }
 
-struct hlsl_ir_node *hlsl_fold_constant_exprs(struct hlsl_ctx *ctx,
-        struct hlsl_ir_node *instr, struct hlsl_block *block)
+bool hlsl_fold_constant_exprs(struct hlsl_ctx *ctx, struct hlsl_ir_node *instr, void *context)
 {
     struct hlsl_ir_constant *arg1, *arg2 = NULL, *arg3 = NULL;
     struct hlsl_constant_value res = {0};
+    struct hlsl_ir_node *res_node;
     struct hlsl_ir_expr *expr;
     unsigned int i;
     bool success;
@@ -1507,22 +1263,6 @@ struct hlsl_ir_node *hlsl_fold_constant_exprs(struct hlsl_ctx *ctx,
             success = fold_ceil(ctx, &res, instr->data_type, arg1);
             break;
 
-        case HLSL_OP1_CLZ:
-            success = fold_clz(ctx, &res, instr->data_type, arg1);
-            break;
-
-        case HLSL_OP1_COS:
-            success = fold_cos(ctx, &res, instr->data_type, arg1);
-            break;
-
-        case HLSL_OP1_COUNTBITS:
-            success = fold_countbits(ctx, &res, instr->data_type, arg1);
-            break;
-
-        case HLSL_OP1_CTZ:
-            success = fold_ctz(ctx, &res, instr->data_type, arg1);
-            break;
-
         case HLSL_OP1_EXP2:
             success = fold_exp2(ctx, &res, instr->data_type, arg1);
             break;
@@ -1551,24 +1291,12 @@ struct hlsl_ir_node *hlsl_fold_constant_exprs(struct hlsl_ctx *ctx,
             success = fold_rcp(ctx, &res, instr->data_type, arg1, &instr->loc);
             break;
 
-        case HLSL_OP1_REINTERPRET:
-            success = fold_reinterpret(ctx, &res, instr->data_type, arg1);
-            break;
-
-        case HLSL_OP1_ROUND:
-            success = fold_round(ctx, &res, instr->data_type, arg1);
-            break;
-
         case HLSL_OP1_RSQ:
             success = fold_rsq(ctx, &res, instr->data_type, arg1, &instr->loc);
             break;
 
         case HLSL_OP1_SAT:
             success = fold_sat(ctx, &res, instr->data_type, arg1);
-            break;
-
-        case HLSL_OP1_SIN:
-            success = fold_sin(ctx, &res, instr->data_type, arg1);
             break;
 
         case HLSL_OP1_SQRT:
@@ -1645,10 +1373,6 @@ struct hlsl_ir_node *hlsl_fold_constant_exprs(struct hlsl_ctx *ctx,
             success = fold_dp2add(ctx, &res, instr->data_type, arg1, arg2, arg3);
             break;
 
-        case HLSL_OP3_MAD:
-            success = fold_mad(ctx, &res, instr->data_type, arg1, arg2, arg3);
-            break;
-
         case HLSL_OP3_TERNARY:
             success = fold_ternary(ctx, &res, instr->data_type, arg1, arg2, arg3);
             break;
@@ -1660,32 +1384,103 @@ struct hlsl_ir_node *hlsl_fold_constant_exprs(struct hlsl_ctx *ctx,
     }
 
     if (success)
-        return hlsl_block_add_constant(ctx, block, instr->data_type, &res, &instr->loc);
-
-    return NULL;
+    {
+        if (!(res_node = hlsl_new_constant(ctx, instr->data_type, &res, &instr->loc)))
+            return false;
+        list_add_before(&expr->node.entry, &res_node->entry);
+        hlsl_replace_node(&expr->node, res_node);
+    }
+    return success;
 }
 
-struct hlsl_ir_node *hlsl_fold_constant_identities(struct hlsl_ctx *ctx,
-        struct hlsl_ir_node *instr, struct hlsl_block *block)
+static bool constant_is_zero(struct hlsl_ir_constant *const_arg)
 {
-    static const struct hlsl_constant_value zero;
+    struct hlsl_type *data_type = const_arg->node.data_type;
+    unsigned int k;
+
+    for (k = 0; k < data_type->e.numeric.dimx; ++k)
+    {
+        switch (data_type->e.numeric.type)
+        {
+            case HLSL_TYPE_FLOAT:
+            case HLSL_TYPE_HALF:
+                if (const_arg->value.u[k].f != 0.0f)
+                    return false;
+                break;
+
+            case HLSL_TYPE_DOUBLE:
+                if (const_arg->value.u[k].d != 0.0)
+                    return false;
+                break;
+
+            case HLSL_TYPE_UINT:
+            case HLSL_TYPE_INT:
+            case HLSL_TYPE_BOOL:
+            case HLSL_TYPE_MIN16UINT:
+                if (const_arg->value.u[k].u != 0)
+                    return false;
+                break;
+        }
+    }
+    return true;
+}
+
+static bool constant_is_one(struct hlsl_ir_constant *const_arg)
+{
+    struct hlsl_type *data_type = const_arg->node.data_type;
+    unsigned int k;
+
+    for (k = 0; k < data_type->e.numeric.dimx; ++k)
+    {
+        switch (data_type->e.numeric.type)
+        {
+            case HLSL_TYPE_FLOAT:
+            case HLSL_TYPE_HALF:
+                if (const_arg->value.u[k].f != 1.0f)
+                    return false;
+                break;
+
+            case HLSL_TYPE_DOUBLE:
+                if (const_arg->value.u[k].d != 1.0)
+                    return false;
+                break;
+
+            case HLSL_TYPE_UINT:
+            case HLSL_TYPE_INT:
+            case HLSL_TYPE_MIN16UINT:
+                if (const_arg->value.u[k].u != 1)
+                    return false;
+                break;
+
+            case HLSL_TYPE_BOOL:
+                if (const_arg->value.u[k].u != ~0)
+                    return false;
+                break;
+        }
+    }
+    return true;
+}
+
+bool hlsl_fold_constant_identities(struct hlsl_ctx *ctx, struct hlsl_ir_node *instr, void *context)
+{
     struct hlsl_ir_constant *const_arg = NULL;
     struct hlsl_ir_node *mut_arg = NULL;
+    struct hlsl_ir_node *res_node;
     struct hlsl_ir_expr *expr;
     unsigned int i;
 
     if (instr->type != HLSL_IR_EXPR)
-        return NULL;
+        return false;
     expr = hlsl_ir_expr(instr);
 
     if (instr->data_type->class > HLSL_CLASS_VECTOR)
-        return NULL;
+        return false;
 
     /* Verify that the expression has two operands. */
     for (i = 0; i < ARRAY_SIZE(expr->operands); ++i)
     {
         if (!!expr->operands[i].node != (i < 2))
-            return NULL;
+            return false;
     }
 
     if (expr->operands[0].node->type == HLSL_IR_CONSTANT)
@@ -1700,48 +1495,46 @@ struct hlsl_ir_node *hlsl_fold_constant_identities(struct hlsl_ctx *ctx,
     }
     else
     {
-        return NULL;
+        return false;
     }
 
+    res_node = NULL;
     switch (expr->op)
     {
         case HLSL_OP2_ADD:
-            if (hlsl_constant_is_zero(const_arg))
-                return mut_arg;
+            if (constant_is_zero(const_arg))
+                res_node = mut_arg;
             break;
 
         case HLSL_OP2_MUL:
-            if (hlsl_constant_is_one(const_arg))
-                return mut_arg;
+            if (constant_is_one(const_arg))
+                res_node = mut_arg;
             break;
 
         case HLSL_OP2_LOGIC_AND:
-            if (hlsl_constant_is_zero(const_arg))
-                return &const_arg->node;
-            else if (hlsl_constant_is_one(const_arg))
-                return mut_arg;
+            if (constant_is_zero(const_arg))
+                res_node = &const_arg->node;
+            else if (constant_is_one(const_arg))
+                res_node = mut_arg;
             break;
 
         case HLSL_OP2_LOGIC_OR:
-            if (hlsl_constant_is_zero(const_arg))
-                return mut_arg;
-            else if (hlsl_constant_is_one(const_arg))
-                return &const_arg->node;
+            if (constant_is_zero(const_arg))
+                res_node = mut_arg;
+            else if (constant_is_one(const_arg))
+                res_node = &const_arg->node;
             break;
-
-        case HLSL_OP2_LESS:
-            /* x < 0 -> false, if x is unsigned. */
-            if (!hlsl_type_is_unsigned_integer(expr->operands[0].node->data_type)
-                    || expr->operands[1].node->type != HLSL_IR_CONSTANT
-                    || !hlsl_constant_is_zero(hlsl_ir_constant(expr->operands[1].node)))
-                break;
-            return hlsl_block_add_constant(ctx, block, instr->data_type, &zero, &instr->loc);
 
         default:
             break;
     }
 
-    return NULL;
+    if (res_node)
+    {
+        hlsl_replace_node(&expr->node, res_node);
+        return true;
+    }
+    return false;
 }
 
 static bool is_op_associative(enum hlsl_ir_expr_op op, enum hlsl_base_type type)
@@ -1840,23 +1633,23 @@ static struct hlsl_ir_node *collect_exprs(struct hlsl_ctx *ctx, struct hlsl_bloc
     return hlsl_block_add_expr(ctx, block, opl, operands, instr->data_type, &instr->loc);
 }
 
-struct hlsl_ir_node *hlsl_fold_binary_exprs(struct hlsl_ctx *ctx, struct hlsl_ir_node *instr, struct hlsl_block *block)
+bool hlsl_normalize_binary_exprs(struct hlsl_ctx *ctx, struct hlsl_ir_node *instr, void *context)
 {
     struct hlsl_ir_node *arg1, *arg2, *tmp;
     struct hlsl_ir_expr *expr;
     enum hlsl_base_type type;
     enum hlsl_ir_expr_op op;
+    struct hlsl_block block;
     bool progress = false;
 
     if (instr->type != HLSL_IR_EXPR)
-        return NULL;
+        return false;
     expr = hlsl_ir_expr(instr);
 
     if (instr->data_type->class > HLSL_CLASS_VECTOR)
-        return NULL;
+        return false;
 
-    if (expr->operands[2].node)
-        return NULL;
+    hlsl_block_init(&block);
 
     arg1 = expr->operands[0].node;
     arg2 = expr->operands[1].node;
@@ -1864,11 +1657,15 @@ struct hlsl_ir_node *hlsl_fold_binary_exprs(struct hlsl_ctx *ctx, struct hlsl_ir
     op = expr->op;
 
     if (!arg1 || !arg2)
-        return NULL;
+        return false;
 
-    /* (x OPL a) OPR (x OPL b) -> x OPL (a OPR b) */
-    if ((tmp = collect_exprs(ctx, block, instr, op, arg1, arg2)))
-        return tmp;
+    if ((tmp = collect_exprs(ctx, &block, instr, op, arg1, arg2)))
+    {
+        /* (x OPL a) OPR (x OPL b) -> x OPL (a OPR b) */
+        list_move_before(&instr->entry, &block.instrs);
+        hlsl_replace_node(instr, tmp);
+        return true;
+    }
 
     if (is_op_commutative(op) && arg1->type == HLSL_IR_CONSTANT && arg2->type != HLSL_IR_CONSTANT)
     {
@@ -1891,13 +1688,13 @@ struct hlsl_ir_node *hlsl_fold_binary_exprs(struct hlsl_ctx *ctx, struct hlsl_ir
             {
                 /* (x OP a) OP b -> x OP (a OP b) */
                 arg1 = e1->operands[0].node;
-                arg2 = hlsl_block_add_binary_expr(ctx, block, op, e1->operands[1].node, arg2);
+                arg2 = hlsl_block_add_binary_expr(ctx, &block, op, e1->operands[1].node, arg2);
                 progress = true;
             }
             else if (is_op_commutative(op))
             {
                 /* (x OP a) OP y -> (x OP y) OP a */
-                arg1 = hlsl_block_add_binary_expr(ctx, block, op, e1->operands[0].node, arg2);
+                arg1 = hlsl_block_add_binary_expr(ctx, &block, op, e1->operands[0].node, arg2);
                 arg2 = e1->operands[1].node;
                 progress = true;
             }
@@ -1907,13 +1704,13 @@ struct hlsl_ir_node *hlsl_fold_binary_exprs(struct hlsl_ctx *ctx, struct hlsl_ir
                 && e2->operands[0].node->type != HLSL_IR_CONSTANT && e2->operands[1].node->type == HLSL_IR_CONSTANT)
         {
             /* x OP (y OP a) -> (x OP y) OP a */
-            arg1 = hlsl_block_add_binary_expr(ctx, block, op, arg1, e2->operands[0].node);
+            arg1 = hlsl_block_add_binary_expr(ctx, &block, op, arg1, e2->operands[0].node);
             arg2 = e2->operands[1].node;
             progress = true;
         }
 
         if (!progress && e1 && e1->op == op
-                && (tmp = collect_exprs(ctx, block, instr, op, e1->operands[1].node, arg2)))
+                && (tmp = collect_exprs(ctx, &block, instr, op, e1->operands[1].node, arg2)))
         {
             /* (y OPR (x OPL a)) OPR (x OPL b) -> y OPR (x OPL (a OPR b)) */
             arg1 = e1->operands[0].node;
@@ -1922,7 +1719,7 @@ struct hlsl_ir_node *hlsl_fold_binary_exprs(struct hlsl_ctx *ctx, struct hlsl_ir
         }
 
         if (!progress && is_op_commutative(op) && e1 && e1->op == op
-                && (tmp = collect_exprs(ctx, block, instr, op, e1->operands[0].node, arg2)))
+                && (tmp = collect_exprs(ctx, &block, instr, op, e1->operands[0].node, arg2)))
         {
             /* ((x OPL a) OPR y) OPR (x OPL b) -> (x OPL (a OPR b)) OPR y */
             arg1 = tmp;
@@ -1931,7 +1728,7 @@ struct hlsl_ir_node *hlsl_fold_binary_exprs(struct hlsl_ctx *ctx, struct hlsl_ir
         }
 
         if (!progress && e2 && e2->op == op
-                && (tmp = collect_exprs(ctx, block, instr, op, arg1, e2->operands[0].node)))
+                && (tmp = collect_exprs(ctx, &block, instr, op, arg1, e2->operands[0].node)))
         {
             /* (x OPL a) OPR ((x OPL b) OPR y) -> (x OPL (a OPR b)) OPR y */
             arg1 = tmp;
@@ -1940,7 +1737,7 @@ struct hlsl_ir_node *hlsl_fold_binary_exprs(struct hlsl_ctx *ctx, struct hlsl_ir
         }
 
         if (!progress && is_op_commutative(op) && e2 && e2->op == op
-                && (tmp = collect_exprs(ctx, block, instr, op, arg1, e2->operands[1].node)))
+                && (tmp = collect_exprs(ctx, &block, instr, op, arg1, e2->operands[1].node)))
         {
             /* (x OPL a) OPR (y OPR (x OPL b)) -> (x OPL (a OPR b)) OPR y */
             arg1 = tmp;
@@ -1952,30 +1749,39 @@ struct hlsl_ir_node *hlsl_fold_binary_exprs(struct hlsl_ctx *ctx, struct hlsl_ir
     if (progress)
     {
         struct hlsl_ir_node *operands[HLSL_MAX_OPERANDS] = {arg1, arg2};
+        struct hlsl_ir_node *res;
 
-        return hlsl_block_add_expr(ctx, block, op, operands, instr->data_type, &instr->loc);
+        res = hlsl_block_add_expr(ctx, &block, op, operands, instr->data_type, &instr->loc);
+
+        list_move_before(&instr->entry, &block.instrs);
+        hlsl_replace_node(instr, res);
     }
 
-    return NULL;
+    return progress;
 }
 
-struct hlsl_ir_node *hlsl_fold_constant_swizzles(struct hlsl_ctx *ctx,
-        struct hlsl_ir_node *instr, struct hlsl_block *block)
+bool hlsl_fold_constant_swizzles(struct hlsl_ctx *ctx, struct hlsl_ir_node *instr, void *context)
 {
     struct hlsl_constant_value value;
     struct hlsl_ir_swizzle *swizzle;
     struct hlsl_ir_constant *src;
+    struct hlsl_ir_node *dst;
     unsigned int i;
 
     if (instr->type != HLSL_IR_SWIZZLE)
-        return NULL;
+        return false;
     swizzle = hlsl_ir_swizzle(instr);
     if (swizzle->val.node->type != HLSL_IR_CONSTANT)
-        return NULL;
+        return false;
     src = hlsl_ir_constant(swizzle->val.node);
 
     for (i = 0; i < swizzle->node.data_type->e.numeric.dimx; ++i)
         value.u[i] = src->value.u[hlsl_swizzle_get_component(swizzle->u.vector, i)];
 
-    return hlsl_block_add_constant(ctx, block, instr->data_type, &value, &instr->loc);
+    if (!(dst = hlsl_new_constant(ctx, instr->data_type, &value, &instr->loc)))
+        return false;
+
+    list_add_before(&swizzle->node.entry, &dst->entry);
+    hlsl_replace_node(&swizzle->node, dst);
+    return true;
 }

@@ -84,7 +84,7 @@
 @ stdcall MFCreateVideoMediaTypeFromVideoInfoHeader(ptr long long long long int64 ptr ptr)
 @ stdcall MFCreateVideoSampleAllocatorEx(ptr ptr)
 @ stdcall MFCreateWaveFormatExFromMFMediaType(ptr ptr ptr long)
-@ stdcall MFDeserializeAttributesFromStream(ptr long ptr)
+@ stub MFDeserializeAttributesFromStream
 @ stub MFDeserializeEvent
 @ stub MFDeserializeMediaTypeFromStream
 @ stub MFDeserializePresentationDescriptor
@@ -149,7 +149,7 @@
 @ stdcall MFRemovePeriodicCallback(long) rtworkq.RtwqRemovePeriodicCallback
 @ stdcall MFScheduleWorkItem(ptr ptr int64 ptr)
 @ stdcall MFScheduleWorkItemEx(ptr int64 ptr) rtworkq.RtwqScheduleWorkItem
-@ stdcall MFSerializeAttributesToStream(ptr long ptr)
+@ stub MFSerializeAttributesToStream
 @ stub MFSerializeEvent
 @ stub MFSerializeMediaTypeToStream
 @ stub MFSerializePresentationDescriptor

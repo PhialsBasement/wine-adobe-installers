@@ -48,8 +48,7 @@ static void xdg_surface_handle_configure(void *private, struct xdg_surface *xdg_
 
     /* Handle this event only if wayland_surface is still associated with
      * the target xdg_surface. */
-    if ((surface = data->wayland_surface) && wayland_surface_is_toplevel(surface) &&
-        surface->xdg_surface == xdg_surface)
+    if ((surface = data->wayland_surface) && surface->xdg_surface == xdg_surface)
     {
         /* If we have a previously requested config, we have already sent a
          * WM_WAYLAND_CONFIGURE which hasn't been handled yet. In that case,
@@ -117,7 +116,7 @@ static void xdg_toplevel_handle_configure(void *private,
 
     if (!(data = wayland_win_data_get(hwnd))) return;
 
-    if ((surface = data->wayland_surface) && wayland_surface_is_toplevel(surface))
+    if ((surface = data->wayland_surface) && surface->xdg_toplevel == xdg_toplevel)
     {
         surface->pending.width = width;
         surface->pending.height = height;
@@ -205,11 +204,6 @@ void wayland_surface_destroy(struct wayland_surface *surface)
         process_wayland.keyboard.focused_hwnd = NULL;
     pthread_mutex_unlock(&process_wayland.keyboard.mutex);
 
-    pthread_mutex_lock(&process_wayland.text_input.mutex);
-    if (process_wayland.text_input.focused_hwnd == surface->hwnd)
-        process_wayland.text_input.focused_hwnd = NULL;
-    pthread_mutex_unlock(&process_wayland.text_input.mutex);
-
     wayland_surface_clear_role(surface);
 
     if (surface->wp_viewport)
@@ -222,18 +216,6 @@ void wayland_surface_destroy(struct wayland_surface *surface)
     {
         wl_surface_destroy(surface->wl_surface);
         surface->wl_surface = NULL;
-    }
-
-    if (surface->big_icon_buffer)
-    {
-        wayland_shm_buffer_unref(surface->big_icon_buffer);
-        surface->big_icon_buffer = NULL;
-    }
-
-    if (surface->small_icon_buffer)
-    {
-        wayland_shm_buffer_unref(surface->small_icon_buffer);
-        surface->small_icon_buffer = NULL;
     }
 
     wl_display_flush(process_wayland.wl_display);
@@ -270,14 +252,12 @@ void wayland_surface_make_toplevel(struct wayland_surface *surface)
     if (process_name)
         xdg_toplevel_set_app_id(surface->xdg_toplevel, process_name);
 
+    wl_surface_commit(surface->wl_surface);
+    wl_display_flush(process_wayland.wl_display);
+
     if (!NtUserInternalGetWindowText(surface->hwnd, text, ARRAY_SIZE(text)))
         text[0] = 0;
     wayland_surface_set_title(surface, text);
-
-    wayland_surface_assign_icon(surface);
-
-    wl_surface_commit(surface->wl_surface);
-    wl_display_flush(process_wayland.wl_display);
 
     return;
 
@@ -344,15 +324,6 @@ void wayland_surface_clear_role(struct wayland_surface *surface)
         break;
 
     case WAYLAND_SURFACE_ROLE_TOPLEVEL:
-        if (surface->xdg_toplevel_icon)
-        {
-            xdg_toplevel_icon_manager_v1_set_icon(
-                process_wayland.xdg_toplevel_icon_manager_v1,
-                surface->xdg_toplevel, NULL);
-            xdg_toplevel_icon_v1_destroy(surface->xdg_toplevel_icon);
-            surface->xdg_toplevel_icon = NULL;
-        }
-
         if (surface->xdg_toplevel)
         {
             xdg_toplevel_destroy(surface->xdg_toplevel);
@@ -616,6 +587,8 @@ static void wayland_surface_reconfigure_client(struct wayland_surface *surface,
         wp_viewport_set_destination(client->wp_viewport, width, height);
     else /* We can't have a 0x0 destination, use 1x1 instead. */
         wp_viewport_set_destination(client->wp_viewport, 1, 1);
+
+    wayland_resize_gl_drawable(client->hwnd);
 }
 
 /**********************************************************************
@@ -808,7 +781,6 @@ struct wayland_shm_buffer *wayland_shm_buffer_create(int width, int height,
     shm_buffer->ref = 1;
     shm_buffer->width = width;
     shm_buffer->height = height;
-    shm_buffer->format = format;
     shm_buffer->map_size = size;
 
     shm_buffer->damage_region = NtGdiCreateRectRgn(0, 0, width, height);
@@ -824,7 +796,7 @@ struct wayland_shm_buffer *wayland_shm_buffer_create(int width, int height,
                              NULL, &section_size, PAGE_READWRITE, SEC_COMMIT, 0);
     if (status)
     {
-        ERR("Failed to create SHM section status=0x%x\n", status);
+        ERR("Failed to create SHM section status=0x%lx\n", (long)status);
         goto err;
     }
 
@@ -834,14 +806,14 @@ struct wayland_shm_buffer *wayland_shm_buffer_create(int width, int height,
     if (status)
     {
         shm_buffer->map_data = NULL;
-        ERR("Failed to create map SHM handle status=0x%x\n", status);
+        ERR("Failed to create map SHM handle status=0x%lx\n", (long)status);
         goto err;
     }
 
     status = wine_server_handle_to_fd(handle, FILE_READ_DATA, &fd, NULL);
     if (status)
     {
-        ERR("Failed to get fd from SHM handle status=0x%x\n", status);
+        ERR("Failed to get fd from SHM handle status=0x%lx\n", (long)status);
         goto err;
     }
 
@@ -874,147 +846,6 @@ err:
     return NULL;
 }
 
-/***********************************************************************
- *           copy_rectangle_into_center_of_square
- *
- * Copies non-square rectangle src to the center of square dest.
- */
-static void copy_rectangle_into_center_of_square(const unsigned int *src,
-                                                 int src_w, int src_h,
-                                                 unsigned int *dest)
-{
-    int dest_length;
-
-    if (src_w > src_h)
-    {
-        dest += src_w * (src_w - src_h) / 2;
-        dest_length = src_w;
-    }
-    else
-    {
-        dest += (src_h - src_w) / 2;
-        dest_length = src_h;
-    }
-
-    for (int h = 0; h < src_h; h++, dest += dest_length, src += src_w)
-        memcpy(dest, src, src_w * 4);
-}
-
-/***********************************************************************
- *           wayland_shm_buffer_from_color_bitmaps
- *
- * Create a wayland_shm_buffer for a color bitmap.
- *
- * Adapted from wineandroid.drv code.
- */
-struct wayland_shm_buffer *wayland_shm_buffer_from_color_bitmaps(HDC hdc, HBITMAP color,
-                                                                 HBITMAP mask,
-                                                                 BOOL allow_padding)
-{
-    struct wayland_shm_buffer *shm_buffer = NULL;
-    char buffer[FIELD_OFFSET(BITMAPINFO, bmiColors[256])];
-    BITMAPINFO *info = (BITMAPINFO *)buffer;
-    BITMAP bm;
-    unsigned int *ptr, *bits = NULL;
-    unsigned char *mask_bits = NULL;
-    int i, j, square_length;
-    BOOL has_alpha = FALSE, use_padding = FALSE;
-
-    if (!NtGdiExtGetObjectW(color, sizeof(bm), &bm)) goto failed;
-
-    info->bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
-    info->bmiHeader.biWidth = bm.bmWidth;
-    info->bmiHeader.biHeight = -bm.bmHeight;
-    info->bmiHeader.biPlanes = 1;
-    info->bmiHeader.biBitCount = 32;
-    info->bmiHeader.biCompression = BI_RGB;
-    info->bmiHeader.biSizeImage = bm.bmWidth * bm.bmHeight * 4;
-    info->bmiHeader.biXPelsPerMeter = 0;
-    info->bmiHeader.biYPelsPerMeter = 0;
-    info->bmiHeader.biClrUsed = 0;
-    info->bmiHeader.biClrImportant = 0;
-
-    use_padding = allow_padding && bm.bmWidth != bm.bmHeight;
-
-    if (use_padding)
-    {
-        square_length = max(bm.bmWidth, bm.bmHeight);
-        shm_buffer = wayland_shm_buffer_create(square_length, square_length,
-                                               WL_SHM_FORMAT_ARGB8888);
-        if (!shm_buffer) goto failed;
-        if (!(bits = malloc(info->bmiHeader.biSizeImage))) goto failed;
-    }
-    else
-    {
-        shm_buffer = wayland_shm_buffer_create(bm.bmWidth, bm.bmHeight,
-                                               WL_SHM_FORMAT_ARGB8888);
-        if (!shm_buffer) goto failed;
-        bits = shm_buffer->map_data;
-    }
-
-    if (!NtGdiGetDIBitsInternal(hdc, color, 0, bm.bmHeight, bits, info,
-                                DIB_RGB_COLORS, 0, 0))
-        goto failed;
-
-    for (i = 0; i < bm.bmWidth * bm.bmHeight; i++)
-        if ((has_alpha = (bits[i] & 0xff000000) != 0)) break;
-
-    if (!has_alpha)
-    {
-        unsigned int width_bytes = (bm.bmWidth + 31) / 32 * 4;
-        /* generate alpha channel from the mask */
-        info->bmiHeader.biBitCount = 1;
-        info->bmiHeader.biSizeImage = width_bytes * bm.bmHeight;
-        if (!(mask_bits = malloc(info->bmiHeader.biSizeImage))) goto failed;
-        if (!NtGdiGetDIBitsInternal(hdc, mask, 0, bm.bmHeight, mask_bits,
-                                    info, DIB_RGB_COLORS, 0, 0))
-            goto failed;
-        ptr = bits;
-        for (i = 0; i < bm.bmHeight; i++)
-        {
-            for (j = 0; j < bm.bmWidth; j++, ptr++)
-            {
-                if (!((mask_bits[i * width_bytes + j / 8] << (j % 8)) & 0x80))
-                    *ptr |= 0xff000000;
-            }
-        }
-        free(mask_bits);
-    }
-
-    if (use_padding)
-    {
-        copy_rectangle_into_center_of_square(bits, bm.bmWidth,
-                                             bm.bmHeight, shm_buffer->map_data);
-        free(bits);
-        bits = shm_buffer->map_data;
-    }
-
-    /* Wayland requires pre-multiplied alpha values */
-    for (ptr = bits, i = 0; i < shm_buffer->width * shm_buffer->height; ptr++, i++)
-    {
-        unsigned char alpha = *ptr >> 24;
-        if (alpha == 0)
-        {
-            *ptr = 0;
-        }
-        else if (alpha != 255)
-        {
-            *ptr = (alpha << 24) |
-                   (((BYTE)(*ptr >> 16) * alpha / 255) << 16) |
-                   (((BYTE)(*ptr >> 8) * alpha / 255) << 8) |
-                   (((BYTE)*ptr * alpha / 255));
-        }
-    }
-
-    return shm_buffer;
-
-failed:
-    if (shm_buffer) wayland_shm_buffer_unref(shm_buffer);
-    if (use_padding) free(bits);
-    free(mask_bits);
-    return NULL;
-}
-
 /**********************************************************************
  *          wayland_surface_coords_from_window
  *
@@ -1041,76 +872,37 @@ void wayland_surface_coords_to_window(struct wayland_surface *surface,
     *window_y = round(surface_y * surface->window.scale);
 }
 
-static struct wayland_client_surface *impl_from_client_surface(struct client_surface *client)
+/**********************************************************************
+ *          wayland_client_surface_release
+ */
+BOOL wayland_client_surface_release(struct wayland_client_surface *client)
 {
-    return CONTAINING_RECORD(client, struct wayland_client_surface, client);
+    if (InterlockedDecrement(&client->ref)) return FALSE;
+
+    if (client->wp_viewport)
+        wp_viewport_destroy(client->wp_viewport);
+    if (client->wl_subsurface)
+        wl_subsurface_destroy(client->wl_subsurface);
+    if (client->wl_surface)
+        wl_surface_destroy(client->wl_surface);
+
+    free(client);
+
+    return TRUE;
 }
-
-static void wayland_client_surface_destroy(struct client_surface *client)
-{
-    struct wayland_client_surface *surface = impl_from_client_surface(client);
-
-    TRACE("%s\n", debugstr_client_surface(client));
-
-    if (surface->wp_viewport)
-        wp_viewport_destroy(surface->wp_viewport);
-    if (surface->wl_subsurface)
-        wl_subsurface_destroy(surface->wl_subsurface);
-    if (surface->wl_surface)
-        wl_surface_destroy(surface->wl_surface);
-}
-
-static void wayland_client_surface_detach(struct client_surface *client)
-{
-    struct wayland_client_surface *surface = impl_from_client_surface(client);
-    struct wayland_win_data *data;
-
-    if ((data = wayland_win_data_get(client->hwnd)))
-    {
-        if (data->client_surface == surface) data->client_surface = NULL;
-        wayland_client_surface_attach(surface, NULL);
-        wayland_win_data_release(data);
-    }
-}
-
-static void wayland_client_surface_update(struct client_surface *client)
-{
-    struct wayland_client_surface *surface = impl_from_client_surface(client);
-    HWND hwnd = client->hwnd, toplevel = NtUserGetAncestor(hwnd, GA_ROOT);
-    struct wayland_win_data *data;
-
-    if (!(data = wayland_win_data_get(hwnd))) return;
-
-    if (toplevel && NtUserIsWindowVisible(hwnd))
-        wayland_client_surface_attach(surface, toplevel);
-    else
-        wayland_client_surface_attach(surface, NULL);
-
-    wayland_win_data_release(data);
-}
-
-static void wayland_client_surface_present(struct client_surface *client, HDC hdc)
-{
-    struct wayland_client_surface *surface = impl_from_client_surface(client);
-    HWND hwnd = client->hwnd, toplevel = NtUserGetAncestor(hwnd, GA_ROOT);
-    ensure_window_surface_contents(toplevel);
-    set_client_surface(hwnd, surface);
-}
-
-static const struct client_surface_funcs wayland_client_surface_funcs =
-{
-    .destroy = wayland_client_surface_destroy,
-    .detach = wayland_client_surface_detach,
-    .update = wayland_client_surface_update,
-    .present = wayland_client_surface_present,
-};
 
 struct wayland_client_surface *wayland_client_surface_create(HWND hwnd)
 {
     struct wayland_client_surface *client;
     struct wl_region *empty_region;
 
-    if (!(client = client_surface_create(sizeof(*client), &wayland_client_surface_funcs, hwnd))) return NULL;
+    if (!(client = calloc(1, sizeof(*client))))
+    {
+        ERR("Failed to allocate space for client surface\n");
+        return NULL;
+    }
+    client->ref = 1;
+    client->hwnd = hwnd;
 
     client->wl_surface =
         wl_compositor_create_surface(process_wayland.wl_compositor);
@@ -1143,38 +935,25 @@ struct wayland_client_surface *wayland_client_surface_create(HWND hwnd)
     return client;
 
 err:
-    client_surface_release(&client->client);
+    wayland_client_surface_release(client);
     return NULL;
 }
 
 void wayland_client_surface_attach(struct wayland_client_surface *client, HWND toplevel)
 {
-    struct wayland_win_data *toplevel_data;
+    struct wayland_win_data *toplevel_data = wayland_win_data_get_nolock(toplevel);
     struct wayland_surface *surface;
-    HWND hwnd = client->client.hwnd;
     RECT client_rect;
 
-    if (!toplevel)
+    if (!toplevel_data || !(surface = toplevel_data->wayland_surface))
     {
-        if (client->wl_subsurface)
-        {
-            wl_subsurface_destroy(client->wl_subsurface);
-            client->wl_subsurface = NULL;
-        }
-
-        client->toplevel = 0;
-        return;
-    }
-
-    if (!(toplevel_data = wayland_win_data_get_nolock(toplevel)) || !(surface = toplevel_data->wayland_surface))
-    {
-        wayland_client_surface_attach(client, NULL);
+        wayland_client_surface_detach(client);
         return;
     }
 
     if (client->toplevel != toplevel)
     {
-        wayland_client_surface_attach(client, NULL);
+        wayland_client_surface_detach(client);
 
         client->wl_subsurface =
             wl_subcompositor_get_subsurface(process_wayland.wl_subcompositor,
@@ -1191,12 +970,23 @@ void wayland_client_surface_attach(struct wayland_client_surface *client, HWND t
         client->toplevel = toplevel;
     }
 
-    NtUserGetClientRect(hwnd, &client_rect, NtUserGetWinMonitorDpi(hwnd, MDT_RAW_DPI));
-    NtUserMapWindowPoints(hwnd, toplevel, (POINT *)&client_rect, 2, NtUserGetWinMonitorDpi(hwnd, MDT_RAW_DPI));
+    NtUserGetClientRect(client->hwnd, &client_rect, NtUserGetWinMonitorDpi(client->hwnd, MDT_RAW_DPI));
+    NtUserMapWindowPoints(client->hwnd, toplevel, (POINT *)&client_rect, 2, NtUserGetWinMonitorDpi(client->hwnd, MDT_RAW_DPI));
 
     wayland_surface_reconfigure_client(surface, client, &client_rect);
     /* Commit to apply subsurface positioning. */
     wl_surface_commit(surface->wl_surface);
+}
+
+void wayland_client_surface_detach(struct wayland_client_surface *client)
+{
+    if (client->wl_subsurface)
+    {
+        wl_subsurface_destroy(client->wl_subsurface);
+        client->wl_subsurface = NULL;
+    }
+
+    client->toplevel = 0;
 }
 
 static void dummy_buffer_release(void *data, struct wl_buffer *buffer)
@@ -1270,7 +1060,7 @@ void wayland_surface_set_title(struct wayland_surface *surface, LPCWSTR text)
     DWORD utf8_count;
     char *utf8 = NULL;
 
-    assert(wayland_surface_is_toplevel(surface));
+    assert(surface->xdg_toplevel);
 
     TRACE("surface=%p hwnd=%p text='%s'\n",
           surface, surface->hwnd, wine_dbgstr_w(text));
@@ -1285,80 +1075,4 @@ void wayland_surface_set_title(struct wayland_surface *surface, LPCWSTR text)
     }
 
     free(utf8);
-}
-
-/**********************************************************************
- *          wayland_surface_set_icon_buffer
- */
-void wayland_surface_set_icon_buffer(struct wayland_surface *surface, UINT type, const ICONINFO *ii)
-{
-    struct wayland_shm_buffer *icon_buf;
-    HDC hDC;
-
-    if (!process_wayland.xdg_toplevel_icon_manager_v1) return;
-
-    assert(ii);
-
-    TRACE("surface=%p type=%x ii=%p\n", surface, type, ii);
-
-    hDC = NtGdiCreateCompatibleDC(0);
-    icon_buf = wayland_shm_buffer_from_color_bitmaps(hDC, ii->hbmColor, ii->hbmMask, TRUE);
-    NtGdiDeleteObjectApp(hDC);
-
-    if (surface->big_icon_buffer && type == ICON_BIG)
-    {
-        wayland_shm_buffer_unref(surface->big_icon_buffer);
-        surface->big_icon_buffer = NULL;
-    }
-    else if (surface->small_icon_buffer && type != ICON_BIG)
-    {
-        wayland_shm_buffer_unref(surface->small_icon_buffer);
-        surface->small_icon_buffer = NULL;
-    }
-
-    if (icon_buf)
-    {
-        if (type == ICON_BIG) surface->big_icon_buffer = icon_buf;
-        else surface->small_icon_buffer = icon_buf;
-    }
-}
-
-/**********************************************************************
- *          wayland_surface_assign_icon
- */
-void wayland_surface_assign_icon(struct wayland_surface *surface)
-{
-    if (!process_wayland.xdg_toplevel_icon_manager_v1) return;
-
-    assert(wayland_surface_is_toplevel(surface));
-
-    TRACE("surface=%p\n", surface);
-
-    if (surface->xdg_toplevel_icon)
-    {
-        xdg_toplevel_icon_manager_v1_set_icon(process_wayland.xdg_toplevel_icon_manager_v1,
-                                              surface->xdg_toplevel, NULL);
-        xdg_toplevel_icon_v1_destroy(surface->xdg_toplevel_icon);
-        surface->xdg_toplevel_icon = NULL;
-    }
-
-    if (surface->big_icon_buffer)
-    {
-        surface->xdg_toplevel_icon =
-            xdg_toplevel_icon_manager_v1_create_icon(process_wayland.xdg_toplevel_icon_manager_v1);
-
-        /* FIXME: what to do with scale ? */
-        xdg_toplevel_icon_v1_add_buffer(surface->xdg_toplevel_icon,
-                                        surface->big_icon_buffer->wl_buffer, 1);
-        if (surface->small_icon_buffer)
-        {
-            xdg_toplevel_icon_v1_add_buffer(surface->xdg_toplevel_icon,
-                                            surface->small_icon_buffer->wl_buffer, 1);
-        }
-
-        xdg_toplevel_icon_v1_set_name(surface->xdg_toplevel_icon, "");
-
-        xdg_toplevel_icon_manager_v1_set_icon(process_wayland.xdg_toplevel_icon_manager_v1,
-                                              surface->xdg_toplevel, surface->xdg_toplevel_icon);
-    }
 }

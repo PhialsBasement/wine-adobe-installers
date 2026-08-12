@@ -162,12 +162,22 @@ static BOOL show_scroll_bar( HWND hwnd, int bar, BOOL show_horz, BOOL show_vert 
         return FALSE;  /* Nothing to do! */
     }
 
-    old_style = set_window_style_bits( hwnd, set_bits, clear_bits );
+    old_style = set_window_style( hwnd, set_bits, clear_bits );
     if ((old_style & clear_bits) != 0 || (old_style & set_bits) != set_bits)
     {
         /* frame has been changed, let the window redraw itself */
         NtUserSetWindowPos( hwnd, 0, 0, 0, 0, 0,
                             SWP_NOSIZE | SWP_NOMOVE | SWP_NOACTIVATE | SWP_NOZORDER | SWP_FRAMECHANGED );
+
+        if ((set_bits & WS_HSCROLL) && !(old_style & WS_HSCROLL))
+            NtUserNotifyWinEvent( EVENT_OBJECT_SHOW, hwnd, OBJID_HSCROLL, 0 );
+        if ((set_bits & WS_VSCROLL) && !(old_style & WS_VSCROLL))
+            NtUserNotifyWinEvent( EVENT_OBJECT_SHOW, hwnd, OBJID_VSCROLL, 0 );
+        if ((clear_bits & WS_HSCROLL) && (old_style & WS_HSCROLL))
+            NtUserNotifyWinEvent( EVENT_OBJECT_HIDE, hwnd, OBJID_HSCROLL, 0 );
+        if ((clear_bits & WS_VSCROLL) && (old_style & WS_VSCROLL))
+            NtUserNotifyWinEvent( EVENT_OBJECT_HIDE, hwnd, OBJID_VSCROLL, 0 );
+
         return TRUE;
     }
     return FALSE; /* no frame changes */
@@ -199,6 +209,7 @@ static BOOL get_scroll_bar_rect( HWND hwnd, int bar, RECT *rect, int *arrow_size
         get_client_rect_rel( hwnd, COORDS_WINDOW, rect, get_thread_dpi() );
         rect->top = rect->bottom;
         rect->bottom += get_system_metrics( SM_CYHSCROLL );
+        if (win->dwStyle & WS_VSCROLL) rect->right++;
         vertical = FALSE;
         break;
 
@@ -214,6 +225,7 @@ static BOOL get_scroll_bar_rect( HWND hwnd, int bar, RECT *rect, int *arrow_size
             rect->left = rect->right;
             rect->right += get_system_metrics( SM_CXVSCROLL );
         }
+        if (win->dwStyle & WS_HSCROLL) rect->bottom++;
         vertical = TRUE;
         break;
 
@@ -684,7 +696,7 @@ void handle_scroll_event( HWND hwnd, int bar, UINT msg, POINT pt )
     }
 
     TRACE( "Event: hwnd=%p bar=%d msg=%s pt=%d,%d hit=%d\n",
-           hwnd, bar, debugstr_msg_name( msg, hwnd ), pt.x, pt.y, hittest );
+           hwnd, bar, debugstr_msg_name( msg, hwnd ), (int)pt.x, (int)pt.y, hittest );
 
     switch (g_tracking_info.hit_test)
     {
@@ -871,7 +883,13 @@ BOOL get_scroll_info( HWND hwnd, int bar, SCROLLINFO *info )
     struct scroll_info *scroll;
 
     /* handle invalid data structure */
-    if (!validate_scroll_info( info ) || !(scroll = get_scroll_info_ptr( hwnd, bar, FALSE )))
+    if (!validate_scroll_info( info ))
+        return FALSE;
+
+    if (bar != SB_CTL && !is_current_thread_window( hwnd ))
+        return send_message( hwnd, WM_WINE_GETSCROLLINFO, (WPARAM)bar, (LPARAM)info );
+
+    if (!(scroll = get_scroll_info_ptr( hwnd, bar, FALSE )))
         return FALSE;
 
     /* fill in the desired scroll info structure */
@@ -997,7 +1015,7 @@ static int set_scroll_info( HWND hwnd, int bar, const SCROLLINFO *info, BOOL red
             (new_flags == ESB_ENABLE_BOTH || new_flags == ESB_DISABLE_BOTH))
         {
             release_scroll_info_ptr( scroll );
-            NtUserEnableWindow( hwnd, new_flags == ESB_ENABLE_BOTH );
+            enable_window( hwnd, new_flags == ESB_ENABLE_BOTH );
             if (!(scroll = get_scroll_info_ptr( hwnd, bar, FALSE ))) return 0;
         }
 
@@ -1045,7 +1063,7 @@ done:
     return ret; /* Return current position */
 }
 
-static BOOL get_scroll_bar_info( HWND hwnd, LONG id, SCROLLBARINFO *info )
+BOOL get_scroll_bar_info( HWND hwnd, LONG id, SCROLLBARINFO *info )
 {
     struct scroll_info *scroll;
     int bar, dummy;
@@ -1063,6 +1081,9 @@ static BOOL get_scroll_bar_info( HWND hwnd, LONG id, SCROLLBARINFO *info )
 
     /* handle invalid data structure */
     if (info->cbSize != sizeof(*info)) return FALSE;
+
+    if (bar != SB_CTL && !is_current_thread_window( hwnd ))
+        return send_message( hwnd, WM_WINE_GETSCROLLBARINFO, (WPARAM)id, (LPARAM)info );
 
     get_scroll_bar_rect( hwnd, bar, &info->rcScrollBar, &dummy,
                          &info->dxyLineButton, &info->xyThumbTop );
@@ -1307,11 +1328,6 @@ LRESULT scroll_bar_window_proc( HWND hwnd, UINT msg, WPARAM wparam, LPARAM lpara
         }
         return 0;
 
-    case WM_GETOBJECT:
-        if ((LONG)lparam == OBJID_QUERYCLASSNAMEIDX)
-            return 0x1000a;
-        return default_window_proc( hwnd, msg, wparam, lparam, ansi );
-
     case WM_SETFOCUS:
         {
             /* Create a caret when a ScrollBar get focus */
@@ -1322,12 +1338,12 @@ LRESULT scroll_bar_window_proc( HWND hwnd, UINT msg, WPARAM wparam, LPARAM lpara
             if (!vertical)
             {
                 NtUserCreateCaret( hwnd, (HBITMAP)1, thumb_size - 2, rect.bottom - rect.top - 2 );
-                NtUserSetCaretPos( thumb_pos + 1, rect.top + 1 );
+                set_caret_pos( thumb_pos + 1, rect.top + 1 );
             }
             else
             {
                 NtUserCreateCaret( hwnd, (HBITMAP)1, rect.right - rect.left - 2, thumb_size - 2 );
-                NtUserSetCaretPos( rect.top + 1, thumb_pos + 1 );
+                set_caret_pos( rect.top + 1, thumb_pos + 1 );
             }
             NtUserShowCaret( hwnd );
         }
@@ -1463,7 +1479,7 @@ BOOL WINAPI NtUserShowScrollBar( HWND hwnd, INT bar, BOOL show )
  */
 BOOL WINAPI NtUserGetScrollBarInfo( HWND hwnd, LONG id, SCROLLBARINFO *info )
 {
-    TRACE( "hwnd=%p id=%d info=%p\n", hwnd, id, info );
+    TRACE( "hwnd=%p id=%d info=%p\n", hwnd, (int)id, info );
 
     /* Refer OBJID_CLIENT requests to the window */
     if (id == OBJID_CLIENT)

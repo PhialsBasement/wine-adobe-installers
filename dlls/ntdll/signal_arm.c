@@ -26,6 +26,7 @@
 #include <setjmp.h>
 
 #include "ntstatus.h"
+#define WIN32_NO_STATUS
 #include "windef.h"
 #include "winternl.h"
 #include "wine/exception.h"
@@ -53,7 +54,7 @@ typedef union _DISPATCHER_CONTEXT_NONVOLREG_ARM
  *         syscalls
  */
 #define SYSCALL_ENTRY(id,name,args) __ASM_SYSCALL_FUNC( id, name, args )
-ALL_SYSCALLS
+ALL_SYSCALLS32
 DEFINE_SYSCALL_HELPER32()
 #undef SYSCALL_ENTRY
 

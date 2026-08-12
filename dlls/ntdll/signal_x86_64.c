@@ -29,6 +29,7 @@
 #include <setjmp.h>
 
 #include "ntstatus.h"
+#define WIN32_NO_STATUS
 #include "windef.h"
 #include "winternl.h"
 #include "ddk/wdm.h"
@@ -43,7 +44,7 @@
  *         syscalls
  */
 #define SYSCALL_ENTRY(id,name,args) __ASM_SYSCALL_FUNC( id, name )
-ALL_SYSCALLS
+ALL_SYSCALLS64
 #undef SYSCALL_ENTRY
 
 
@@ -73,6 +74,14 @@ __ASM_GLOBAL_FUNC( invoke_arm64ec_syscall,
                    "pushq %r10\n\t"         /* and return to syscall thunk */
                    "ret" )
 
+/**************************************************************************
+ *		arm64ec_suspend_point
+ *
+ * x64 stub to support cooperative suspend when leaving a syscall callack.
+ */
+__ASM_GLOBAL_FUNC( arm64ec_suspend_point,
+                   "ret" )
+
 /*******************************************************************
  *		KiUserExceptionDispatcher (NTDLL.@)
  */
@@ -82,7 +91,7 @@ __ASM_GLOBAL_FUNC( "EXP+#KiUserExceptionDispatcher",
                    "test %rax,%rax\n\t"
                    "jz 1f\n\t"
                    "subq $0x28,%rsp\n\t"
-                   "leaq 0x30+0x3b0+0x4d0(%rsp),%rcx\n\t" /* rec */
+                   "leaq 0x30+0x3b0+0xcd0(%rsp),%rcx\n\t" /* rec */
                    "leaq 0x30(%rsp),%rdx\n\t"             /* context */
                    "call *%rax\n"
                    "addq $0x28,%rsp\n"
@@ -93,14 +102,22 @@ __ASM_GLOBAL_FUNC( "EXP+#KiUserExceptionDispatcher",
 WINE_DEFAULT_DEBUG_CHANNEL(seh);
 WINE_DECLARE_DEBUG_CHANNEL(relay);
 
-
 /***********************************************************************
  *           virtual_unwind
  */
-static NTSTATUS virtual_unwind( ULONG type, DISPATCHER_CONTEXT *dispatch, CONTEXT *context )
+static NTSTATUS virtual_unwind( ULONG type, DISPATCHER_CONTEXT *dispatch, CONTEXT *context, BOOL dump_backtrace )
 {
-    LDR_DATA_TABLE_ENTRY *module;
+    LDR_DATA_TABLE_ENTRY *module = NULL;
     NTSTATUS status;
+
+    if (dump_backtrace)
+    {
+        if (!LdrFindEntryForAddress( (void *)context->Rip, &module ))
+            WINE_BACKTRACE_LOG( "%p: %s + %p.\n", (void *)context->Rip, debugstr_w(module->BaseDllName.Buffer),
+                                (void *)((char *)context->Rip - (char *)module->DllBase) );
+        else
+            WINE_BACKTRACE_LOG( "%p: unknown module.\n", (void *)context->Rip );
+    }
 
     dispatch->ImageBase = 0;
     dispatch->ScopeIndex = 0;
@@ -109,8 +126,8 @@ static NTSTATUS virtual_unwind( ULONG type, DISPATCHER_CONTEXT *dispatch, CONTEX
                                                       dispatch->HistoryTable );
 
     /* look for host system exception information */
-    if (!dispatch->FunctionEntry &&
-        (LdrFindEntryForAddress( (void *)context->Rip, &module ) || (module->Flags & LDR_WINE_INTERNAL)))
+    if (!dispatch->FunctionEntry && ((!module && LdrFindEntryForAddress( (void *)context->Rip, &module ))
+        || module->Flags & LDR_WINE_INTERNAL))
     {
         struct unwind_builtin_dll_params params = { type, dispatch, context };
 
@@ -168,27 +185,20 @@ __ASM_GLOBAL_FUNC( RtlCaptureContext,
                    "ret" );
 
 
-struct unwind_exception_frame
+struct call_seh_handler_frame
 {
-    EXCEPTION_REGISTRATION_RECORD frame;
-    char dummy[0x10]; /* Layout 'dispatch' accessed from unwind_exception_handler() so it is above register
-                       * save space when .seh handler is used. */
-    DISPATCHER_CONTEXT *dispatch;
+    ULONG64 unused[4];
+    ULONG64 establisher_frame;
 };
-C_ASSERT( sizeof(struct unwind_exception_frame) == 0x28 );
-C_ASSERT( offsetof(struct unwind_exception_frame, dispatch) == 0x20 );
-
 
 /*******************************************************************
  *         nested_exception_handler
  */
-EXCEPTION_DISPOSITION WINAPI nested_exception_handler( EXCEPTION_RECORD *rec, void *frame,
+EXCEPTION_DISPOSITION WINAPI nested_exception_handler( EXCEPTION_RECORD *rec, struct call_seh_handler_frame *frame,
                                                        CONTEXT *context, DISPATCHER_CONTEXT *dispatch )
 {
-    struct unwind_exception_frame *unwind_frame = (struct unwind_exception_frame *)frame;
-
     if (rec->ExceptionFlags & (EXCEPTION_UNWINDING | EXCEPTION_EXIT_UNWIND)) return ExceptionContinueSearch;
-    dispatch->EstablisherFrame = unwind_frame->dispatch->EstablisherFrame;
+    dispatch->EstablisherFrame = frame->establisher_frame;
     return ExceptionNestedException;
 }
 
@@ -200,11 +210,12 @@ EXCEPTION_DISPOSITION WINAPI nested_exception_handler( EXCEPTION_RECORD *rec, vo
 DWORD WINAPI call_seh_handler( EXCEPTION_RECORD *rec, ULONG_PTR frame,
                                CONTEXT *context, void *dispatch, PEXCEPTION_ROUTINE handler );
 __ASM_GLOBAL_FUNC( call_seh_handler,
-                   "subq $0x28, %rsp\n\t"
-                   ".seh_stackalloc 0x28\n\t"
+                   "pushq %rdx\n\t"             /* call_seh_handler_frame.establisher_frame <- frame */
+                   ".seh_pushreg %rdx\n\t"
+                   "subq $0x20, %rsp\n\t"
+                   ".seh_stackalloc 0x20\n\t"
                    ".seh_endprologue\n\t"
                    ".seh_handler nested_exception_handler, @except\n\t"
-                   "movq %r9,0x20(%rsp)\n\t"    /* unwind_exception_frame->dispatch */
                    "callq *0x50(%rsp)\n\t"      /* handler */
                    "nop\n\t"                    /* avoid epilogue so handler is called */
                    "addq $0x28, %rsp\n\t"
@@ -213,11 +224,16 @@ __ASM_GLOBAL_FUNC( call_seh_handler,
 static DWORD call_seh_handler( EXCEPTION_RECORD *rec, ULONG_PTR frame,
                                CONTEXT *context, void *dispatch, PEXCEPTION_ROUTINE handler )
 {
-    struct unwind_exception_frame wrapper_frame;
+    union
+    {
+        struct call_seh_handler_frame seh_handler_frame;
+        EXCEPTION_REGISTRATION_RECORD frame;
+    }
+    wrapper_frame;
     DWORD res;
 
     wrapper_frame.frame.Handler = (PEXCEPTION_HANDLER)nested_exception_handler;
-    wrapper_frame.dispatch = dispatch;
+    wrapper_frame.seh_handler_frame.establisher_frame = frame;
     __wine_push_frame( &wrapper_frame.frame );
     res = handler( rec, (void *)frame, context, dispatch );
     __wine_pop_frame( &wrapper_frame.frame );
@@ -250,7 +266,7 @@ NTSTATUS call_seh_handlers( EXCEPTION_RECORD *rec, CONTEXT *orig_context )
     nested_frame = 0;
     for (;;)
     {
-        status = virtual_unwind( UNW_FLAG_EHANDLER, &dispatch, &context );
+        status = virtual_unwind( UNW_FLAG_EHANDLER, &dispatch, &context, need_backtrace( rec->ExceptionCode ) );
         if (status != STATUS_SUCCESS) return status;
 
     unwind_done:
@@ -380,7 +396,7 @@ __ASM_GLOBAL_FUNC( KiUserExceptionDispatcher,
  */
 __ASM_GLOBAL_FUNC( KiUserApcDispatcher,
                    __ASM_SEH(".seh_pushframe\n\t")
-                   __ASM_SEH(".seh_stackalloc 0x530\n\t")  /* machine_frame offset */
+                   __ASM_SEH(".seh_stackalloc 0x4d0\n\t")  /* sizeof(CONTEXT) */
                    __ASM_SEH(".seh_savereg %rbx,0x90\n\t")
                    __ASM_SEH(".seh_savereg %rbp,0xa0\n\t")
                    __ASM_SEH(".seh_savereg %rsi,0xa8\n\t")
@@ -400,8 +416,8 @@ __ASM_GLOBAL_FUNC( KiUserApcDispatcher,
                    __ASM_CFI(".cfi_offset %r13,0xe0\n\t")
                    __ASM_CFI(".cfi_offset %r14,0xe8\n\t")
                    __ASM_CFI(".cfi_offset %r15,0xf0\n\t")
-                   __ASM_CFI(".cfi_offset %rip,0x530\n\t")
-                   __ASM_CFI(".cfi_offset %rsp,0x548\n\t")
+                   __ASM_CFI(".cfi_offset %rip,0x4d0\n\t")
+                   __ASM_CFI(".cfi_offset %rsp,0x4e8\n\t")
                    "movq 0x00(%rsp),%rcx\n\t"  /* context->P1Home = arg1 */
                    "movq 0x08(%rsp),%rdx\n\t"  /* context->P2Home = arg2 */
                    "movq 0x10(%rsp),%r8\n\t"   /* context->P3Home = arg3 */
@@ -409,8 +425,8 @@ __ASM_GLOBAL_FUNC( KiUserApcDispatcher,
                    "movq %rsp,%r9\n\t"         /* context */
                    "callq *%rax\n\t"
                    "movq %rsp,%rcx\n\t"        /* context */
-                   "leaq 0x4f0(%rsp),%rdx\n\t" /* continue_arg */
-                   "call " __ASM_NAME("NtContinueEx") "\n\t"
+                   "movl $1,%edx\n\t"          /* alertable */
+                   "call " __ASM_NAME("NtContinue") "\n\t"
                    "int3" )
 
 
@@ -429,7 +445,8 @@ __ASM_GLOBAL_FUNC( KiUserCallbackDispatcher,
                    "movl 0x28(%rsp),%edx\n\t"  /* len */
                    "movl 0x2c(%rsp),%r8d\n\t"  /* id */
 #ifdef __WINE_PE_BUILD
-                   "movq %gs:0x60,%rax\n\t"     /* peb */
+                   "movq %gs:0x30,%rax\n\t"     /* NtCurrentTeb() */
+                   "movq 0x60(%rax),%rax\n\t"   /* peb */
                    "movq 0x58(%rax),%rax\n\t"   /* peb->KernelCallbackTable */
                    "call *(%rax,%r8,8)\n\t"     /* KernelCallbackTable[id] */
                    ".seh_handler " __ASM_NAME("user_callback_handler") ", @except\n\t"
@@ -454,6 +471,17 @@ BOOLEAN WINAPI RtlIsEcCode( ULONG_PTR ptr )
 {
     return FALSE;
 }
+
+
+struct unwind_exception_frame
+{
+    EXCEPTION_REGISTRATION_RECORD frame;
+    char dummy[0x10]; /* Layout 'dispatch' accessed from unwind_exception_handler() so it is above register
+                       * save space when .seh handler is used. */
+    DISPATCHER_CONTEXT *dispatch;
+};
+C_ASSERT( sizeof(struct unwind_exception_frame) == 0x28 );
+C_ASSERT( offsetof(struct unwind_exception_frame, dispatch) == 0x20 );
 
 
 /**********************************************************************
@@ -726,7 +754,7 @@ void WINAPI RtlUnwindEx( PVOID end_frame, PVOID target_ip, EXCEPTION_RECORD *rec
 
     for (;;)
     {
-        status = virtual_unwind( UNW_FLAG_UHANDLER, &dispatch, &new_context );
+        status = virtual_unwind( UNW_FLAG_UHANDLER, &dispatch, &new_context, FALSE );
         if (status != STATUS_SUCCESS) raise_status( status, rec );
 
     unwind_done:
@@ -837,8 +865,15 @@ __ASM_GLOBAL_FUNC( RtlRaiseException,
                    "movq 0x4f8(%rsp),%rax\n\t"  /* return address */
                    "movq %rax,0xf8(%rdx)\n\t"   /* context->Rip */
                    "movq %rax,0x10(%rcx)\n\t"   /* rec->ExceptionAddress */
+                   "xor %rax,%rax\n\t"
+                   "movq %rax,0x70(%rdx)\n\t"   /* Context->Dr7 */
+                   "movq %rax,0x48(%rdx)\n\t"   /* Context->Dr0 */
+                   "movq %rax,0x50(%rdx)\n\t"   /* Context->Dr1 */
+                   "movq %rax,0x58(%rdx)\n\t"   /* Context->Dr2 */
+                   "movq %rax,0x60(%rdx)\n\t"   /* Context->Dr3 */
                    "movl $1,%r8d\n\t"
-                   "movq %gs:0x60,%rax\n\t"     /* Peb */
+                   "movq %gs:(0x30),%rax\n\t"   /* Teb */
+                   "movq 0x60(%rax),%rax\n\t"   /* Peb */
                    "cmpb $0,0x02(%rax)\n\t"     /* BeingDebugged */
                    "jne 1f\n\t"
                    "call " __ASM_NAME("dispatch_exception") "\n"
@@ -865,6 +900,13 @@ BOOLEAN WINAPI RtlIsProcessorFeaturePresent( UINT feature )
     return feature < PROCESSOR_FEATURE_MAX && user_shared_data->ProcessorFeatures[feature];
 }
 
+/***********************************************************************
+ *              RtlWow64SuspendThread (NTDLL.@)
+ */
+NTSTATUS WINAPI RtlWow64SuspendThread( HANDLE thread, ULONG *count )
+{
+    return NtSuspendThread( thread, count );
+}
 
 /*************************************************************************
  *		RtlWalkFrameChain (NTDLL.@)
@@ -1020,7 +1062,7 @@ __ASM_GLOBAL_FUNC( signal_start_thread,
                    "movq %rcx,%rbx\n\t"        /* context */
                    /* clear the thread stack */
                    "andq $~0xfff,%rcx\n\t"     /* round down to page size */
-                   "leaq -0xf000(%rcx),%rdi\n\t"
+                   "leaq -0xf0000(%rcx),%rdi\n\t"
                    "movq %rdi,%rsp\n\t"
                    "subq %rdi,%rcx\n\t"
                    "xorl %eax,%eax\n\t"
@@ -1082,7 +1124,8 @@ __ASM_GLOBAL_FUNC( DbgUiRemoteBreakin,
                    ".seh_stackalloc 0x28\n\t"
                    ".seh_endprologue\n\t"
                    ".seh_handler DbgUiRemoteBreakin_handler, @except\n\t"
-                   "mov %gs:0x60,%rax\n\t"
+                   "mov %gs:0x30,%rax\n\t"
+                   "mov 0x60(%rax),%rax\n\t"
                    "cmpb $0,2(%rax)\n\t"
                    "je 1f\n\t"
                    "call " __ASM_NAME("DbgBreakPoint") "\n"

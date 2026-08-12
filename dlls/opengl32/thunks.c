@@ -2,9 +2,9 @@
 
 #include <stdarg.h>
 #include <stddef.h>
-#include <stdlib.h>
 
 #include "ntstatus.h"
+#define WIN32_NO_STATUS
 #include "windef.h"
 #include "winbase.h"
 #include "wingdi.h"
@@ -18,12 +18,37 @@ WINE_DEFAULT_DEBUG_CHANNEL(opengl);
 
 BOOL WINAPI wglCopyContext( HGLRC hglrcSrc, HGLRC hglrcDst, UINT mask )
 {
-    struct wglCopyContext_params args = { .teb = NtCurrentTeb(), .mask = mask };
+    struct wglCopyContext_params args = { .teb = NtCurrentTeb(), .hglrcSrc = hglrcSrc, .hglrcDst = hglrcDst, .mask = mask };
     NTSTATUS status;
     TRACE( "hglrcSrc %p, hglrcDst %p, mask %u\n", hglrcSrc, hglrcDst, mask );
-    if (!get_context_from_handle( hglrcSrc, &args.hglrcSrc )) return 0;
-    if (!get_context_from_handle( hglrcDst, &args.hglrcDst )) return 0;
     if ((status = UNIX_CALL( wglCopyContext, &args ))) WARN( "wglCopyContext returned %#lx\n", status );
+    return args.ret;
+}
+
+HGLRC WINAPI wglCreateContext( HDC hDc )
+{
+    struct wglCreateContext_params args = { .teb = NtCurrentTeb(), .hDc = hDc };
+    NTSTATUS status;
+    TRACE( "hDc %p\n", hDc );
+    if ((status = UNIX_CALL( wglCreateContext, &args ))) WARN( "wglCreateContext returned %#lx\n", status );
+    return args.ret;
+}
+
+BOOL WINAPI wglDeleteContext( HGLRC oldContext )
+{
+    struct wglDeleteContext_params args = { .teb = NtCurrentTeb(), .oldContext = oldContext };
+    NTSTATUS status;
+    TRACE( "oldContext %p\n", oldContext );
+    if ((status = UNIX_CALL( wglDeleteContext, &args ))) WARN( "wglDeleteContext returned %#lx\n", status );
+    return args.ret;
+}
+
+BOOL WINAPI wglMakeCurrent( HDC hDc, HGLRC newContext )
+{
+    struct wglMakeCurrent_params args = { .teb = NtCurrentTeb(), .hDc = hDc, .newContext = newContext };
+    NTSTATUS status;
+    TRACE( "hDc %p, newContext %p\n", hDc, newContext );
+    if ((status = UNIX_CALL( wglMakeCurrent, &args ))) WARN( "wglMakeCurrent returned %#lx\n", status );
     return args.ret;
 }
 
@@ -38,11 +63,9 @@ BOOL WINAPI wglSetPixelFormat( HDC hdc, int ipfd, const PIXELFORMATDESCRIPTOR *p
 
 BOOL WINAPI wglShareLists( HGLRC hrcSrvShare, HGLRC hrcSrvSource )
 {
-    struct wglShareLists_params args = { .teb = NtCurrentTeb() };
+    struct wglShareLists_params args = { .teb = NtCurrentTeb(), .hrcSrvShare = hrcSrvShare, .hrcSrvSource = hrcSrvSource };
     NTSTATUS status;
     TRACE( "hrcSrvShare %p, hrcSrvSource %p\n", hrcSrvShare, hrcSrvSource );
-    if (!get_context_from_handle( hrcSrvShare, &args.hrcSrvShare )) return 0;
-    if (!get_context_from_handle( hrcSrvSource, &args.hrcSrvSource )) return 0;
     if ((status = UNIX_CALL( wglShareLists, &args ))) WARN( "wglShareLists returned %#lx\n", status );
     return args.ret;
 }
@@ -845,10 +868,8 @@ void WINAPI glGetBooleanv( GLenum pname, GLboolean *data )
 {
     struct glGetBooleanv_params args = { .teb = NtCurrentTeb(), .pname = pname, .data = data };
     NTSTATUS status;
-    int integer;
     TRACE( "pname %d, data %p\n", pname, data );
-    if (get_integer( pname, &integer )) *data = integer;
-    else if ((status = UNIX_CALL( glGetBooleanv, &args ))) WARN( "glGetBooleanv returned %#lx\n", status );
+    if ((status = UNIX_CALL( glGetBooleanv, &args ))) WARN( "glGetBooleanv returned %#lx\n", status );
 }
 
 void WINAPI glGetClipPlane( GLenum plane, GLdouble *equation )
@@ -863,10 +884,8 @@ void WINAPI glGetDoublev( GLenum pname, GLdouble *data )
 {
     struct glGetDoublev_params args = { .teb = NtCurrentTeb(), .pname = pname, .data = data };
     NTSTATUS status;
-    int integer;
     TRACE( "pname %d, data %p\n", pname, data );
-    if (get_integer( pname, &integer )) *data = integer;
-    else if ((status = UNIX_CALL( glGetDoublev, &args ))) WARN( "glGetDoublev returned %#lx\n", status );
+    if ((status = UNIX_CALL( glGetDoublev, &args ))) WARN( "glGetDoublev returned %#lx\n", status );
 }
 
 GLenum WINAPI glGetError(void)
@@ -882,20 +901,16 @@ void WINAPI glGetFloatv( GLenum pname, GLfloat *data )
 {
     struct glGetFloatv_params args = { .teb = NtCurrentTeb(), .pname = pname, .data = data };
     NTSTATUS status;
-    int integer;
     TRACE( "pname %d, data %p\n", pname, data );
-    if (get_integer( pname, &integer )) *data = integer;
-    else if ((status = UNIX_CALL( glGetFloatv, &args ))) WARN( "glGetFloatv returned %#lx\n", status );
+    if ((status = UNIX_CALL( glGetFloatv, &args ))) WARN( "glGetFloatv returned %#lx\n", status );
 }
 
 void WINAPI glGetIntegerv( GLenum pname, GLint *data )
 {
     struct glGetIntegerv_params args = { .teb = NtCurrentTeb(), .pname = pname, .data = data };
     NTSTATUS status;
-    int integer;
     TRACE( "pname %d, data %p\n", pname, data );
-    if (get_integer( pname, &integer )) *data = integer;
-    else if ((status = UNIX_CALL( glGetIntegerv, &args ))) WARN( "glGetIntegerv returned %#lx\n", status );
+    if ((status = UNIX_CALL( glGetIntegerv, &args ))) WARN( "glGetIntegerv returned %#lx\n", status );
 }
 
 void WINAPI glGetLightfv( GLenum light, GLenum pname, GLfloat *params )
@@ -2831,14 +2846,6 @@ static void WINAPI glAlphaFragmentOp3ATI( GLenum op, GLuint dst, GLuint dstMod, 
     if ((status = UNIX_CALL( glAlphaFragmentOp3ATI, &args ))) WARN( "glAlphaFragmentOp3ATI returned %#lx\n", status );
 }
 
-static void WINAPI glAlphaFuncx( GLenum func, GLfixed ref )
-{
-    struct glAlphaFuncx_params args = { .teb = NtCurrentTeb(), .func = func, .ref = ref };
-    NTSTATUS status;
-    TRACE( "func %d, ref %d\n", func, ref );
-    if ((status = UNIX_CALL( glAlphaFuncx, &args ))) WARN( "glAlphaFuncx returned %#lx\n", status );
-}
-
 static void WINAPI glAlphaFuncxOES( GLenum func, GLfixed ref )
 {
     struct glAlphaFuncxOES_params args = { .teb = NtCurrentTeb(), .func = func, .ref = ref };
@@ -3560,14 +3567,6 @@ static void WINAPI glBitmapxOES( GLsizei width, GLsizei height, GLfixed xorig, G
     if ((status = UNIX_CALL( glBitmapxOES, &args ))) WARN( "glBitmapxOES returned %#lx\n", status );
 }
 
-static void WINAPI glBlendBarrier(void)
-{
-    struct glBlendBarrier_params args = { .teb = NtCurrentTeb() };
-    NTSTATUS status;
-    TRACE( "\n" );
-    if ((status = UNIX_CALL( glBlendBarrier, &args ))) WARN( "glBlendBarrier returned %#lx\n", status );
-}
-
 static void WINAPI glBlendBarrierKHR(void)
 {
     struct glBlendBarrierKHR_params args = { .teb = NtCurrentTeb() };
@@ -3784,22 +3783,6 @@ static void WINAPI glBlitFramebufferEXT( GLint srcX0, GLint srcY0, GLint srcX1, 
     if ((status = UNIX_CALL( glBlitFramebufferEXT, &args ))) WARN( "glBlitFramebufferEXT returned %#lx\n", status );
 }
 
-static void WINAPI glBlitFramebufferLayerEXT( GLint srcX0, GLint srcY0, GLint srcX1, GLint srcY1, GLint srcLayer, GLint dstX0, GLint dstY0, GLint dstX1, GLint dstY1, GLint dstLayer, GLbitfield mask, GLenum filter )
-{
-    struct glBlitFramebufferLayerEXT_params args = { .teb = NtCurrentTeb(), .srcX0 = srcX0, .srcY0 = srcY0, .srcX1 = srcX1, .srcY1 = srcY1, .srcLayer = srcLayer, .dstX0 = dstX0, .dstY0 = dstY0, .dstX1 = dstX1, .dstY1 = dstY1, .dstLayer = dstLayer, .mask = mask, .filter = filter };
-    NTSTATUS status;
-    TRACE( "srcX0 %d, srcY0 %d, srcX1 %d, srcY1 %d, srcLayer %d, dstX0 %d, dstY0 %d, dstX1 %d, dstY1 %d, dstLayer %d, mask %d, filter %d\n", srcX0, srcY0, srcX1, srcY1, srcLayer, dstX0, dstY0, dstX1, dstY1, dstLayer, mask, filter );
-    if ((status = UNIX_CALL( glBlitFramebufferLayerEXT, &args ))) WARN( "glBlitFramebufferLayerEXT returned %#lx\n", status );
-}
-
-static void WINAPI glBlitFramebufferLayersEXT( GLint srcX0, GLint srcY0, GLint srcX1, GLint srcY1, GLint dstX0, GLint dstY0, GLint dstX1, GLint dstY1, GLbitfield mask, GLenum filter )
-{
-    struct glBlitFramebufferLayersEXT_params args = { .teb = NtCurrentTeb(), .srcX0 = srcX0, .srcY0 = srcY0, .srcX1 = srcX1, .srcY1 = srcY1, .dstX0 = dstX0, .dstY0 = dstY0, .dstX1 = dstX1, .dstY1 = dstY1, .mask = mask, .filter = filter };
-    NTSTATUS status;
-    TRACE( "srcX0 %d, srcY0 %d, srcX1 %d, srcY1 %d, dstX0 %d, dstY0 %d, dstX1 %d, dstY1 %d, mask %d, filter %d\n", srcX0, srcY0, srcX1, srcY1, dstX0, dstY0, dstX1, dstY1, mask, filter );
-    if ((status = UNIX_CALL( glBlitFramebufferLayersEXT, &args ))) WARN( "glBlitFramebufferLayersEXT returned %#lx\n", status );
-}
-
 static void WINAPI glBlitNamedFramebuffer( GLuint readFramebuffer, GLuint drawFramebuffer, GLint srcX0, GLint srcY0, GLint srcX1, GLint srcY1, GLint dstX0, GLint dstY0, GLint dstX1, GLint dstY1, GLbitfield mask, GLenum filter )
 {
     struct glBlitNamedFramebuffer_params args = { .teb = NtCurrentTeb(), .readFramebuffer = readFramebuffer, .drawFramebuffer = drawFramebuffer, .srcX0 = srcX0, .srcY0 = srcY0, .srcX1 = srcX1, .srcY1 = srcY1, .dstX0 = dstX0, .dstY0 = dstY0, .dstX1 = dstX1, .dstY1 = dstY1, .mask = mask, .filter = filter };
@@ -3846,14 +3829,6 @@ static void WINAPI glBufferPageCommitmentARB( GLenum target, GLintptr offset, GL
     NTSTATUS status;
     TRACE( "target %d, offset %Id, size %Id, commit %d\n", target, offset, size, commit );
     if ((status = UNIX_CALL( glBufferPageCommitmentARB, &args ))) WARN( "glBufferPageCommitmentARB returned %#lx\n", status );
-}
-
-static void WINAPI glBufferPageCommitmentMemNV( GLenum target, GLintptr offset, GLsizeiptr size, GLuint memory, GLuint64 memOffset, GLboolean commit )
-{
-    struct glBufferPageCommitmentMemNV_params args = { .teb = NtCurrentTeb(), .target = target, .offset = offset, .size = size, .memory = memory, .memOffset = memOffset, .commit = commit };
-    NTSTATUS status;
-    TRACE( "target %d, offset %Id, size %Id, memory %d, memOffset %s, commit %d\n", target, offset, size, memory, wine_dbgstr_longlong(memOffset), commit );
-    if ((status = UNIX_CALL( glBufferPageCommitmentMemNV, &args ))) WARN( "glBufferPageCommitmentMemNV returned %#lx\n", status );
 }
 
 static void WINAPI glBufferParameteriAPPLE( GLenum target, GLenum pname, GLint param )
@@ -4045,14 +4020,6 @@ static void WINAPI glClearColorIuiEXT( GLuint red, GLuint green, GLuint blue, GL
     if ((status = UNIX_CALL( glClearColorIuiEXT, &args ))) WARN( "glClearColorIuiEXT returned %#lx\n", status );
 }
 
-static void WINAPI glClearColorx( GLfixed red, GLfixed green, GLfixed blue, GLfixed alpha )
-{
-    struct glClearColorx_params args = { .teb = NtCurrentTeb(), .red = red, .green = green, .blue = blue, .alpha = alpha };
-    NTSTATUS status;
-    TRACE( "red %d, green %d, blue %d, alpha %d\n", red, green, blue, alpha );
-    if ((status = UNIX_CALL( glClearColorx, &args ))) WARN( "glClearColorx returned %#lx\n", status );
-}
-
 static void WINAPI glClearColorxOES( GLfixed red, GLfixed green, GLfixed blue, GLfixed alpha )
 {
     struct glClearColorxOES_params args = { .teb = NtCurrentTeb(), .red = red, .green = green, .blue = blue, .alpha = alpha };
@@ -4083,14 +4050,6 @@ static void WINAPI glClearDepthfOES( GLclampf depth )
     NTSTATUS status;
     TRACE( "depth %f\n", depth );
     if ((status = UNIX_CALL( glClearDepthfOES, &args ))) WARN( "glClearDepthfOES returned %#lx\n", status );
-}
-
-static void WINAPI glClearDepthx( GLfixed depth )
-{
-    struct glClearDepthx_params args = { .teb = NtCurrentTeb(), .depth = depth };
-    NTSTATUS status;
-    TRACE( "depth %d\n", depth );
-    if ((status = UNIX_CALL( glClearDepthx, &args ))) WARN( "glClearDepthx returned %#lx\n", status );
 }
 
 static void WINAPI glClearDepthxOES( GLfixed depth )
@@ -4223,10 +4182,9 @@ static void WINAPI glClientWaitSemaphoreui64NVX( GLsizei fenceObjectCount, const
 
 static GLenum WINAPI glClientWaitSync( GLsync sync, GLbitfield flags, GLuint64 timeout )
 {
-    struct glClientWaitSync_params args = { .teb = NtCurrentTeb(), .flags = flags, .timeout = timeout };
+    struct glClientWaitSync_params args = { .teb = NtCurrentTeb(), .sync = sync, .flags = flags, .timeout = timeout };
     NTSTATUS status;
     TRACE( "sync %p, flags %d, timeout %s\n", sync, flags, wine_dbgstr_longlong(timeout) );
-    if (!get_sync_from_handle( sync, &args.sync )) { set_gl_error( GL_INVALID_VALUE ); return 0; }
     if ((status = UNIX_CALL( glClientWaitSync, &args ))) WARN( "glClientWaitSync returned %#lx\n", status );
     return args.ret;
 }
@@ -4239,28 +4197,12 @@ static void WINAPI glClipControl( GLenum origin, GLenum depth )
     if ((status = UNIX_CALL( glClipControl, &args ))) WARN( "glClipControl returned %#lx\n", status );
 }
 
-static void WINAPI glClipPlanef( GLenum p, const GLfloat *eqn )
-{
-    struct glClipPlanef_params args = { .teb = NtCurrentTeb(), .p = p, .eqn = eqn };
-    NTSTATUS status;
-    TRACE( "p %d, eqn %p\n", p, eqn );
-    if ((status = UNIX_CALL( glClipPlanef, &args ))) WARN( "glClipPlanef returned %#lx\n", status );
-}
-
 static void WINAPI glClipPlanefOES( GLenum plane, const GLfloat *equation )
 {
     struct glClipPlanefOES_params args = { .teb = NtCurrentTeb(), .plane = plane, .equation = equation };
     NTSTATUS status;
     TRACE( "plane %d, equation %p\n", plane, equation );
     if ((status = UNIX_CALL( glClipPlanefOES, &args ))) WARN( "glClipPlanefOES returned %#lx\n", status );
-}
-
-static void WINAPI glClipPlanex( GLenum plane, const GLfixed *equation )
-{
-    struct glClipPlanex_params args = { .teb = NtCurrentTeb(), .plane = plane, .equation = equation };
-    NTSTATUS status;
-    TRACE( "plane %d, equation %p\n", plane, equation );
-    if ((status = UNIX_CALL( glClipPlanex, &args ))) WARN( "glClipPlanex returned %#lx\n", status );
 }
 
 static void WINAPI glClipPlanexOES( GLenum plane, const GLfixed *equation )
@@ -4381,14 +4323,6 @@ static void WINAPI glColor4ubVertex3fvSUN( const GLubyte *c, const GLfloat *v )
     NTSTATUS status;
     TRACE( "c %p, v %p\n", c, v );
     if ((status = UNIX_CALL( glColor4ubVertex3fvSUN, &args ))) WARN( "glColor4ubVertex3fvSUN returned %#lx\n", status );
-}
-
-static void WINAPI glColor4x( GLfixed red, GLfixed green, GLfixed blue, GLfixed alpha )
-{
-    struct glColor4x_params args = { .teb = NtCurrentTeb(), .red = red, .green = green, .blue = blue, .alpha = alpha };
-    NTSTATUS status;
-    TRACE( "red %d, green %d, blue %d, alpha %d\n", red, green, blue, alpha );
-    if ((status = UNIX_CALL( glColor4x, &args ))) WARN( "glColor4x returned %#lx\n", status );
 }
 
 static void WINAPI glColor4xOES( GLfixed red, GLfixed green, GLfixed blue, GLfixed alpha )
@@ -5426,14 +5360,6 @@ static void WINAPI glCreateSamplers( GLsizei n, GLuint *samplers )
     if ((status = UNIX_CALL( glCreateSamplers, &args ))) WARN( "glCreateSamplers returned %#lx\n", status );
 }
 
-static void WINAPI glCreateSemaphoresNV( GLsizei n, GLuint *semaphores )
-{
-    struct glCreateSemaphoresNV_params args = { .teb = NtCurrentTeb(), .n = n, .semaphores = semaphores };
-    NTSTATUS status;
-    TRACE( "n %d, semaphores %p\n", n, semaphores );
-    if ((status = UNIX_CALL( glCreateSemaphoresNV, &args ))) WARN( "glCreateSemaphoresNV returned %#lx\n", status );
-}
-
 static GLuint WINAPI glCreateShader( GLenum type )
 {
     struct glCreateShader_params args = { .teb = NtCurrentTeb(), .type = type };
@@ -5476,6 +5402,15 @@ static void WINAPI glCreateStatesNV( GLsizei n, GLuint *states )
     NTSTATUS status;
     TRACE( "n %d, states %p\n", n, states );
     if ((status = UNIX_CALL( glCreateStatesNV, &args ))) WARN( "glCreateStatesNV returned %#lx\n", status );
+}
+
+static GLsync WINAPI glCreateSyncFromCLeventARB( struct _cl_context *context, struct _cl_event *event, GLbitfield flags )
+{
+    struct glCreateSyncFromCLeventARB_params args = { .teb = NtCurrentTeb(), .context = context, .event = event, .flags = flags };
+    NTSTATUS status;
+    TRACE( "context %p, event %p, flags %d\n", context, event, flags );
+    if ((status = UNIX_CALL( glCreateSyncFromCLeventARB, &args ))) WARN( "glCreateSyncFromCLeventARB returned %#lx\n", status );
+    return args.ret;
 }
 
 static void WINAPI glCreateTextures( GLenum target, GLsizei n, GLuint *textures )
@@ -5878,6 +5813,14 @@ static void WINAPI glDeleteStatesNV( GLsizei n, const GLuint *states )
     if ((status = UNIX_CALL( glDeleteStatesNV, &args ))) WARN( "glDeleteStatesNV returned %#lx\n", status );
 }
 
+static void WINAPI glDeleteSync( GLsync sync )
+{
+    struct glDeleteSync_params args = { .teb = NtCurrentTeb(), .sync = sync };
+    NTSTATUS status;
+    TRACE( "sync %p\n", sync );
+    if ((status = UNIX_CALL( glDeleteSync, &args ))) WARN( "glDeleteSync returned %#lx\n", status );
+}
+
 static void WINAPI glDeleteTexturesEXT( GLsizei n, const GLuint *textures )
 {
     struct glDeleteTexturesEXT_params args = { .teb = NtCurrentTeb(), .n = n, .textures = textures };
@@ -5996,14 +5939,6 @@ static void WINAPI glDepthRangefOES( GLclampf n, GLclampf f )
     NTSTATUS status;
     TRACE( "n %f, f %f\n", n, f );
     if ((status = UNIX_CALL( glDepthRangefOES, &args ))) WARN( "glDepthRangefOES returned %#lx\n", status );
-}
-
-static void WINAPI glDepthRangex( GLfixed n, GLfixed f )
-{
-    struct glDepthRangex_params args = { .teb = NtCurrentTeb(), .n = n, .f = f };
-    NTSTATUS status;
-    TRACE( "n %d, f %d\n", n, f );
-    if ((status = UNIX_CALL( glDepthRangex, &args ))) WARN( "glDepthRangex returned %#lx\n", status );
 }
 
 static void WINAPI glDepthRangexOES( GLfixed n, GLfixed f )
@@ -6348,22 +6283,6 @@ static void WINAPI glDrawMeshArraysSUN( GLenum mode, GLint first, GLsizei count,
     NTSTATUS status;
     TRACE( "mode %d, first %d, count %d, width %d\n", mode, first, count, width );
     if ((status = UNIX_CALL( glDrawMeshArraysSUN, &args ))) WARN( "glDrawMeshArraysSUN returned %#lx\n", status );
-}
-
-static void WINAPI glDrawMeshTasksEXT( GLuint num_groups_x, GLuint num_groups_y, GLuint num_groups_z )
-{
-    struct glDrawMeshTasksEXT_params args = { .teb = NtCurrentTeb(), .num_groups_x = num_groups_x, .num_groups_y = num_groups_y, .num_groups_z = num_groups_z };
-    NTSTATUS status;
-    TRACE( "num_groups_x %d, num_groups_y %d, num_groups_z %d\n", num_groups_x, num_groups_y, num_groups_z );
-    if ((status = UNIX_CALL( glDrawMeshTasksEXT, &args ))) WARN( "glDrawMeshTasksEXT returned %#lx\n", status );
-}
-
-static void WINAPI glDrawMeshTasksIndirectEXT( GLintptr indirect )
-{
-    struct glDrawMeshTasksIndirectEXT_params args = { .teb = NtCurrentTeb(), .indirect = indirect };
-    NTSTATUS status;
-    TRACE( "indirect %Id\n", indirect );
-    if ((status = UNIX_CALL( glDrawMeshTasksIndirectEXT, &args ))) WARN( "glDrawMeshTasksIndirectEXT returned %#lx\n", status );
 }
 
 static void WINAPI glDrawMeshTasksIndirectNV( GLintptr indirect )
@@ -6814,6 +6733,15 @@ static void WINAPI glFeedbackBufferxOES( GLsizei n, GLenum type, const GLfixed *
     if ((status = UNIX_CALL( glFeedbackBufferxOES, &args ))) WARN( "glFeedbackBufferxOES returned %#lx\n", status );
 }
 
+static GLsync WINAPI glFenceSync( GLenum condition, GLbitfield flags )
+{
+    struct glFenceSync_params args = { .teb = NtCurrentTeb(), .condition = condition, .flags = flags };
+    NTSTATUS status;
+    TRACE( "condition %d, flags %d\n", condition, flags );
+    if ((status = UNIX_CALL( glFenceSync, &args ))) WARN( "glFenceSync returned %#lx\n", status );
+    return args.ret;
+}
+
 static void WINAPI glFinalCombinerInputNV( GLenum variable, GLenum input, GLenum mapping, GLenum componentUsage )
 {
     struct glFinalCombinerInputNV_params args = { .teb = NtCurrentTeb(), .variable = variable, .input = input, .mapping = mapping, .componentUsage = componentUsage };
@@ -7055,28 +6983,12 @@ static void WINAPI glFogFuncSGIS( GLsizei n, const GLfloat *points )
     if ((status = UNIX_CALL( glFogFuncSGIS, &args ))) WARN( "glFogFuncSGIS returned %#lx\n", status );
 }
 
-static void WINAPI glFogx( GLenum pname, GLfixed param )
-{
-    struct glFogx_params args = { .teb = NtCurrentTeb(), .pname = pname, .param = param };
-    NTSTATUS status;
-    TRACE( "pname %d, param %d\n", pname, param );
-    if ((status = UNIX_CALL( glFogx, &args ))) WARN( "glFogx returned %#lx\n", status );
-}
-
 static void WINAPI glFogxOES( GLenum pname, GLfixed param )
 {
     struct glFogxOES_params args = { .teb = NtCurrentTeb(), .pname = pname, .param = param };
     NTSTATUS status;
     TRACE( "pname %d, param %d\n", pname, param );
     if ((status = UNIX_CALL( glFogxOES, &args ))) WARN( "glFogxOES returned %#lx\n", status );
-}
-
-static void WINAPI glFogxv( GLenum pname, const GLfixed *param )
-{
-    struct glFogxv_params args = { .teb = NtCurrentTeb(), .pname = pname, .param = param };
-    NTSTATUS status;
-    TRACE( "pname %d, param %p\n", pname, param );
-    if ((status = UNIX_CALL( glFogxv, &args ))) WARN( "glFogxv returned %#lx\n", status );
 }
 
 static void WINAPI glFogxvOES( GLenum pname, const GLfixed *param )
@@ -7303,14 +7215,6 @@ static void WINAPI glFramebufferSamplePositionsfvAMD( GLenum target, GLuint nums
     if ((status = UNIX_CALL( glFramebufferSamplePositionsfvAMD, &args ))) WARN( "glFramebufferSamplePositionsfvAMD returned %#lx\n", status );
 }
 
-static void WINAPI glFramebufferShadingRateEXT( GLenum target, GLenum attachment, GLuint texture, GLint baseLayer, GLsizei numLayers, GLsizei texelWidth, GLsizei texelHeight )
-{
-    struct glFramebufferShadingRateEXT_params args = { .teb = NtCurrentTeb(), .target = target, .attachment = attachment, .texture = texture, .baseLayer = baseLayer, .numLayers = numLayers, .texelWidth = texelWidth, .texelHeight = texelHeight };
-    NTSTATUS status;
-    TRACE( "target %d, attachment %d, texture %d, baseLayer %d, numLayers %d, texelWidth %d, texelHeight %d\n", target, attachment, texture, baseLayer, numLayers, texelWidth, texelHeight );
-    if ((status = UNIX_CALL( glFramebufferShadingRateEXT, &args ))) WARN( "glFramebufferShadingRateEXT returned %#lx\n", status );
-}
-
 static void WINAPI glFramebufferTexture( GLenum target, GLenum attachment, GLuint texture, GLint level )
 {
     struct glFramebufferTexture_params args = { .teb = NtCurrentTeb(), .target = target, .attachment = attachment, .texture = texture, .level = level };
@@ -7439,28 +7343,12 @@ static void WINAPI glFreeObjectBufferATI( GLuint buffer )
     if ((status = UNIX_CALL( glFreeObjectBufferATI, &args ))) WARN( "glFreeObjectBufferATI returned %#lx\n", status );
 }
 
-static void WINAPI glFrustumf( GLfloat l, GLfloat r, GLfloat b, GLfloat t, GLfloat n, GLfloat f )
-{
-    struct glFrustumf_params args = { .teb = NtCurrentTeb(), .l = l, .r = r, .b = b, .t = t, .n = n, .f = f };
-    NTSTATUS status;
-    TRACE( "l %f, r %f, b %f, t %f, n %f, f %f\n", l, r, b, t, n, f );
-    if ((status = UNIX_CALL( glFrustumf, &args ))) WARN( "glFrustumf returned %#lx\n", status );
-}
-
 static void WINAPI glFrustumfOES( GLfloat l, GLfloat r, GLfloat b, GLfloat t, GLfloat n, GLfloat f )
 {
     struct glFrustumfOES_params args = { .teb = NtCurrentTeb(), .l = l, .r = r, .b = b, .t = t, .n = n, .f = f };
     NTSTATUS status;
     TRACE( "l %f, r %f, b %f, t %f, n %f, f %f\n", l, r, b, t, n, f );
     if ((status = UNIX_CALL( glFrustumfOES, &args ))) WARN( "glFrustumfOES returned %#lx\n", status );
-}
-
-static void WINAPI glFrustumx( GLfixed l, GLfixed r, GLfixed b, GLfixed t, GLfixed n, GLfixed f )
-{
-    struct glFrustumx_params args = { .teb = NtCurrentTeb(), .l = l, .r = r, .b = b, .t = t, .n = n, .f = f };
-    NTSTATUS status;
-    TRACE( "l %d, r %d, b %d, t %d, n %d, f %d\n", l, r, b, t, n, f );
-    if ((status = UNIX_CALL( glFrustumx, &args ))) WARN( "glFrustumx returned %#lx\n", status );
 }
 
 static void WINAPI glFrustumxOES( GLfixed l, GLfixed r, GLfixed b, GLfixed t, GLfixed n, GLfixed f )
@@ -7982,28 +7870,12 @@ static void WINAPI glGetBufferSubDataARB( GLenum target, GLintptrARB offset, GLs
     if ((status = UNIX_CALL( glGetBufferSubDataARB, &args ))) WARN( "glGetBufferSubDataARB returned %#lx\n", status );
 }
 
-static void WINAPI glGetClipPlanef( GLenum plane, GLfloat *equation )
-{
-    struct glGetClipPlanef_params args = { .teb = NtCurrentTeb(), .plane = plane, .equation = equation };
-    NTSTATUS status;
-    TRACE( "plane %d, equation %p\n", plane, equation );
-    if ((status = UNIX_CALL( glGetClipPlanef, &args ))) WARN( "glGetClipPlanef returned %#lx\n", status );
-}
-
 static void WINAPI glGetClipPlanefOES( GLenum plane, GLfloat *equation )
 {
     struct glGetClipPlanefOES_params args = { .teb = NtCurrentTeb(), .plane = plane, .equation = equation };
     NTSTATUS status;
     TRACE( "plane %d, equation %p\n", plane, equation );
     if ((status = UNIX_CALL( glGetClipPlanefOES, &args ))) WARN( "glGetClipPlanefOES returned %#lx\n", status );
-}
-
-static void WINAPI glGetClipPlanex( GLenum plane, GLfixed *equation )
-{
-    struct glGetClipPlanex_params args = { .teb = NtCurrentTeb(), .plane = plane, .equation = equation };
-    NTSTATUS status;
-    TRACE( "plane %d, equation %p\n", plane, equation );
-    if ((status = UNIX_CALL( glGetClipPlanex, &args ))) WARN( "glGetClipPlanex returned %#lx\n", status );
 }
 
 static void WINAPI glGetClipPlanexOES( GLenum plane, GLfixed *equation )
@@ -8256,7 +8128,7 @@ static GLuint WINAPI glGetDebugMessageLog( GLuint count, GLsizei bufSize, GLenum
     return args.ret;
 }
 
-static GLuint WINAPI glGetDebugMessageLogAMD( GLuint count, GLsizei bufSize, GLenum *categories, GLenum *severities, GLuint *ids, GLsizei *lengths, GLchar *message )
+static GLuint WINAPI glGetDebugMessageLogAMD( GLuint count, GLsizei bufSize, GLenum *categories, GLuint *severities, GLuint *ids, GLsizei *lengths, GLchar *message )
 {
     struct glGetDebugMessageLogAMD_params args = { .teb = NtCurrentTeb(), .count = count, .bufSize = bufSize, .categories = categories, .severities = severities, .ids = ids, .lengths = lengths, .message = message };
     NTSTATUS status;
@@ -8336,14 +8208,6 @@ static void WINAPI glGetFirstPerfQueryIdINTEL( GLuint *queryId )
     NTSTATUS status;
     TRACE( "queryId %p\n", queryId );
     if ((status = UNIX_CALL( glGetFirstPerfQueryIdINTEL, &args ))) WARN( "glGetFirstPerfQueryIdINTEL returned %#lx\n", status );
-}
-
-static void WINAPI glGetFixedv( GLenum pname, GLfixed *params )
-{
-    struct glGetFixedv_params args = { .teb = NtCurrentTeb(), .pname = pname, .params = params };
-    NTSTATUS status;
-    TRACE( "pname %d, params %p\n", pname, params );
-    if ((status = UNIX_CALL( glGetFixedv, &args ))) WARN( "glGetFixedv returned %#lx\n", status );
 }
 
 static void WINAPI glGetFixedvOES( GLenum pname, GLfixed *params )
@@ -8443,14 +8307,6 @@ static void WINAPI glGetFragmentMaterialivSGIX( GLenum face, GLenum pname, GLint
     NTSTATUS status;
     TRACE( "face %d, pname %d, params %p\n", face, pname, params );
     if ((status = UNIX_CALL( glGetFragmentMaterialivSGIX, &args ))) WARN( "glGetFragmentMaterialivSGIX returned %#lx\n", status );
-}
-
-static void WINAPI glGetFragmentShadingRatesEXT( GLsizei samples, GLsizei maxCount, GLsizei *count, GLenum *shadingRates )
-{
-    struct glGetFragmentShadingRatesEXT_params args = { .teb = NtCurrentTeb(), .samples = samples, .maxCount = maxCount, .count = count, .shadingRates = shadingRates };
-    NTSTATUS status;
-    TRACE( "samples %d, maxCount %d, count %p, shadingRates %p\n", samples, maxCount, count, shadingRates );
-    if ((status = UNIX_CALL( glGetFragmentShadingRatesEXT, &args ))) WARN( "glGetFragmentShadingRatesEXT returned %#lx\n", status );
 }
 
 static void WINAPI glGetFramebufferAttachmentParameteriv( GLenum target, GLenum attachment, GLenum pname, GLint *params )
@@ -8647,10 +8503,8 @@ static void WINAPI glGetInteger64v( GLenum pname, GLint64 *data )
 {
     struct glGetInteger64v_params args = { .teb = NtCurrentTeb(), .pname = pname, .data = data };
     NTSTATUS status;
-    int integer;
     TRACE( "pname %d, data %p\n", pname, data );
-    if (get_integer( pname, &integer )) *data = integer;
-    else if ((status = UNIX_CALL( glGetInteger64v, &args ))) WARN( "glGetInteger64v returned %#lx\n", status );
+    if ((status = UNIX_CALL( glGetInteger64v, &args ))) WARN( "glGetInteger64v returned %#lx\n", status );
 }
 
 static void WINAPI glGetIntegerIndexedvEXT( GLenum target, GLuint index, GLint *data )
@@ -8739,14 +8593,6 @@ static void WINAPI glGetLightxOES( GLenum light, GLenum pname, GLfixed *params )
     NTSTATUS status;
     TRACE( "light %d, pname %d, params %p\n", light, pname, params );
     if ((status = UNIX_CALL( glGetLightxOES, &args ))) WARN( "glGetLightxOES returned %#lx\n", status );
-}
-
-static void WINAPI glGetLightxv( GLenum light, GLenum pname, GLfixed *params )
-{
-    struct glGetLightxv_params args = { .teb = NtCurrentTeb(), .light = light, .pname = pname, .params = params };
-    NTSTATUS status;
-    TRACE( "light %d, pname %d, params %p\n", light, pname, params );
-    if ((status = UNIX_CALL( glGetLightxv, &args ))) WARN( "glGetLightxv returned %#lx\n", status );
 }
 
 static void WINAPI glGetListParameterfvSGIX( GLuint list, GLenum pname, GLfloat *params )
@@ -8843,14 +8689,6 @@ static void WINAPI glGetMaterialxOES( GLenum face, GLenum pname, GLfixed param )
     NTSTATUS status;
     TRACE( "face %d, pname %d, param %d\n", face, pname, param );
     if ((status = UNIX_CALL( glGetMaterialxOES, &args ))) WARN( "glGetMaterialxOES returned %#lx\n", status );
-}
-
-static void WINAPI glGetMaterialxv( GLenum face, GLenum pname, GLfixed *params )
-{
-    struct glGetMaterialxv_params args = { .teb = NtCurrentTeb(), .face = face, .pname = pname, .params = params };
-    NTSTATUS status;
-    TRACE( "face %d, pname %d, params %p\n", face, pname, params );
-    if ((status = UNIX_CALL( glGetMaterialxv, &args ))) WARN( "glGetMaterialxv returned %#lx\n", status );
 }
 
 static void WINAPI glGetMemoryObjectDetachedResourcesuivNV( GLuint memory, GLenum pname, GLint first, GLsizei count, GLuint *params )
@@ -9961,14 +9799,6 @@ static void WINAPI glGetSamplerParameteriv( GLuint sampler, GLenum pname, GLint 
     if ((status = UNIX_CALL( glGetSamplerParameteriv, &args ))) WARN( "glGetSamplerParameteriv returned %#lx\n", status );
 }
 
-static void WINAPI glGetSemaphoreParameterivNV( GLuint semaphore, GLenum pname, GLint *params )
-{
-    struct glGetSemaphoreParameterivNV_params args = { .teb = NtCurrentTeb(), .semaphore = semaphore, .pname = pname, .params = params };
-    NTSTATUS status;
-    TRACE( "semaphore %d, pname %d, params %p\n", semaphore, pname, params );
-    if ((status = UNIX_CALL( glGetSemaphoreParameterivNV, &args ))) WARN( "glGetSemaphoreParameterivNV returned %#lx\n", status );
-}
-
 static void WINAPI glGetSemaphoreParameterui64vEXT( GLuint semaphore, GLenum pname, GLuint64 *params )
 {
     struct glGetSemaphoreParameterui64vEXT_params args = { .teb = NtCurrentTeb(), .semaphore = semaphore, .pname = pname, .params = params };
@@ -10086,10 +9916,9 @@ static GLint WINAPI glGetSubroutineUniformLocation( GLuint program, GLenum shade
 
 static void WINAPI glGetSynciv( GLsync sync, GLenum pname, GLsizei count, GLsizei *length, GLint *values )
 {
-    struct glGetSynciv_params args = { .teb = NtCurrentTeb(), .pname = pname, .count = count, .length = length, .values = values };
+    struct glGetSynciv_params args = { .teb = NtCurrentTeb(), .sync = sync, .pname = pname, .count = count, .length = length, .values = values };
     NTSTATUS status;
     TRACE( "sync %p, pname %d, count %d, length %p, values %p\n", sync, pname, count, length, values );
-    if (!get_sync_from_handle( sync, &args.sync )) { set_gl_error( GL_INVALID_VALUE ); return; }
     if ((status = UNIX_CALL( glGetSynciv, &args ))) WARN( "glGetSynciv returned %#lx\n", status );
 }
 
@@ -10107,14 +9936,6 @@ static void WINAPI glGetTexBumpParameterivATI( GLenum pname, GLint *param )
     NTSTATUS status;
     TRACE( "pname %d, param %p\n", pname, param );
     if ((status = UNIX_CALL( glGetTexBumpParameterivATI, &args ))) WARN( "glGetTexBumpParameterivATI returned %#lx\n", status );
-}
-
-static void WINAPI glGetTexEnvxv( GLenum target, GLenum pname, GLfixed *params )
-{
-    struct glGetTexEnvxv_params args = { .teb = NtCurrentTeb(), .target = target, .pname = pname, .params = params };
-    NTSTATUS status;
-    TRACE( "target %d, pname %d, params %p\n", target, pname, params );
-    if ((status = UNIX_CALL( glGetTexEnvxv, &args ))) WARN( "glGetTexEnvxv returned %#lx\n", status );
 }
 
 static void WINAPI glGetTexEnvxvOES( GLenum target, GLenum pname, GLfixed *params )
@@ -10187,14 +10008,6 @@ static void WINAPI glGetTexParameterPointervAPPLE( GLenum target, GLenum pname, 
     NTSTATUS status;
     TRACE( "target %d, pname %d, params %p\n", target, pname, params );
     if ((status = UNIX_CALL( glGetTexParameterPointervAPPLE, &args ))) WARN( "glGetTexParameterPointervAPPLE returned %#lx\n", status );
-}
-
-static void WINAPI glGetTexParameterxv( GLenum target, GLenum pname, GLfixed *params )
-{
-    struct glGetTexParameterxv_params args = { .teb = NtCurrentTeb(), .target = target, .pname = pname, .params = params };
-    NTSTATUS status;
-    TRACE( "target %d, pname %d, params %p\n", target, pname, params );
-    if ((status = UNIX_CALL( glGetTexParameterxv, &args ))) WARN( "glGetTexParameterxv returned %#lx\n", status );
 }
 
 static void WINAPI glGetTexParameterxvOES( GLenum target, GLenum pname, GLfixed *params )
@@ -11384,6 +11197,14 @@ static void WINAPI glImageTransformParameterivHP( GLenum target, GLenum pname, c
     if ((status = UNIX_CALL( glImageTransformParameterivHP, &args ))) WARN( "glImageTransformParameterivHP returned %#lx\n", status );
 }
 
+static void WINAPI glImportMemoryFdEXT( GLuint memory, GLuint64 size, GLenum handleType, GLint fd )
+{
+    struct glImportMemoryFdEXT_params args = { .teb = NtCurrentTeb(), .memory = memory, .size = size, .handleType = handleType, .fd = fd };
+    NTSTATUS status;
+    TRACE( "memory %d, size %s, handleType %d, fd %d\n", memory, wine_dbgstr_longlong(size), handleType, fd );
+    if ((status = UNIX_CALL( glImportMemoryFdEXT, &args ))) WARN( "glImportMemoryFdEXT returned %#lx\n", status );
+}
+
 static void WINAPI glImportMemoryWin32HandleEXT( GLuint memory, GLuint64 size, GLenum handleType, void *handle )
 {
     struct glImportMemoryWin32HandleEXT_params args = { .teb = NtCurrentTeb(), .memory = memory, .size = size, .handleType = handleType, .handle = handle };
@@ -11400,6 +11221,14 @@ static void WINAPI glImportMemoryWin32NameEXT( GLuint memory, GLuint64 size, GLe
     if ((status = UNIX_CALL( glImportMemoryWin32NameEXT, &args ))) WARN( "glImportMemoryWin32NameEXT returned %#lx\n", status );
 }
 
+static void WINAPI glImportSemaphoreFdEXT( GLuint semaphore, GLenum handleType, GLint fd )
+{
+    struct glImportSemaphoreFdEXT_params args = { .teb = NtCurrentTeb(), .semaphore = semaphore, .handleType = handleType, .fd = fd };
+    NTSTATUS status;
+    TRACE( "semaphore %d, handleType %d, fd %d\n", semaphore, handleType, fd );
+    if ((status = UNIX_CALL( glImportSemaphoreFdEXT, &args ))) WARN( "glImportSemaphoreFdEXT returned %#lx\n", status );
+}
+
 static void WINAPI glImportSemaphoreWin32HandleEXT( GLuint semaphore, GLenum handleType, void *handle )
 {
     struct glImportSemaphoreWin32HandleEXT_params args = { .teb = NtCurrentTeb(), .semaphore = semaphore, .handleType = handleType, .handle = handle };
@@ -11414,6 +11243,15 @@ static void WINAPI glImportSemaphoreWin32NameEXT( GLuint semaphore, GLenum handl
     NTSTATUS status;
     TRACE( "semaphore %d, handleType %d, name %p\n", semaphore, handleType, name );
     if ((status = UNIX_CALL( glImportSemaphoreWin32NameEXT, &args ))) WARN( "glImportSemaphoreWin32NameEXT returned %#lx\n", status );
+}
+
+static GLsync WINAPI glImportSyncEXT( GLenum external_sync_type, GLintptr external_sync, GLbitfield flags )
+{
+    struct glImportSyncEXT_params args = { .teb = NtCurrentTeb(), .external_sync_type = external_sync_type, .external_sync = external_sync, .flags = flags };
+    NTSTATUS status;
+    TRACE( "external_sync_type %d, external_sync %Id, flags %d\n", external_sync_type, external_sync, flags );
+    if ((status = UNIX_CALL( glImportSyncEXT, &args ))) WARN( "glImportSyncEXT returned %#lx\n", status );
+    return args.ret;
 }
 
 static void WINAPI glIndexFormatNV( GLenum type, GLsizei stride )
@@ -11876,10 +11714,9 @@ static GLboolean WINAPI glIsStateNV( GLuint state )
 
 static GLboolean WINAPI glIsSync( GLsync sync )
 {
-    struct glIsSync_params args = { .teb = NtCurrentTeb() };
+    struct glIsSync_params args = { .teb = NtCurrentTeb(), .sync = sync };
     NTSTATUS status;
     TRACE( "sync %p\n", sync );
-    if (!get_sync_from_handle( sync, &args.sync )) return 0;
     if ((status = UNIX_CALL( glIsSync, &args ))) WARN( "glIsSync returned %#lx\n", status );
     return args.ret;
 }
@@ -12005,28 +11842,12 @@ static void WINAPI glLightEnviSGIX( GLenum pname, GLint param )
     if ((status = UNIX_CALL( glLightEnviSGIX, &args ))) WARN( "glLightEnviSGIX returned %#lx\n", status );
 }
 
-static void WINAPI glLightModelx( GLenum pname, GLfixed param )
-{
-    struct glLightModelx_params args = { .teb = NtCurrentTeb(), .pname = pname, .param = param };
-    NTSTATUS status;
-    TRACE( "pname %d, param %d\n", pname, param );
-    if ((status = UNIX_CALL( glLightModelx, &args ))) WARN( "glLightModelx returned %#lx\n", status );
-}
-
 static void WINAPI glLightModelxOES( GLenum pname, GLfixed param )
 {
     struct glLightModelxOES_params args = { .teb = NtCurrentTeb(), .pname = pname, .param = param };
     NTSTATUS status;
     TRACE( "pname %d, param %d\n", pname, param );
     if ((status = UNIX_CALL( glLightModelxOES, &args ))) WARN( "glLightModelxOES returned %#lx\n", status );
-}
-
-static void WINAPI glLightModelxv( GLenum pname, const GLfixed *param )
-{
-    struct glLightModelxv_params args = { .teb = NtCurrentTeb(), .pname = pname, .param = param };
-    NTSTATUS status;
-    TRACE( "pname %d, param %p\n", pname, param );
-    if ((status = UNIX_CALL( glLightModelxv, &args ))) WARN( "glLightModelxv returned %#lx\n", status );
 }
 
 static void WINAPI glLightModelxvOES( GLenum pname, const GLfixed *param )
@@ -12037,14 +11858,6 @@ static void WINAPI glLightModelxvOES( GLenum pname, const GLfixed *param )
     if ((status = UNIX_CALL( glLightModelxvOES, &args ))) WARN( "glLightModelxvOES returned %#lx\n", status );
 }
 
-static void WINAPI glLightx( GLenum light, GLenum pname, GLfixed param )
-{
-    struct glLightx_params args = { .teb = NtCurrentTeb(), .light = light, .pname = pname, .param = param };
-    NTSTATUS status;
-    TRACE( "light %d, pname %d, param %d\n", light, pname, param );
-    if ((status = UNIX_CALL( glLightx, &args ))) WARN( "glLightx returned %#lx\n", status );
-}
-
 static void WINAPI glLightxOES( GLenum light, GLenum pname, GLfixed param )
 {
     struct glLightxOES_params args = { .teb = NtCurrentTeb(), .light = light, .pname = pname, .param = param };
@@ -12053,28 +11866,12 @@ static void WINAPI glLightxOES( GLenum light, GLenum pname, GLfixed param )
     if ((status = UNIX_CALL( glLightxOES, &args ))) WARN( "glLightxOES returned %#lx\n", status );
 }
 
-static void WINAPI glLightxv( GLenum light, GLenum pname, const GLfixed *params )
-{
-    struct glLightxv_params args = { .teb = NtCurrentTeb(), .light = light, .pname = pname, .params = params };
-    NTSTATUS status;
-    TRACE( "light %d, pname %d, params %p\n", light, pname, params );
-    if ((status = UNIX_CALL( glLightxv, &args ))) WARN( "glLightxv returned %#lx\n", status );
-}
-
 static void WINAPI glLightxvOES( GLenum light, GLenum pname, const GLfixed *params )
 {
     struct glLightxvOES_params args = { .teb = NtCurrentTeb(), .light = light, .pname = pname, .params = params };
     NTSTATUS status;
     TRACE( "light %d, pname %d, params %p\n", light, pname, params );
     if ((status = UNIX_CALL( glLightxvOES, &args ))) WARN( "glLightxvOES returned %#lx\n", status );
-}
-
-static void WINAPI glLineWidthx( GLfixed width )
-{
-    struct glLineWidthx_params args = { .teb = NtCurrentTeb(), .width = width };
-    NTSTATUS status;
-    TRACE( "width %d\n", width );
-    if ((status = UNIX_CALL( glLineWidthx, &args ))) WARN( "glLineWidthx returned %#lx\n", status );
 }
 
 static void WINAPI glLineWidthxOES( GLfixed width )
@@ -12147,14 +11944,6 @@ static void WINAPI glLoadIdentityDeformationMapSGIX( GLbitfield mask )
     NTSTATUS status;
     TRACE( "mask %d\n", mask );
     if ((status = UNIX_CALL( glLoadIdentityDeformationMapSGIX, &args ))) WARN( "glLoadIdentityDeformationMapSGIX returned %#lx\n", status );
-}
-
-static void WINAPI glLoadMatrixx( const GLfixed *m )
-{
-    struct glLoadMatrixx_params args = { .teb = NtCurrentTeb(), .m = m };
-    NTSTATUS status;
-    TRACE( "m %p\n", m );
-    if ((status = UNIX_CALL( glLoadMatrixx, &args ))) WARN( "glLoadMatrixx returned %#lx\n", status );
 }
 
 static void WINAPI glLoadMatrixxOES( const GLfixed *m )
@@ -12349,33 +12138,6 @@ static void WINAPI glMap2xOES( GLenum target, GLfixed u1, GLfixed u2, GLint ustr
     if ((status = UNIX_CALL( glMap2xOES, &args ))) WARN( "glMap2xOES returned %#lx\n", status );
 }
 
-static void * WINAPI glMapBuffer( GLenum target, GLenum access )
-{
-    struct glMapBuffer_params args = { .teb = NtCurrentTeb(), .target = target, .access = access };
-    NTSTATUS status;
-    TRACE( "target %d, access %d\n", target, access );
-    if ((status = UNIX_CALL( glMapBuffer, &args ))) WARN( "glMapBuffer returned %#lx\n", status );
-    return args.ret;
-}
-
-static void * WINAPI glMapBufferARB( GLenum target, GLenum access )
-{
-    struct glMapBufferARB_params args = { .teb = NtCurrentTeb(), .target = target, .access = access };
-    NTSTATUS status;
-    TRACE( "target %d, access %d\n", target, access );
-    if ((status = UNIX_CALL( glMapBufferARB, &args ))) WARN( "glMapBufferARB returned %#lx\n", status );
-    return args.ret;
-}
-
-static void * WINAPI glMapBufferRange( GLenum target, GLintptr offset, GLsizeiptr length, GLbitfield access )
-{
-    struct glMapBufferRange_params args = { .teb = NtCurrentTeb(), .target = target, .offset = offset, .length = length, .access = access };
-    NTSTATUS status;
-    TRACE( "target %d, offset %Id, length %Id, access %d\n", target, offset, length, access );
-    if ((status = UNIX_CALL( glMapBufferRange, &args ))) WARN( "glMapBufferRange returned %#lx\n", status );
-    return args.ret;
-}
-
 static void WINAPI glMapControlPointsNV( GLenum target, GLuint index, GLenum type, GLsizei ustride, GLsizei vstride, GLint uorder, GLint vorder, GLboolean packed, const void *points )
 {
     struct glMapControlPointsNV_params args = { .teb = NtCurrentTeb(), .target = target, .index = index, .type = type, .ustride = ustride, .vstride = vstride, .uorder = uorder, .vorder = vorder, .packed = packed, .points = points };
@@ -12398,42 +12160,6 @@ static void WINAPI glMapGrid2xOES( GLint n, GLfixed u1, GLfixed u2, GLfixed v1, 
     NTSTATUS status;
     TRACE( "n %d, u1 %d, u2 %d, v1 %d, v2 %d\n", n, u1, u2, v1, v2 );
     if ((status = UNIX_CALL( glMapGrid2xOES, &args ))) WARN( "glMapGrid2xOES returned %#lx\n", status );
-}
-
-static void * WINAPI glMapNamedBuffer( GLuint buffer, GLenum access )
-{
-    struct glMapNamedBuffer_params args = { .teb = NtCurrentTeb(), .buffer = buffer, .access = access };
-    NTSTATUS status;
-    TRACE( "buffer %d, access %d\n", buffer, access );
-    if ((status = UNIX_CALL( glMapNamedBuffer, &args ))) WARN( "glMapNamedBuffer returned %#lx\n", status );
-    return args.ret;
-}
-
-static void * WINAPI glMapNamedBufferEXT( GLuint buffer, GLenum access )
-{
-    struct glMapNamedBufferEXT_params args = { .teb = NtCurrentTeb(), .buffer = buffer, .access = access };
-    NTSTATUS status;
-    TRACE( "buffer %d, access %d\n", buffer, access );
-    if ((status = UNIX_CALL( glMapNamedBufferEXT, &args ))) WARN( "glMapNamedBufferEXT returned %#lx\n", status );
-    return args.ret;
-}
-
-static void * WINAPI glMapNamedBufferRange( GLuint buffer, GLintptr offset, GLsizeiptr length, GLbitfield access )
-{
-    struct glMapNamedBufferRange_params args = { .teb = NtCurrentTeb(), .buffer = buffer, .offset = offset, .length = length, .access = access };
-    NTSTATUS status;
-    TRACE( "buffer %d, offset %Id, length %Id, access %d\n", buffer, offset, length, access );
-    if ((status = UNIX_CALL( glMapNamedBufferRange, &args ))) WARN( "glMapNamedBufferRange returned %#lx\n", status );
-    return args.ret;
-}
-
-static void * WINAPI glMapNamedBufferRangeEXT( GLuint buffer, GLintptr offset, GLsizeiptr length, GLbitfield access )
-{
-    struct glMapNamedBufferRangeEXT_params args = { .teb = NtCurrentTeb(), .buffer = buffer, .offset = offset, .length = length, .access = access };
-    NTSTATUS status;
-    TRACE( "buffer %d, offset %Id, length %Id, access %d\n", buffer, offset, length, access );
-    if ((status = UNIX_CALL( glMapNamedBufferRangeEXT, &args ))) WARN( "glMapNamedBufferRangeEXT returned %#lx\n", status );
-    return args.ret;
 }
 
 static void * WINAPI glMapObjectBufferATI( GLuint buffer )
@@ -12502,28 +12228,12 @@ static void WINAPI glMapVertexAttrib2fAPPLE( GLuint index, GLuint size, GLfloat 
     if ((status = UNIX_CALL( glMapVertexAttrib2fAPPLE, &args ))) WARN( "glMapVertexAttrib2fAPPLE returned %#lx\n", status );
 }
 
-static void WINAPI glMaterialx( GLenum face, GLenum pname, GLfixed param )
-{
-    struct glMaterialx_params args = { .teb = NtCurrentTeb(), .face = face, .pname = pname, .param = param };
-    NTSTATUS status;
-    TRACE( "face %d, pname %d, param %d\n", face, pname, param );
-    if ((status = UNIX_CALL( glMaterialx, &args ))) WARN( "glMaterialx returned %#lx\n", status );
-}
-
 static void WINAPI glMaterialxOES( GLenum face, GLenum pname, GLfixed param )
 {
     struct glMaterialxOES_params args = { .teb = NtCurrentTeb(), .face = face, .pname = pname, .param = param };
     NTSTATUS status;
     TRACE( "face %d, pname %d, param %d\n", face, pname, param );
     if ((status = UNIX_CALL( glMaterialxOES, &args ))) WARN( "glMaterialxOES returned %#lx\n", status );
-}
-
-static void WINAPI glMaterialxv( GLenum face, GLenum pname, const GLfixed *param )
-{
-    struct glMaterialxv_params args = { .teb = NtCurrentTeb(), .face = face, .pname = pname, .param = param };
-    NTSTATUS status;
-    TRACE( "face %d, pname %d, param %p\n", face, pname, param );
-    if ((status = UNIX_CALL( glMaterialxv, &args ))) WARN( "glMaterialxv returned %#lx\n", status );
 }
 
 static void WINAPI glMaterialxvOES( GLenum face, GLenum pname, const GLfixed *param )
@@ -12846,14 +12556,6 @@ static void WINAPI glMinmaxEXT( GLenum target, GLenum internalformat, GLboolean 
     if ((status = UNIX_CALL( glMinmaxEXT, &args ))) WARN( "glMinmaxEXT returned %#lx\n", status );
 }
 
-static void WINAPI glMultMatrixx( const GLfixed *m )
-{
-    struct glMultMatrixx_params args = { .teb = NtCurrentTeb(), .m = m };
-    NTSTATUS status;
-    TRACE( "m %p\n", m );
-    if ((status = UNIX_CALL( glMultMatrixx, &args ))) WARN( "glMultMatrixx returned %#lx\n", status );
-}
-
 static void WINAPI glMultMatrixxOES( const GLfixed *m )
 {
     struct glMultMatrixxOES_params args = { .teb = NtCurrentTeb(), .m = m };
@@ -13046,28 +12748,12 @@ static void WINAPI glMultiDrawElementsIndirectCountARB( GLenum mode, GLenum type
     if ((status = UNIX_CALL( glMultiDrawElementsIndirectCountARB, &args ))) WARN( "glMultiDrawElementsIndirectCountARB returned %#lx\n", status );
 }
 
-static void WINAPI glMultiDrawMeshTasksIndirectCountEXT( GLintptr indirect, GLintptr drawcount, GLsizei maxdrawcount, GLsizei stride )
-{
-    struct glMultiDrawMeshTasksIndirectCountEXT_params args = { .teb = NtCurrentTeb(), .indirect = indirect, .drawcount = drawcount, .maxdrawcount = maxdrawcount, .stride = stride };
-    NTSTATUS status;
-    TRACE( "indirect %Id, drawcount %Id, maxdrawcount %d, stride %d\n", indirect, drawcount, maxdrawcount, stride );
-    if ((status = UNIX_CALL( glMultiDrawMeshTasksIndirectCountEXT, &args ))) WARN( "glMultiDrawMeshTasksIndirectCountEXT returned %#lx\n", status );
-}
-
 static void WINAPI glMultiDrawMeshTasksIndirectCountNV( GLintptr indirect, GLintptr drawcount, GLsizei maxdrawcount, GLsizei stride )
 {
     struct glMultiDrawMeshTasksIndirectCountNV_params args = { .teb = NtCurrentTeb(), .indirect = indirect, .drawcount = drawcount, .maxdrawcount = maxdrawcount, .stride = stride };
     NTSTATUS status;
     TRACE( "indirect %Id, drawcount %Id, maxdrawcount %d, stride %d\n", indirect, drawcount, maxdrawcount, stride );
     if ((status = UNIX_CALL( glMultiDrawMeshTasksIndirectCountNV, &args ))) WARN( "glMultiDrawMeshTasksIndirectCountNV returned %#lx\n", status );
-}
-
-static void WINAPI glMultiDrawMeshTasksIndirectEXT( GLintptr indirect, GLsizei drawcount, GLsizei stride )
-{
-    struct glMultiDrawMeshTasksIndirectEXT_params args = { .teb = NtCurrentTeb(), .indirect = indirect, .drawcount = drawcount, .stride = stride };
-    NTSTATUS status;
-    TRACE( "indirect %Id, drawcount %d, stride %d\n", indirect, drawcount, stride );
-    if ((status = UNIX_CALL( glMultiDrawMeshTasksIndirectEXT, &args ))) WARN( "glMultiDrawMeshTasksIndirectEXT returned %#lx\n", status );
 }
 
 static void WINAPI glMultiDrawMeshTasksIndirectNV( GLintptr indirect, GLsizei drawcount, GLsizei stride )
@@ -14054,14 +13740,6 @@ static void WINAPI glMultiTexCoord4svSGIS( GLenum target, GLshort * v )
     if ((status = UNIX_CALL( glMultiTexCoord4svSGIS, &args ))) WARN( "glMultiTexCoord4svSGIS returned %#lx\n", status );
 }
 
-static void WINAPI glMultiTexCoord4x( GLenum texture, GLfixed s, GLfixed t, GLfixed r, GLfixed q )
-{
-    struct glMultiTexCoord4x_params args = { .teb = NtCurrentTeb(), .texture = texture, .s = s, .t = t, .r = r, .q = q };
-    NTSTATUS status;
-    TRACE( "texture %d, s %d, t %d, r %d, q %d\n", texture, s, t, r, q );
-    if ((status = UNIX_CALL( glMultiTexCoord4x, &args ))) WARN( "glMultiTexCoord4x returned %#lx\n", status );
-}
-
 static void WINAPI glMultiTexCoord4xOES( GLenum texture, GLfixed s, GLfixed t, GLfixed r, GLfixed q )
 {
     struct glMultiTexCoord4xOES_params args = { .teb = NtCurrentTeb(), .texture = texture, .s = s, .t = t, .r = r, .q = q };
@@ -14494,14 +14172,6 @@ static void WINAPI glNamedBufferPageCommitmentEXT( GLuint buffer, GLintptr offse
     if ((status = UNIX_CALL( glNamedBufferPageCommitmentEXT, &args ))) WARN( "glNamedBufferPageCommitmentEXT returned %#lx\n", status );
 }
 
-static void WINAPI glNamedBufferPageCommitmentMemNV( GLuint buffer, GLintptr offset, GLsizeiptr size, GLuint memory, GLuint64 memOffset, GLboolean commit )
-{
-    struct glNamedBufferPageCommitmentMemNV_params args = { .teb = NtCurrentTeb(), .buffer = buffer, .offset = offset, .size = size, .memory = memory, .memOffset = memOffset, .commit = commit };
-    NTSTATUS status;
-    TRACE( "buffer %d, offset %Id, size %Id, memory %d, memOffset %s, commit %d\n", buffer, offset, size, memory, wine_dbgstr_longlong(memOffset), commit );
-    if ((status = UNIX_CALL( glNamedBufferPageCommitmentMemNV, &args ))) WARN( "glNamedBufferPageCommitmentMemNV returned %#lx\n", status );
-}
-
 static void WINAPI glNamedBufferStorage( GLuint buffer, GLsizeiptr size, const void *data, GLbitfield flags )
 {
     struct glNamedBufferStorage_params args = { .teb = NtCurrentTeb(), .buffer = buffer, .size = size, .data = data, .flags = flags };
@@ -14700,14 +14370,6 @@ static void WINAPI glNamedFramebufferTextureLayerEXT( GLuint framebuffer, GLenum
     NTSTATUS status;
     TRACE( "framebuffer %d, attachment %d, texture %d, level %d, layer %d\n", framebuffer, attachment, texture, level, layer );
     if ((status = UNIX_CALL( glNamedFramebufferTextureLayerEXT, &args ))) WARN( "glNamedFramebufferTextureLayerEXT returned %#lx\n", status );
-}
-
-static void WINAPI glNamedFramebufferTextureMultiviewOVR( GLuint framebuffer, GLenum attachment, GLuint texture, GLint level, GLint baseViewIndex, GLsizei numViews )
-{
-    struct glNamedFramebufferTextureMultiviewOVR_params args = { .teb = NtCurrentTeb(), .framebuffer = framebuffer, .attachment = attachment, .texture = texture, .level = level, .baseViewIndex = baseViewIndex, .numViews = numViews };
-    NTSTATUS status;
-    TRACE( "framebuffer %d, attachment %d, texture %d, level %d, baseViewIndex %d, numViews %d\n", framebuffer, attachment, texture, level, baseViewIndex, numViews );
-    if ((status = UNIX_CALL( glNamedFramebufferTextureMultiviewOVR, &args ))) WARN( "glNamedFramebufferTextureMultiviewOVR returned %#lx\n", status );
 }
 
 static void WINAPI glNamedProgramLocalParameter4dEXT( GLuint program, GLenum target, GLuint index, GLdouble x, GLdouble y, GLdouble z, GLdouble w )
@@ -14912,14 +14574,6 @@ static void WINAPI glNormal3hvNV( const GLhalfNV *v )
     if ((status = UNIX_CALL( glNormal3hvNV, &args ))) WARN( "glNormal3hvNV returned %#lx\n", status );
 }
 
-static void WINAPI glNormal3x( GLfixed nx, GLfixed ny, GLfixed nz )
-{
-    struct glNormal3x_params args = { .teb = NtCurrentTeb(), .nx = nx, .ny = ny, .nz = nz };
-    NTSTATUS status;
-    TRACE( "nx %d, ny %d, nz %d\n", nx, ny, nz );
-    if ((status = UNIX_CALL( glNormal3x, &args ))) WARN( "glNormal3x returned %#lx\n", status );
-}
-
 static void WINAPI glNormal3xOES( GLfixed nx, GLfixed ny, GLfixed nz )
 {
     struct glNormal3xOES_params args = { .teb = NtCurrentTeb(), .nx = nx, .ny = ny, .nz = nz };
@@ -15098,28 +14752,12 @@ static GLenum WINAPI glObjectUnpurgeableAPPLE( GLenum objectType, GLuint name, G
     return args.ret;
 }
 
-static void WINAPI glOrthof( GLfloat l, GLfloat r, GLfloat b, GLfloat t, GLfloat n, GLfloat f )
-{
-    struct glOrthof_params args = { .teb = NtCurrentTeb(), .l = l, .r = r, .b = b, .t = t, .n = n, .f = f };
-    NTSTATUS status;
-    TRACE( "l %f, r %f, b %f, t %f, n %f, f %f\n", l, r, b, t, n, f );
-    if ((status = UNIX_CALL( glOrthof, &args ))) WARN( "glOrthof returned %#lx\n", status );
-}
-
 static void WINAPI glOrthofOES( GLfloat l, GLfloat r, GLfloat b, GLfloat t, GLfloat n, GLfloat f )
 {
     struct glOrthofOES_params args = { .teb = NtCurrentTeb(), .l = l, .r = r, .b = b, .t = t, .n = n, .f = f };
     NTSTATUS status;
     TRACE( "l %f, r %f, b %f, t %f, n %f, f %f\n", l, r, b, t, n, f );
     if ((status = UNIX_CALL( glOrthofOES, &args ))) WARN( "glOrthofOES returned %#lx\n", status );
-}
-
-static void WINAPI glOrthox( GLfixed l, GLfixed r, GLfixed b, GLfixed t, GLfixed n, GLfixed f )
-{
-    struct glOrthox_params args = { .teb = NtCurrentTeb(), .l = l, .r = r, .b = b, .t = t, .n = n, .f = f };
-    NTSTATUS status;
-    TRACE( "l %d, r %d, b %d, t %d, n %d, f %d\n", l, r, b, t, n, f );
-    if ((status = UNIX_CALL( glOrthox, &args ))) WARN( "glOrthox returned %#lx\n", status );
 }
 
 static void WINAPI glOrthoxOES( GLfixed l, GLfixed r, GLfixed b, GLfixed t, GLfixed n, GLfixed f )
@@ -15235,10 +14873,11 @@ static GLenum WINAPI glPathGlyphIndexArrayNV( GLuint firstPathName, GLenum fontT
     return args.ret;
 }
 
-static GLenum WINAPI glPathGlyphIndexRangeNV( GLenum fontTarget, const void *fontName, GLbitfield fontStyle, GLuint pathParameterTemplate, GLfloat emScale, GLuint *baseAndCount )
+static GLenum WINAPI glPathGlyphIndexRangeNV( GLenum fontTarget, const void *fontName, GLbitfield fontStyle, GLuint pathParameterTemplate, GLfloat emScale, GLuint baseAndCount[2] )
 {
-    struct glPathGlyphIndexRangeNV_params args = { .teb = NtCurrentTeb(), .fontTarget = fontTarget, .fontName = fontName, .fontStyle = fontStyle, .pathParameterTemplate = pathParameterTemplate, .emScale = emScale, .baseAndCount = baseAndCount };
+    struct glPathGlyphIndexRangeNV_params args = { .teb = NtCurrentTeb(), .fontTarget = fontTarget, .fontName = fontName, .fontStyle = fontStyle, .pathParameterTemplate = pathParameterTemplate, .emScale = emScale };
     NTSTATUS status;
+    memcpy( args.baseAndCount, baseAndCount, sizeof(args.baseAndCount) );
     TRACE( "fontTarget %d, fontName %p, fontStyle %d, pathParameterTemplate %d, emScale %f, baseAndCount %p\n", fontTarget, fontName, fontStyle, pathParameterTemplate, emScale, baseAndCount );
     if ((status = UNIX_CALL( glPathGlyphIndexRangeNV, &args ))) WARN( "glPathGlyphIndexRangeNV returned %#lx\n", status );
     return args.ret;
@@ -15582,36 +15221,12 @@ static void WINAPI glPointParameterivNV( GLenum pname, const GLint *params )
     if ((status = UNIX_CALL( glPointParameterivNV, &args ))) WARN( "glPointParameterivNV returned %#lx\n", status );
 }
 
-static void WINAPI glPointParameterx( GLenum pname, GLfixed param )
-{
-    struct glPointParameterx_params args = { .teb = NtCurrentTeb(), .pname = pname, .param = param };
-    NTSTATUS status;
-    TRACE( "pname %d, param %d\n", pname, param );
-    if ((status = UNIX_CALL( glPointParameterx, &args ))) WARN( "glPointParameterx returned %#lx\n", status );
-}
-
-static void WINAPI glPointParameterxv( GLenum pname, const GLfixed *params )
-{
-    struct glPointParameterxv_params args = { .teb = NtCurrentTeb(), .pname = pname, .params = params };
-    NTSTATUS status;
-    TRACE( "pname %d, params %p\n", pname, params );
-    if ((status = UNIX_CALL( glPointParameterxv, &args ))) WARN( "glPointParameterxv returned %#lx\n", status );
-}
-
 static void WINAPI glPointParameterxvOES( GLenum pname, const GLfixed *params )
 {
     struct glPointParameterxvOES_params args = { .teb = NtCurrentTeb(), .pname = pname, .params = params };
     NTSTATUS status;
     TRACE( "pname %d, params %p\n", pname, params );
     if ((status = UNIX_CALL( glPointParameterxvOES, &args ))) WARN( "glPointParameterxvOES returned %#lx\n", status );
-}
-
-static void WINAPI glPointSizex( GLfixed size )
-{
-    struct glPointSizex_params args = { .teb = NtCurrentTeb(), .size = size };
-    NTSTATUS status;
-    TRACE( "size %d\n", size );
-    if ((status = UNIX_CALL( glPointSizex, &args ))) WARN( "glPointSizex returned %#lx\n", status );
 }
 
 static void WINAPI glPointSizexOES( GLfixed size )
@@ -15664,14 +15279,6 @@ static void WINAPI glPolygonOffsetEXT( GLfloat factor, GLfloat bias )
     if ((status = UNIX_CALL( glPolygonOffsetEXT, &args ))) WARN( "glPolygonOffsetEXT returned %#lx\n", status );
 }
 
-static void WINAPI glPolygonOffsetx( GLfixed factor, GLfixed units )
-{
-    struct glPolygonOffsetx_params args = { .teb = NtCurrentTeb(), .factor = factor, .units = units };
-    NTSTATUS status;
-    TRACE( "factor %d, units %d\n", factor, units );
-    if ((status = UNIX_CALL( glPolygonOffsetx, &args ))) WARN( "glPolygonOffsetx returned %#lx\n", status );
-}
-
 static void WINAPI glPolygonOffsetxOES( GLfixed factor, GLfixed units )
 {
     struct glPolygonOffsetxOES_params args = { .teb = NtCurrentTeb(), .factor = factor, .units = units };
@@ -15710,14 +15317,6 @@ static void WINAPI glPresentFrameKeyedNV( GLuint video_slot, GLuint64EXT minPres
     NTSTATUS status;
     TRACE( "video_slot %d, minPresentTime %s, beginPresentTimeId %d, presentDurationId %d, type %d, target0 %d, fill0 %d, key0 %d, target1 %d, fill1 %d, key1 %d\n", video_slot, wine_dbgstr_longlong(minPresentTime), beginPresentTimeId, presentDurationId, type, target0, fill0, key0, target1, fill1, key1 );
     if ((status = UNIX_CALL( glPresentFrameKeyedNV, &args ))) WARN( "glPresentFrameKeyedNV returned %#lx\n", status );
-}
-
-static void WINAPI glPrimitiveBoundingBox( GLfloat minX, GLfloat minY, GLfloat minZ, GLfloat minW, GLfloat maxX, GLfloat maxY, GLfloat maxZ, GLfloat maxW )
-{
-    struct glPrimitiveBoundingBox_params args = { .teb = NtCurrentTeb(), .minX = minX, .minY = minY, .minZ = minZ, .minW = minW, .maxX = maxX, .maxY = maxY, .maxZ = maxZ, .maxW = maxW };
-    NTSTATUS status;
-    TRACE( "minX %f, minY %f, minZ %f, minW %f, maxX %f, maxY %f, maxZ %f, maxW %f\n", minX, minY, minZ, minW, maxX, maxY, maxZ, maxW );
-    if ((status = UNIX_CALL( glPrimitiveBoundingBox, &args ))) WARN( "glPrimitiveBoundingBox returned %#lx\n", status );
 }
 
 static void WINAPI glPrimitiveBoundingBoxARB( GLfloat minX, GLfloat minY, GLfloat minZ, GLfloat minW, GLfloat maxX, GLfloat maxY, GLfloat maxZ, GLfloat maxW )
@@ -17747,14 +17346,6 @@ static void WINAPI glResumeTransformFeedbackNV(void)
     if ((status = UNIX_CALL( glResumeTransformFeedbackNV, &args ))) WARN( "glResumeTransformFeedbackNV returned %#lx\n", status );
 }
 
-static void WINAPI glRotatex( GLfixed angle, GLfixed x, GLfixed y, GLfixed z )
-{
-    struct glRotatex_params args = { .teb = NtCurrentTeb(), .angle = angle, .x = x, .y = y, .z = z };
-    NTSTATUS status;
-    TRACE( "angle %d, x %d, y %d, z %d\n", angle, x, y, z );
-    if ((status = UNIX_CALL( glRotatex, &args ))) WARN( "glRotatex returned %#lx\n", status );
-}
-
 static void WINAPI glRotatexOES( GLfixed angle, GLfixed x, GLfixed y, GLfixed z )
 {
     struct glRotatexOES_params args = { .teb = NtCurrentTeb(), .angle = angle, .x = x, .y = y, .z = z };
@@ -17777,14 +17368,6 @@ static void WINAPI glSampleCoverageARB( GLfloat value, GLboolean invert )
     NTSTATUS status;
     TRACE( "value %f, invert %d\n", value, invert );
     if ((status = UNIX_CALL( glSampleCoverageARB, &args ))) WARN( "glSampleCoverageARB returned %#lx\n", status );
-}
-
-static void WINAPI glSampleCoveragex( GLclampx value, GLboolean invert )
-{
-    struct glSampleCoveragex_params args = { .teb = NtCurrentTeb(), .value = value, .invert = invert };
-    NTSTATUS status;
-    TRACE( "value %d, invert %d\n", value, invert );
-    if ((status = UNIX_CALL( glSampleCoveragex, &args ))) WARN( "glSampleCoveragex returned %#lx\n", status );
 }
 
 static void WINAPI glSampleMapATI( GLuint dst, GLuint interp, GLenum swizzle )
@@ -17889,14 +17472,6 @@ static void WINAPI glSamplerParameteriv( GLuint sampler, GLenum pname, const GLi
     NTSTATUS status;
     TRACE( "sampler %d, pname %d, param %p\n", sampler, pname, param );
     if ((status = UNIX_CALL( glSamplerParameteriv, &args ))) WARN( "glSamplerParameteriv returned %#lx\n", status );
-}
-
-static void WINAPI glScalex( GLfixed x, GLfixed y, GLfixed z )
-{
-    struct glScalex_params args = { .teb = NtCurrentTeb(), .x = x, .y = y, .z = z };
-    NTSTATUS status;
-    TRACE( "x %d, y %d, z %d\n", x, y, z );
-    if ((status = UNIX_CALL( glScalex, &args ))) WARN( "glScalex returned %#lx\n", status );
 }
 
 static void WINAPI glScalexOES( GLfixed x, GLfixed y, GLfixed z )
@@ -18291,14 +17866,6 @@ static void WINAPI glSelectTextureSGIS( GLenum target )
     if ((status = UNIX_CALL( glSelectTextureSGIS, &args ))) WARN( "glSelectTextureSGIS returned %#lx\n", status );
 }
 
-static void WINAPI glSemaphoreParameterivNV( GLuint semaphore, GLenum pname, const GLint *params )
-{
-    struct glSemaphoreParameterivNV_params args = { .teb = NtCurrentTeb(), .semaphore = semaphore, .pname = pname, .params = params };
-    NTSTATUS status;
-    TRACE( "semaphore %d, pname %d, params %p\n", semaphore, pname, params );
-    if ((status = UNIX_CALL( glSemaphoreParameterivNV, &args ))) WARN( "glSemaphoreParameterivNV returned %#lx\n", status );
-}
-
 static void WINAPI glSemaphoreParameterui64vEXT( GLuint semaphore, GLenum pname, const GLuint64 *params )
 {
     struct glSemaphoreParameterui64vEXT_params args = { .teb = NtCurrentTeb(), .semaphore = semaphore, .pname = pname, .params = params };
@@ -18371,11 +17938,11 @@ static void WINAPI glSetMultisamplefvAMD( GLenum pname, GLuint index, const GLfl
     if ((status = UNIX_CALL( glSetMultisamplefvAMD, &args ))) WARN( "glSetMultisamplefvAMD returned %#lx\n", status );
 }
 
-static void WINAPI glShaderBinary( GLsizei count, const GLuint *shaders, GLenum binaryFormat, const void *binary, GLsizei length )
+static void WINAPI glShaderBinary( GLsizei count, const GLuint *shaders, GLenum binaryformat, const void *binary, GLsizei length )
 {
-    struct glShaderBinary_params args = { .teb = NtCurrentTeb(), .count = count, .shaders = shaders, .binaryFormat = binaryFormat, .binary = binary, .length = length };
+    struct glShaderBinary_params args = { .teb = NtCurrentTeb(), .count = count, .shaders = shaders, .binaryformat = binaryformat, .binary = binary, .length = length };
     NTSTATUS status;
-    TRACE( "count %d, shaders %p, binaryFormat %d, binary %p, length %d\n", count, shaders, binaryFormat, binary, length );
+    TRACE( "count %d, shaders %p, binaryformat %d, binary %p, length %d\n", count, shaders, binaryformat, binary, length );
     if ((status = UNIX_CALL( glShaderBinary, &args ))) WARN( "glShaderBinary returned %#lx\n", status );
 }
 
@@ -18403,44 +17970,12 @@ static void WINAPI glShaderOp3EXT( GLenum op, GLuint res, GLuint arg1, GLuint ar
     if ((status = UNIX_CALL( glShaderOp3EXT, &args ))) WARN( "glShaderOp3EXT returned %#lx\n", status );
 }
 
-static void WINAPI glShaderSource( GLuint shader, GLsizei count, const GLchar *const*string, const GLint *length )
-{
-    struct glShaderSource_params args = { .teb = NtCurrentTeb(), .shader = shader, .count = count, .string = string, .length = length };
-    NTSTATUS status;
-    TRACE( "shader %d, count %d, string %p, length %p\n", shader, count, string, length );
-    if ((status = UNIX_CALL( glShaderSource, &args ))) WARN( "glShaderSource returned %#lx\n", status );
-}
-
-static void WINAPI glShaderSourceARB( GLhandleARB shaderObj, GLsizei count, const GLcharARB **string, const GLint *length )
-{
-    struct glShaderSourceARB_params args = { .teb = NtCurrentTeb(), .shaderObj = shaderObj, .count = count, .string = string, .length = length };
-    NTSTATUS status;
-    TRACE( "shaderObj %d, count %d, string %p, length %p\n", shaderObj, count, string, length );
-    if ((status = UNIX_CALL( glShaderSourceARB, &args ))) WARN( "glShaderSourceARB returned %#lx\n", status );
-}
-
 static void WINAPI glShaderStorageBlockBinding( GLuint program, GLuint storageBlockIndex, GLuint storageBlockBinding )
 {
     struct glShaderStorageBlockBinding_params args = { .teb = NtCurrentTeb(), .program = program, .storageBlockIndex = storageBlockIndex, .storageBlockBinding = storageBlockBinding };
     NTSTATUS status;
     TRACE( "program %d, storageBlockIndex %d, storageBlockBinding %d\n", program, storageBlockIndex, storageBlockBinding );
     if ((status = UNIX_CALL( glShaderStorageBlockBinding, &args ))) WARN( "glShaderStorageBlockBinding returned %#lx\n", status );
-}
-
-static void WINAPI glShadingRateCombinerOpsEXT( GLenum combinerOp0, GLenum combinerOp1 )
-{
-    struct glShadingRateCombinerOpsEXT_params args = { .teb = NtCurrentTeb(), .combinerOp0 = combinerOp0, .combinerOp1 = combinerOp1 };
-    NTSTATUS status;
-    TRACE( "combinerOp0 %d, combinerOp1 %d\n", combinerOp0, combinerOp1 );
-    if ((status = UNIX_CALL( glShadingRateCombinerOpsEXT, &args ))) WARN( "glShadingRateCombinerOpsEXT returned %#lx\n", status );
-}
-
-static void WINAPI glShadingRateEXT( GLenum rate )
-{
-    struct glShadingRateEXT_params args = { .teb = NtCurrentTeb(), .rate = rate };
-    NTSTATUS status;
-    TRACE( "rate %d\n", rate );
-    if ((status = UNIX_CALL( glShadingRateEXT, &args ))) WARN( "glShadingRateEXT returned %#lx\n", status );
 }
 
 static void WINAPI glShadingRateImageBarrierNV( GLboolean synchronize )
@@ -19342,28 +18877,12 @@ static void WINAPI glTexCoordPointervINTEL( GLint size, GLenum type, const void 
     if ((status = UNIX_CALL( glTexCoordPointervINTEL, &args ))) WARN( "glTexCoordPointervINTEL returned %#lx\n", status );
 }
 
-static void WINAPI glTexEnvx( GLenum target, GLenum pname, GLfixed param )
-{
-    struct glTexEnvx_params args = { .teb = NtCurrentTeb(), .target = target, .pname = pname, .param = param };
-    NTSTATUS status;
-    TRACE( "target %d, pname %d, param %d\n", target, pname, param );
-    if ((status = UNIX_CALL( glTexEnvx, &args ))) WARN( "glTexEnvx returned %#lx\n", status );
-}
-
 static void WINAPI glTexEnvxOES( GLenum target, GLenum pname, GLfixed param )
 {
     struct glTexEnvxOES_params args = { .teb = NtCurrentTeb(), .target = target, .pname = pname, .param = param };
     NTSTATUS status;
     TRACE( "target %d, pname %d, param %d\n", target, pname, param );
     if ((status = UNIX_CALL( glTexEnvxOES, &args ))) WARN( "glTexEnvxOES returned %#lx\n", status );
-}
-
-static void WINAPI glTexEnvxv( GLenum target, GLenum pname, const GLfixed *params )
-{
-    struct glTexEnvxv_params args = { .teb = NtCurrentTeb(), .target = target, .pname = pname, .params = params };
-    NTSTATUS status;
-    TRACE( "target %d, pname %d, params %p\n", target, pname, params );
-    if ((status = UNIX_CALL( glTexEnvxv, &args ))) WARN( "glTexEnvxv returned %#lx\n", status );
 }
 
 static void WINAPI glTexEnvxvOES( GLenum target, GLenum pname, const GLfixed *params )
@@ -19462,14 +18981,6 @@ static void WINAPI glTexPageCommitmentARB( GLenum target, GLint level, GLint xof
     if ((status = UNIX_CALL( glTexPageCommitmentARB, &args ))) WARN( "glTexPageCommitmentARB returned %#lx\n", status );
 }
 
-static void WINAPI glTexPageCommitmentMemNV( GLenum target, GLint layer, GLint level, GLint xoffset, GLint yoffset, GLint zoffset, GLsizei width, GLsizei height, GLsizei depth, GLuint memory, GLuint64 offset, GLboolean commit )
-{
-    struct glTexPageCommitmentMemNV_params args = { .teb = NtCurrentTeb(), .target = target, .layer = layer, .level = level, .xoffset = xoffset, .yoffset = yoffset, .zoffset = zoffset, .width = width, .height = height, .depth = depth, .memory = memory, .offset = offset, .commit = commit };
-    NTSTATUS status;
-    TRACE( "target %d, layer %d, level %d, xoffset %d, yoffset %d, zoffset %d, width %d, height %d, depth %d, memory %d, offset %s, commit %d\n", target, layer, level, xoffset, yoffset, zoffset, width, height, depth, memory, wine_dbgstr_longlong(offset), commit );
-    if ((status = UNIX_CALL( glTexPageCommitmentMemNV, &args ))) WARN( "glTexPageCommitmentMemNV returned %#lx\n", status );
-}
-
 static void WINAPI glTexParameterIiv( GLenum target, GLenum pname, const GLint *params )
 {
     struct glTexParameterIiv_params args = { .teb = NtCurrentTeb(), .target = target, .pname = pname, .params = params };
@@ -19502,28 +19013,12 @@ static void WINAPI glTexParameterIuivEXT( GLenum target, GLenum pname, const GLu
     if ((status = UNIX_CALL( glTexParameterIuivEXT, &args ))) WARN( "glTexParameterIuivEXT returned %#lx\n", status );
 }
 
-static void WINAPI glTexParameterx( GLenum target, GLenum pname, GLfixed param )
-{
-    struct glTexParameterx_params args = { .teb = NtCurrentTeb(), .target = target, .pname = pname, .param = param };
-    NTSTATUS status;
-    TRACE( "target %d, pname %d, param %d\n", target, pname, param );
-    if ((status = UNIX_CALL( glTexParameterx, &args ))) WARN( "glTexParameterx returned %#lx\n", status );
-}
-
 static void WINAPI glTexParameterxOES( GLenum target, GLenum pname, GLfixed param )
 {
     struct glTexParameterxOES_params args = { .teb = NtCurrentTeb(), .target = target, .pname = pname, .param = param };
     NTSTATUS status;
     TRACE( "target %d, pname %d, param %d\n", target, pname, param );
     if ((status = UNIX_CALL( glTexParameterxOES, &args ))) WARN( "glTexParameterxOES returned %#lx\n", status );
-}
-
-static void WINAPI glTexParameterxv( GLenum target, GLenum pname, const GLfixed *params )
-{
-    struct glTexParameterxv_params args = { .teb = NtCurrentTeb(), .target = target, .pname = pname, .params = params };
-    NTSTATUS status;
-    TRACE( "target %d, pname %d, params %p\n", target, pname, params );
-    if ((status = UNIX_CALL( glTexParameterxv, &args ))) WARN( "glTexParameterxv returned %#lx\n", status );
 }
 
 static void WINAPI glTexParameterxvOES( GLenum target, GLenum pname, const GLfixed *params )
@@ -19550,28 +19045,12 @@ static void WINAPI glTexStorage1D( GLenum target, GLsizei levels, GLenum interna
     if ((status = UNIX_CALL( glTexStorage1D, &args ))) WARN( "glTexStorage1D returned %#lx\n", status );
 }
 
-static void WINAPI glTexStorage1DEXT( GLenum target, GLsizei levels, GLenum internalformat, GLsizei width )
-{
-    struct glTexStorage1DEXT_params args = { .teb = NtCurrentTeb(), .target = target, .levels = levels, .internalformat = internalformat, .width = width };
-    NTSTATUS status;
-    TRACE( "target %d, levels %d, internalformat %d, width %d\n", target, levels, internalformat, width );
-    if ((status = UNIX_CALL( glTexStorage1DEXT, &args ))) WARN( "glTexStorage1DEXT returned %#lx\n", status );
-}
-
 static void WINAPI glTexStorage2D( GLenum target, GLsizei levels, GLenum internalformat, GLsizei width, GLsizei height )
 {
     struct glTexStorage2D_params args = { .teb = NtCurrentTeb(), .target = target, .levels = levels, .internalformat = internalformat, .width = width, .height = height };
     NTSTATUS status;
     TRACE( "target %d, levels %d, internalformat %d, width %d, height %d\n", target, levels, internalformat, width, height );
     if ((status = UNIX_CALL( glTexStorage2D, &args ))) WARN( "glTexStorage2D returned %#lx\n", status );
-}
-
-static void WINAPI glTexStorage2DEXT( GLenum target, GLsizei levels, GLenum internalformat, GLsizei width, GLsizei height )
-{
-    struct glTexStorage2DEXT_params args = { .teb = NtCurrentTeb(), .target = target, .levels = levels, .internalformat = internalformat, .width = width, .height = height };
-    NTSTATUS status;
-    TRACE( "target %d, levels %d, internalformat %d, width %d, height %d\n", target, levels, internalformat, width, height );
-    if ((status = UNIX_CALL( glTexStorage2DEXT, &args ))) WARN( "glTexStorage2DEXT returned %#lx\n", status );
 }
 
 static void WINAPI glTexStorage2DMultisample( GLenum target, GLsizei samples, GLenum internalformat, GLsizei width, GLsizei height, GLboolean fixedsamplelocations )
@@ -19588,14 +19067,6 @@ static void WINAPI glTexStorage3D( GLenum target, GLsizei levels, GLenum interna
     NTSTATUS status;
     TRACE( "target %d, levels %d, internalformat %d, width %d, height %d, depth %d\n", target, levels, internalformat, width, height, depth );
     if ((status = UNIX_CALL( glTexStorage3D, &args ))) WARN( "glTexStorage3D returned %#lx\n", status );
-}
-
-static void WINAPI glTexStorage3DEXT( GLenum target, GLsizei levels, GLenum internalformat, GLsizei width, GLsizei height, GLsizei depth )
-{
-    struct glTexStorage3DEXT_params args = { .teb = NtCurrentTeb(), .target = target, .levels = levels, .internalformat = internalformat, .width = width, .height = height, .depth = depth };
-    NTSTATUS status;
-    TRACE( "target %d, levels %d, internalformat %d, width %d, height %d, depth %d\n", target, levels, internalformat, width, height, depth );
-    if ((status = UNIX_CALL( glTexStorage3DEXT, &args ))) WARN( "glTexStorage3DEXT returned %#lx\n", status );
 }
 
 static void WINAPI glTexStorage3DMultisample( GLenum target, GLsizei samples, GLenum internalformat, GLsizei width, GLsizei height, GLsizei depth, GLboolean fixedsamplelocations )
@@ -19844,14 +19315,6 @@ static void WINAPI glTexturePageCommitmentEXT( GLuint texture, GLint level, GLin
     NTSTATUS status;
     TRACE( "texture %d, level %d, xoffset %d, yoffset %d, zoffset %d, width %d, height %d, depth %d, commit %d\n", texture, level, xoffset, yoffset, zoffset, width, height, depth, commit );
     if ((status = UNIX_CALL( glTexturePageCommitmentEXT, &args ))) WARN( "glTexturePageCommitmentEXT returned %#lx\n", status );
-}
-
-static void WINAPI glTexturePageCommitmentMemNV( GLuint texture, GLint layer, GLint level, GLint xoffset, GLint yoffset, GLint zoffset, GLsizei width, GLsizei height, GLsizei depth, GLuint memory, GLuint64 offset, GLboolean commit )
-{
-    struct glTexturePageCommitmentMemNV_params args = { .teb = NtCurrentTeb(), .texture = texture, .layer = layer, .level = level, .xoffset = xoffset, .yoffset = yoffset, .zoffset = zoffset, .width = width, .height = height, .depth = depth, .memory = memory, .offset = offset, .commit = commit };
-    NTSTATUS status;
-    TRACE( "texture %d, layer %d, level %d, xoffset %d, yoffset %d, zoffset %d, width %d, height %d, depth %d, memory %d, offset %s, commit %d\n", texture, layer, level, xoffset, yoffset, zoffset, width, height, depth, memory, wine_dbgstr_longlong(offset), commit );
-    if ((status = UNIX_CALL( glTexturePageCommitmentMemNV, &args ))) WARN( "glTexturePageCommitmentMemNV returned %#lx\n", status );
 }
 
 static void WINAPI glTextureParameterIiv( GLuint texture, GLenum pname, const GLint *params )
@@ -20220,14 +19683,6 @@ static void WINAPI glTransformPathNV( GLuint resultPath, GLuint srcPath, GLenum 
     NTSTATUS status;
     TRACE( "resultPath %d, srcPath %d, transformType %d, transformValues %p\n", resultPath, srcPath, transformType, transformValues );
     if ((status = UNIX_CALL( glTransformPathNV, &args ))) WARN( "glTransformPathNV returned %#lx\n", status );
-}
-
-static void WINAPI glTranslatex( GLfixed x, GLfixed y, GLfixed z )
-{
-    struct glTranslatex_params args = { .teb = NtCurrentTeb(), .x = x, .y = y, .z = z };
-    NTSTATUS status;
-    TRACE( "x %d, y %d, z %d\n", x, y, z );
-    if ((status = UNIX_CALL( glTranslatex, &args ))) WARN( "glTranslatex returned %#lx\n", status );
 }
 
 static void WINAPI glTranslatexOES( GLfixed x, GLfixed y, GLfixed z )
@@ -21188,42 +20643,6 @@ static void WINAPI glUnlockArraysEXT(void)
     NTSTATUS status;
     TRACE( "\n" );
     if ((status = UNIX_CALL( glUnlockArraysEXT, &args ))) WARN( "glUnlockArraysEXT returned %#lx\n", status );
-}
-
-static GLboolean WINAPI glUnmapBuffer( GLenum target )
-{
-    struct glUnmapBuffer_params args = { .teb = NtCurrentTeb(), .target = target };
-    NTSTATUS status;
-    TRACE( "target %d\n", target );
-    if ((status = UNIX_CALL( glUnmapBuffer, &args ))) WARN( "glUnmapBuffer returned %#lx\n", status );
-    return args.ret;
-}
-
-static GLboolean WINAPI glUnmapBufferARB( GLenum target )
-{
-    struct glUnmapBufferARB_params args = { .teb = NtCurrentTeb(), .target = target };
-    NTSTATUS status;
-    TRACE( "target %d\n", target );
-    if ((status = UNIX_CALL( glUnmapBufferARB, &args ))) WARN( "glUnmapBufferARB returned %#lx\n", status );
-    return args.ret;
-}
-
-static GLboolean WINAPI glUnmapNamedBuffer( GLuint buffer )
-{
-    struct glUnmapNamedBuffer_params args = { .teb = NtCurrentTeb(), .buffer = buffer };
-    NTSTATUS status;
-    TRACE( "buffer %d\n", buffer );
-    if ((status = UNIX_CALL( glUnmapNamedBuffer, &args ))) WARN( "glUnmapNamedBuffer returned %#lx\n", status );
-    return args.ret;
-}
-
-static GLboolean WINAPI glUnmapNamedBufferEXT( GLuint buffer )
-{
-    struct glUnmapNamedBufferEXT_params args = { .teb = NtCurrentTeb(), .buffer = buffer };
-    NTSTATUS status;
-    TRACE( "buffer %d\n", buffer );
-    if ((status = UNIX_CALL( glUnmapNamedBufferEXT, &args ))) WARN( "glUnmapNamedBufferEXT returned %#lx\n", status );
-    return args.ret;
 }
 
 static void WINAPI glUnmapObjectBufferATI( GLuint buffer )
@@ -24153,10 +23572,9 @@ static void WINAPI glWaitSemaphoreui64NVX( GLuint waitGpu, GLsizei fenceObjectCo
 
 static void WINAPI glWaitSync( GLsync sync, GLbitfield flags, GLuint64 timeout )
 {
-    struct glWaitSync_params args = { .teb = NtCurrentTeb(), .flags = flags, .timeout = timeout };
+    struct glWaitSync_params args = { .teb = NtCurrentTeb(), .sync = sync, .flags = flags, .timeout = timeout };
     NTSTATUS status;
     TRACE( "sync %p, flags %d, timeout %s\n", sync, flags, wine_dbgstr_longlong(timeout) );
-    if (!get_sync_from_handle( sync, &args.sync )) { set_gl_error( GL_INVALID_VALUE ); return; }
     if ((status = UNIX_CALL( glWaitSync, &args ))) WARN( "glWaitSync returned %#lx\n", status );
 }
 
@@ -24723,11 +24141,37 @@ static void * WINAPI wglAllocateMemoryNV( GLsizei size, GLfloat readfreq, GLfloa
 
 static BOOL WINAPI wglBindTexImageARB( HPBUFFERARB hPbuffer, int iBuffer )
 {
-    struct wglBindTexImageARB_params args = { .teb = NtCurrentTeb(), .iBuffer = iBuffer };
+    struct wglBindTexImageARB_params args = { .teb = NtCurrentTeb(), .hPbuffer = hPbuffer, .iBuffer = iBuffer };
     NTSTATUS status;
     TRACE( "hPbuffer %p, iBuffer %d\n", hPbuffer, iBuffer );
-    if (!get_pbuffer_from_handle( hPbuffer, &args.hPbuffer )) return 0;
     if ((status = UNIX_CALL( wglBindTexImageARB, &args ))) WARN( "wglBindTexImageARB returned %#lx\n", status );
+    return args.ret;
+}
+
+static HGLRC WINAPI wglCreateContextAttribsARB( HDC hDC, HGLRC hShareContext, const int *attribList )
+{
+    struct wglCreateContextAttribsARB_params args = { .teb = NtCurrentTeb(), .hDC = hDC, .hShareContext = hShareContext, .attribList = attribList };
+    NTSTATUS status;
+    TRACE( "hDC %p, hShareContext %p, attribList %p\n", hDC, hShareContext, attribList );
+    if ((status = UNIX_CALL( wglCreateContextAttribsARB, &args ))) WARN( "wglCreateContextAttribsARB returned %#lx\n", status );
+    return args.ret;
+}
+
+static HPBUFFERARB WINAPI wglCreatePbufferARB( HDC hDC, int iPixelFormat, int iWidth, int iHeight, const int *piAttribList )
+{
+    struct wglCreatePbufferARB_params args = { .teb = NtCurrentTeb(), .hDC = hDC, .iPixelFormat = iPixelFormat, .iWidth = iWidth, .iHeight = iHeight, .piAttribList = piAttribList };
+    NTSTATUS status;
+    TRACE( "hDC %p, iPixelFormat %d, iWidth %d, iHeight %d, piAttribList %p\n", hDC, iPixelFormat, iWidth, iHeight, piAttribList );
+    if ((status = UNIX_CALL( wglCreatePbufferARB, &args ))) WARN( "wglCreatePbufferARB returned %#lx\n", status );
+    return args.ret;
+}
+
+static BOOL WINAPI wglDestroyPbufferARB( HPBUFFERARB hPbuffer )
+{
+    struct wglDestroyPbufferARB_params args = { .teb = NtCurrentTeb(), .hPbuffer = hPbuffer };
+    NTSTATUS status;
+    TRACE( "hPbuffer %p\n", hPbuffer );
+    if ((status = UNIX_CALL( wglDestroyPbufferARB, &args ))) WARN( "wglDestroyPbufferARB returned %#lx\n", status );
     return args.ret;
 }
 
@@ -24741,10 +24185,9 @@ static void WINAPI wglFreeMemoryNV( void *pointer )
 
 static HDC WINAPI wglGetPbufferDCARB( HPBUFFERARB hPbuffer )
 {
-    struct wglGetPbufferDCARB_params args = { .teb = NtCurrentTeb() };
+    struct wglGetPbufferDCARB_params args = { .teb = NtCurrentTeb(), .hPbuffer = hPbuffer };
     NTSTATUS status;
     TRACE( "hPbuffer %p\n", hPbuffer );
-    if (!get_pbuffer_from_handle( hPbuffer, &args.hPbuffer )) return 0;
     if ((status = UNIX_CALL( wglGetPbufferDCARB, &args ))) WARN( "wglGetPbufferDCARB returned %#lx\n", status );
     return args.ret;
 }
@@ -24755,6 +24198,15 @@ static int WINAPI wglGetSwapIntervalEXT(void)
     NTSTATUS status;
     TRACE( "\n" );
     if ((status = UNIX_CALL( wglGetSwapIntervalEXT, &args ))) WARN( "wglGetSwapIntervalEXT returned %#lx\n", status );
+    return args.ret;
+}
+
+static BOOL WINAPI wglMakeContextCurrentARB( HDC hDrawDC, HDC hReadDC, HGLRC hglrc )
+{
+    struct wglMakeContextCurrentARB_params args = { .teb = NtCurrentTeb(), .hDrawDC = hDrawDC, .hReadDC = hReadDC, .hglrc = hglrc };
+    NTSTATUS status;
+    TRACE( "hDrawDC %p, hReadDC %p, hglrc %p\n", hDrawDC, hReadDC, hglrc );
+    if ((status = UNIX_CALL( wglMakeContextCurrentARB, &args ))) WARN( "wglMakeContextCurrentARB returned %#lx\n", status );
     return args.ret;
 }
 
@@ -24769,10 +24221,9 @@ static BOOL WINAPI wglQueryCurrentRendererIntegerWINE( GLenum attribute, GLuint 
 
 static BOOL WINAPI wglQueryPbufferARB( HPBUFFERARB hPbuffer, int iAttribute, int *piValue )
 {
-    struct wglQueryPbufferARB_params args = { .teb = NtCurrentTeb(), .iAttribute = iAttribute, .piValue = piValue };
+    struct wglQueryPbufferARB_params args = { .teb = NtCurrentTeb(), .hPbuffer = hPbuffer, .iAttribute = iAttribute, .piValue = piValue };
     NTSTATUS status;
     TRACE( "hPbuffer %p, iAttribute %d, piValue %p\n", hPbuffer, iAttribute, piValue );
-    if (!get_pbuffer_from_handle( hPbuffer, &args.hPbuffer )) return 0;
     if ((status = UNIX_CALL( wglQueryPbufferARB, &args ))) WARN( "wglQueryPbufferARB returned %#lx\n", status );
     return args.ret;
 }
@@ -24788,30 +24239,27 @@ static BOOL WINAPI wglQueryRendererIntegerWINE( HDC dc, GLint renderer, GLenum a
 
 static int WINAPI wglReleasePbufferDCARB( HPBUFFERARB hPbuffer, HDC hDC )
 {
-    struct wglReleasePbufferDCARB_params args = { .teb = NtCurrentTeb(), .hDC = hDC };
+    struct wglReleasePbufferDCARB_params args = { .teb = NtCurrentTeb(), .hPbuffer = hPbuffer, .hDC = hDC };
     NTSTATUS status;
     TRACE( "hPbuffer %p, hDC %p\n", hPbuffer, hDC );
-    if (!get_pbuffer_from_handle( hPbuffer, &args.hPbuffer )) return 0;
     if ((status = UNIX_CALL( wglReleasePbufferDCARB, &args ))) WARN( "wglReleasePbufferDCARB returned %#lx\n", status );
     return args.ret;
 }
 
 static BOOL WINAPI wglReleaseTexImageARB( HPBUFFERARB hPbuffer, int iBuffer )
 {
-    struct wglReleaseTexImageARB_params args = { .teb = NtCurrentTeb(), .iBuffer = iBuffer };
+    struct wglReleaseTexImageARB_params args = { .teb = NtCurrentTeb(), .hPbuffer = hPbuffer, .iBuffer = iBuffer };
     NTSTATUS status;
     TRACE( "hPbuffer %p, iBuffer %d\n", hPbuffer, iBuffer );
-    if (!get_pbuffer_from_handle( hPbuffer, &args.hPbuffer )) return 0;
     if ((status = UNIX_CALL( wglReleaseTexImageARB, &args ))) WARN( "wglReleaseTexImageARB returned %#lx\n", status );
     return args.ret;
 }
 
 static BOOL WINAPI wglSetPbufferAttribARB( HPBUFFERARB hPbuffer, const int *piAttribList )
 {
-    struct wglSetPbufferAttribARB_params args = { .teb = NtCurrentTeb(), .piAttribList = piAttribList };
+    struct wglSetPbufferAttribARB_params args = { .teb = NtCurrentTeb(), .hPbuffer = hPbuffer, .piAttribList = piAttribList };
     NTSTATUS status;
     TRACE( "hPbuffer %p, piAttribList %p\n", hPbuffer, piAttribList );
-    if (!get_pbuffer_from_handle( hPbuffer, &args.hPbuffer )) return 0;
     if ((status = UNIX_CALL( wglSetPbufferAttribARB, &args ))) WARN( "wglSetPbufferAttribARB returned %#lx\n", status );
     return args.ret;
 }
@@ -24834,6 +24282,28 @@ static BOOL WINAPI wglSwapIntervalEXT( int interval )
     return args.ret;
 }
 
+extern const GLubyte * WINAPI glGetStringi( GLenum name, GLuint index );
+extern void * WINAPI glMapBuffer( GLenum target, GLenum access );
+extern void * WINAPI glMapBufferARB( GLenum target, GLenum access );
+extern void * WINAPI glMapBufferRange( GLenum target, GLintptr offset, GLsizeiptr length, GLbitfield access );
+extern void * WINAPI glMapNamedBuffer( GLuint buffer, GLenum access );
+extern void * WINAPI glMapNamedBufferEXT( GLuint buffer, GLenum access );
+extern void * WINAPI glMapNamedBufferRange( GLuint buffer, GLintptr offset, GLsizeiptr length, GLbitfield access );
+extern void * WINAPI glMapNamedBufferRangeEXT( GLuint buffer, GLintptr offset, GLsizeiptr length, GLbitfield access );
+extern void WINAPI glShaderSource( GLuint shader, GLsizei count, const GLchar *const*string, const GLint *length );
+extern void WINAPI glShaderSourceARB( GLhandleARB shaderObj, GLsizei count, const GLcharARB **string, const GLint *length );
+extern GLboolean WINAPI glUnmapBuffer( GLenum target );
+extern GLboolean WINAPI glUnmapBufferARB( GLenum target );
+extern GLboolean WINAPI glUnmapNamedBuffer( GLuint buffer );
+extern GLboolean WINAPI glUnmapNamedBufferEXT( GLuint buffer );
+extern BOOL WINAPI wglChoosePixelFormatARB( HDC hdc, const int *piAttribIList, const FLOAT *pfAttribFList, UINT nMaxFormats, int *piFormats, UINT *nNumFormats );
+extern HDC WINAPI wglGetCurrentReadDCARB(void);
+extern const char * WINAPI wglGetExtensionsStringARB( HDC hdc );
+extern const char * WINAPI wglGetExtensionsStringEXT(void);
+extern BOOL WINAPI wglGetPixelFormatAttribfvARB( HDC hdc, int iPixelFormat, int iLayerPlane, UINT nAttributes, const int *piAttributes, FLOAT *pfValues );
+extern BOOL WINAPI wglGetPixelFormatAttribivARB( HDC hdc, int iPixelFormat, int iLayerPlane, UINT nAttributes, const int *piAttributes, int *piValues );
+extern const GLchar * WINAPI wglQueryCurrentRendererStringWINE( GLenum attribute );
+extern const GLchar * WINAPI wglQueryRendererStringWINE( HDC dc, GLint renderer, GLenum attribute );
 const void *extension_procs[] =
 {
     glAccumxOES,
@@ -24847,7 +24317,6 @@ const void *extension_procs[] =
     glAlphaFragmentOp1ATI,
     glAlphaFragmentOp2ATI,
     glAlphaFragmentOp3ATI,
-    glAlphaFuncx,
     glAlphaFuncxOES,
     glAlphaToCoverageDitherControlNV,
     glApplyFramebufferAttachmentCMAAINTEL,
@@ -24937,7 +24406,6 @@ const void *extension_procs[] =
     glBinormal3svEXT,
     glBinormalPointerEXT,
     glBitmapxOES,
-    glBlendBarrier,
     glBlendBarrierKHR,
     glBlendBarrierNV,
     glBlendColor,
@@ -24965,15 +24433,12 @@ const void *extension_procs[] =
     glBlendParameteriNV,
     glBlitFramebuffer,
     glBlitFramebufferEXT,
-    glBlitFramebufferLayerEXT,
-    glBlitFramebufferLayersEXT,
     glBlitNamedFramebuffer,
     glBufferAddressRangeNV,
     glBufferAttachMemoryNV,
     glBufferData,
     glBufferDataARB,
     glBufferPageCommitmentARB,
-    glBufferPageCommitmentMemNV,
     glBufferParameteriAPPLE,
     glBufferRegionEnabled,
     glBufferStorage,
@@ -24997,12 +24462,10 @@ const void *extension_procs[] =
     glClearBufferuiv,
     glClearColorIiEXT,
     glClearColorIuiEXT,
-    glClearColorx,
     glClearColorxOES,
     glClearDepthdNV,
     glClearDepthf,
     glClearDepthfOES,
-    glClearDepthx,
     glClearDepthxOES,
     glClearNamedBufferData,
     glClearNamedBufferDataEXT,
@@ -25021,9 +24484,7 @@ const void *extension_procs[] =
     glClientWaitSemaphoreui64NVX,
     glClientWaitSync,
     glClipControl,
-    glClipPlanef,
     glClipPlanefOES,
-    glClipPlanex,
     glClipPlanexOES,
     glColor3fVertex3fSUN,
     glColor3fVertex3fvSUN,
@@ -25039,7 +24500,6 @@ const void *extension_procs[] =
     glColor4ubVertex2fvSUN,
     glColor4ubVertex3fSUN,
     glColor4ubVertex3fvSUN,
-    glColor4x,
     glColor4xOES,
     glColor4xvOES,
     glColorFormatNV,
@@ -25169,7 +24629,6 @@ const void *extension_procs[] =
     glCreateQueries,
     glCreateRenderbuffers,
     glCreateSamplers,
-    glCreateSemaphoresNV,
     glCreateShader,
     glCreateShaderObjectARB,
     glCreateShaderProgramEXT,
@@ -25242,7 +24701,6 @@ const void *extension_procs[] =
     glDepthRangedNV,
     glDepthRangef,
     glDepthRangefOES,
-    glDepthRangex,
     glDepthRangexOES,
     glDetachObjectARB,
     glDetachShader,
@@ -25286,8 +24744,6 @@ const void *extension_procs[] =
     glDrawElementsInstancedBaseVertexBaseInstance,
     glDrawElementsInstancedEXT,
     glDrawMeshArraysSUN,
-    glDrawMeshTasksEXT,
-    glDrawMeshTasksIndirectEXT,
     glDrawMeshTasksIndirectNV,
     glDrawMeshTasksNV,
     glDrawRangeElementArrayAPPLE,
@@ -25375,9 +24831,7 @@ const void *extension_procs[] =
     glFogCoordhNV,
     glFogCoordhvNV,
     glFogFuncSGIS,
-    glFogx,
     glFogxOES,
-    glFogxv,
     glFogxvOES,
     glFragmentColorMaterialSGIX,
     glFragmentCoverageColorNV,
@@ -25406,7 +24860,6 @@ const void *extension_procs[] =
     glFramebufferSampleLocationsfvARB,
     glFramebufferSampleLocationsfvNV,
     glFramebufferSamplePositionsfvAMD,
-    glFramebufferShadingRateEXT,
     glFramebufferTexture,
     glFramebufferTexture1D,
     glFramebufferTexture1DEXT,
@@ -25423,9 +24876,7 @@ const void *extension_procs[] =
     glFramebufferTextureLayerEXT,
     glFramebufferTextureMultiviewOVR,
     glFreeObjectBufferATI,
-    glFrustumf,
     glFrustumfOES,
-    glFrustumx,
     glFrustumxOES,
     glGenAsyncMarkersSGIX,
     glGenBuffers,
@@ -25490,9 +24941,7 @@ const void *extension_procs[] =
     glGetBufferPointervARB,
     glGetBufferSubData,
     glGetBufferSubDataARB,
-    glGetClipPlanef,
     glGetClipPlanefOES,
-    glGetClipPlanex,
     glGetClipPlanexOES,
     glGetColorTable,
     glGetColorTableEXT,
@@ -25534,7 +24983,6 @@ const void *extension_procs[] =
     glGetFinalCombinerInputParameterfvNV,
     glGetFinalCombinerInputParameterivNV,
     glGetFirstPerfQueryIdINTEL,
-    glGetFixedv,
     glGetFixedvOES,
     glGetFloatIndexedvEXT,
     glGetFloati_v,
@@ -25547,7 +24995,6 @@ const void *extension_procs[] =
     glGetFragmentLightivSGIX,
     glGetFragmentMaterialfvSGIX,
     glGetFragmentMaterialivSGIX,
-    glGetFragmentShadingRatesEXT,
     glGetFramebufferAttachmentParameteriv,
     glGetFramebufferAttachmentParameterivEXT,
     glGetFramebufferParameterfvAMD,
@@ -25583,7 +25030,6 @@ const void *extension_procs[] =
     glGetInvariantFloatvEXT,
     glGetInvariantIntegervEXT,
     glGetLightxOES,
-    glGetLightxv,
     glGetListParameterfvSGIX,
     glGetListParameterivSGIX,
     glGetLocalConstantBooleanvEXT,
@@ -25596,7 +25042,6 @@ const void *extension_procs[] =
     glGetMapParameterivNV,
     glGetMapxvOES,
     glGetMaterialxOES,
-    glGetMaterialxv,
     glGetMemoryObjectDetachedResourcesuivNV,
     glGetMemoryObjectParameterivEXT,
     glGetMinmax,
@@ -25735,7 +25180,6 @@ const void *extension_procs[] =
     glGetSamplerParameterIuiv,
     glGetSamplerParameterfv,
     glGetSamplerParameteriv,
-    glGetSemaphoreParameterivNV,
     glGetSemaphoreParameterui64vEXT,
     glGetSeparableFilter,
     glGetSeparableFilterEXT,
@@ -25754,7 +25198,6 @@ const void *extension_procs[] =
     glGetSynciv,
     glGetTexBumpParameterfvATI,
     glGetTexBumpParameterivATI,
-    glGetTexEnvxv,
     glGetTexEnvxvOES,
     glGetTexFilterFuncSGIS,
     glGetTexGenxvOES,
@@ -25764,7 +25207,6 @@ const void *extension_procs[] =
     glGetTexParameterIuiv,
     glGetTexParameterIuivEXT,
     glGetTexParameterPointervAPPLE,
-    glGetTexParameterxv,
     glGetTexParameterxvOES,
     glGetTextureHandleARB,
     glGetTextureHandleNV,
@@ -25912,8 +25354,10 @@ const void *extension_procs[] =
     glImageTransformParameterfvHP,
     glImageTransformParameteriHP,
     glImageTransformParameterivHP,
+    glImportMemoryFdEXT,
     glImportMemoryWin32HandleEXT,
     glImportMemoryWin32NameEXT,
+    glImportSemaphoreFdEXT,
     glImportSemaphoreWin32HandleEXT,
     glImportSemaphoreWin32NameEXT,
     glImportSyncEXT,
@@ -25985,15 +25429,10 @@ const void *extension_procs[] =
     glLGPUNamedBufferSubDataNVX,
     glLabelObjectEXT,
     glLightEnviSGIX,
-    glLightModelx,
     glLightModelxOES,
-    glLightModelxv,
     glLightModelxvOES,
-    glLightx,
     glLightxOES,
-    glLightxv,
     glLightxvOES,
-    glLineWidthx,
     glLineWidthxOES,
     glLinkProgram,
     glLinkProgramARB,
@@ -26003,7 +25442,6 @@ const void *extension_procs[] =
     glListParameteriSGIX,
     glListParameterivSGIX,
     glLoadIdentityDeformationMapSGIX,
-    glLoadMatrixx,
     glLoadMatrixxOES,
     glLoadProgramNV,
     glLoadTransposeMatrixd,
@@ -26046,9 +25484,7 @@ const void *extension_procs[] =
     glMapVertexAttrib1fAPPLE,
     glMapVertexAttrib2dAPPLE,
     glMapVertexAttrib2fAPPLE,
-    glMaterialx,
     glMaterialxOES,
-    glMaterialxv,
     glMaterialxvOES,
     glMatrixFrustumEXT,
     glMatrixIndexPointerARB,
@@ -26089,7 +25525,6 @@ const void *extension_procs[] =
     glMinSampleShadingARB,
     glMinmax,
     glMinmaxEXT,
-    glMultMatrixx,
     glMultMatrixxOES,
     glMultTransposeMatrixd,
     glMultTransposeMatrixdARB,
@@ -26114,9 +25549,7 @@ const void *extension_procs[] =
     glMultiDrawElementsIndirectBindlessNV,
     glMultiDrawElementsIndirectCount,
     glMultiDrawElementsIndirectCountARB,
-    glMultiDrawMeshTasksIndirectCountEXT,
     glMultiDrawMeshTasksIndirectCountNV,
-    glMultiDrawMeshTasksIndirectEXT,
     glMultiDrawMeshTasksIndirectNV,
     glMultiDrawRangeElementArrayAPPLE,
     glMultiModeDrawArraysIBM,
@@ -26240,7 +25673,6 @@ const void *extension_procs[] =
     glMultiTexCoord4sv,
     glMultiTexCoord4svARB,
     glMultiTexCoord4svSGIS,
-    glMultiTexCoord4x,
     glMultiTexCoord4xOES,
     glMultiTexCoord4xvOES,
     glMultiTexCoordP1ui,
@@ -26295,7 +25727,6 @@ const void *extension_procs[] =
     glNamedBufferDataEXT,
     glNamedBufferPageCommitmentARB,
     glNamedBufferPageCommitmentEXT,
-    glNamedBufferPageCommitmentMemNV,
     glNamedBufferStorage,
     glNamedBufferStorageEXT,
     glNamedBufferStorageExternalEXT,
@@ -26321,7 +25752,6 @@ const void *extension_procs[] =
     glNamedFramebufferTextureFaceEXT,
     glNamedFramebufferTextureLayer,
     glNamedFramebufferTextureLayerEXT,
-    glNamedFramebufferTextureMultiviewOVR,
     glNamedProgramLocalParameter4dEXT,
     glNamedProgramLocalParameter4dvEXT,
     glNamedProgramLocalParameter4fEXT,
@@ -26347,7 +25777,6 @@ const void *extension_procs[] =
     glNormal3fVertex3fvSUN,
     glNormal3hNV,
     glNormal3hvNV,
-    glNormal3x,
     glNormal3xOES,
     glNormal3xvOES,
     glNormalFormatNV,
@@ -26370,9 +25799,7 @@ const void *extension_procs[] =
     glObjectPtrLabel,
     glObjectPurgeableAPPLE,
     glObjectUnpurgeableAPPLE,
-    glOrthof,
     glOrthofOES,
-    glOrthox,
     glOrthoxOES,
     glPNTrianglesfATI,
     glPNTrianglesiATI,
@@ -26430,23 +25857,18 @@ const void *extension_procs[] =
     glPointParameteriNV,
     glPointParameteriv,
     glPointParameterivNV,
-    glPointParameterx,
-    glPointParameterxv,
     glPointParameterxvOES,
-    glPointSizex,
     glPointSizexOES,
     glPollAsyncSGIX,
     glPollInstrumentsSGIX,
     glPolygonOffsetClamp,
     glPolygonOffsetClampEXT,
     glPolygonOffsetEXT,
-    glPolygonOffsetx,
     glPolygonOffsetxOES,
     glPopDebugGroup,
     glPopGroupMarkerEXT,
     glPresentFrameDualFillNV,
     glPresentFrameKeyedNV,
-    glPrimitiveBoundingBox,
     glPrimitiveBoundingBoxARB,
     glPrimitiveRestartIndex,
     glPrimitiveRestartIndexNV,
@@ -26700,11 +26122,9 @@ const void *extension_procs[] =
     glResolveDepthValuesNV,
     glResumeTransformFeedback,
     glResumeTransformFeedbackNV,
-    glRotatex,
     glRotatexOES,
     glSampleCoverage,
     glSampleCoverageARB,
-    glSampleCoveragex,
     glSampleMapATI,
     glSampleMaskEXT,
     glSampleMaskIndexedNV,
@@ -26718,7 +26138,6 @@ const void *extension_procs[] =
     glSamplerParameterfv,
     glSamplerParameteri,
     glSamplerParameteriv,
-    glScalex,
     glScalexOES,
     glScissorArrayv,
     glScissorExclusiveArrayvNV,
@@ -26768,7 +26187,6 @@ const void *extension_procs[] =
     glSelectPerfMonitorCountersAMD,
     glSelectTextureCoordSetSGIS,
     glSelectTextureSGIS,
-    glSemaphoreParameterivNV,
     glSemaphoreParameterui64vEXT,
     glSeparableFilter2D,
     glSeparableFilter2DEXT,
@@ -26785,8 +26203,6 @@ const void *extension_procs[] =
     glShaderSource,
     glShaderSourceARB,
     glShaderStorageBlockBinding,
-    glShadingRateCombinerOpsEXT,
-    glShadingRateEXT,
     glShadingRateImageBarrierNV,
     glShadingRateImagePaletteNV,
     glShadingRateSampleOrderCustomNV,
@@ -26899,9 +26315,7 @@ const void *extension_procs[] =
     glTexCoordPointerEXT,
     glTexCoordPointerListIBM,
     glTexCoordPointervINTEL,
-    glTexEnvx,
     glTexEnvxOES,
-    glTexEnvxv,
     glTexEnvxvOES,
     glTexFilterFuncSGIS,
     glTexGenxOES,
@@ -26914,23 +26328,17 @@ const void *extension_procs[] =
     glTexImage3DMultisampleCoverageNV,
     glTexImage4DSGIS,
     glTexPageCommitmentARB,
-    glTexPageCommitmentMemNV,
     glTexParameterIiv,
     glTexParameterIivEXT,
     glTexParameterIuiv,
     glTexParameterIuivEXT,
-    glTexParameterx,
     glTexParameterxOES,
-    glTexParameterxv,
     glTexParameterxvOES,
     glTexRenderbufferNV,
     glTexStorage1D,
-    glTexStorage1DEXT,
     glTexStorage2D,
-    glTexStorage2DEXT,
     glTexStorage2DMultisample,
     glTexStorage3D,
-    glTexStorage3DEXT,
     glTexStorage3DMultisample,
     glTexStorageMem1DEXT,
     glTexStorageMem2DEXT,
@@ -26962,7 +26370,6 @@ const void *extension_procs[] =
     glTextureMaterialEXT,
     glTextureNormalEXT,
     glTexturePageCommitmentEXT,
-    glTexturePageCommitmentMemNV,
     glTextureParameterIiv,
     glTextureParameterIivEXT,
     glTextureParameterIuiv,
@@ -27009,7 +26416,6 @@ const void *extension_procs[] =
     glTransformFeedbackVaryingsEXT,
     glTransformFeedbackVaryingsNV,
     glTransformPathNV,
-    glTranslatex,
     glTranslatexOES,
     glUniform1d,
     glUniform1dv,
@@ -27595,2775 +27001,3 @@ const void *extension_procs[] =
     wglSetPixelFormatWINE,
     wglSwapIntervalEXT,
 };
-const struct registry_entry extension_registry[] =
-{
-    { "glAccumxOES", glAccumxOES, 0, 0, { GL_OES_fixed_point, GL_EXTENSION_COUNT }},
-    { "glAcquireKeyedMutexWin32EXT", glAcquireKeyedMutexWin32EXT, 0, 0, { GL_EXT_win32_keyed_mutex, GL_EXTENSION_COUNT }},
-    { "glActiveProgramEXT", glActiveProgramEXT, 0, 0, { GL_EXT_separate_shader_objects, GL_EXTENSION_COUNT }},
-    { "glActiveShaderProgram", glActiveShaderProgram, 4, 1, { GL_ARB_separate_shader_objects, GL_EXTENSION_COUNT }},
-    { "glActiveStencilFaceEXT", glActiveStencilFaceEXT, 0, 0, { GL_EXT_stencil_two_side, GL_EXTENSION_COUNT }},
-    { "glActiveTexture", glActiveTexture, 1, 3, { GL_EXTENSION_COUNT }},
-    { "glActiveTextureARB", glActiveTextureARB, 0, 0, { GL_ARB_multitexture, GL_EXTENSION_COUNT }},
-    { "glActiveVaryingNV", glActiveVaryingNV, 0, 0, { GL_NV_transform_feedback, GL_EXTENSION_COUNT }},
-    { "glAlphaFragmentOp1ATI", glAlphaFragmentOp1ATI, 0, 0, { GL_ATI_fragment_shader, GL_EXTENSION_COUNT }},
-    { "glAlphaFragmentOp2ATI", glAlphaFragmentOp2ATI, 0, 0, { GL_ATI_fragment_shader, GL_EXTENSION_COUNT }},
-    { "glAlphaFragmentOp3ATI", glAlphaFragmentOp3ATI, 0, 0, { GL_ATI_fragment_shader, GL_EXTENSION_COUNT }},
-    { "glAlphaFuncx", glAlphaFuncx, 0, 0, { GL_NV_ES1_1_compatibility, GL_EXTENSION_COUNT }},
-    { "glAlphaFuncxOES", glAlphaFuncxOES, 0, 0, { GL_OES_fixed_point, GL_EXTENSION_COUNT }},
-    { "glAlphaToCoverageDitherControlNV", glAlphaToCoverageDitherControlNV, 0, 0, { GL_NV_alpha_to_coverage_dither_control, GL_EXTENSION_COUNT }},
-    { "glApplyFramebufferAttachmentCMAAINTEL", glApplyFramebufferAttachmentCMAAINTEL, 0, 0, { GL_INTEL_framebuffer_CMAA, GL_EXTENSION_COUNT }},
-    { "glApplyTextureEXT", glApplyTextureEXT, 0, 0, { GL_EXT_light_texture, GL_EXTENSION_COUNT }},
-    { "glAreProgramsResidentNV", glAreProgramsResidentNV, 0, 0, { GL_NV_vertex_program, GL_EXTENSION_COUNT }},
-    { "glAreTexturesResidentEXT", glAreTexturesResidentEXT, 0, 0, { GL_EXT_texture_object, GL_EXTENSION_COUNT }},
-    { "glArrayElementEXT", glArrayElementEXT, 0, 0, { GL_EXT_vertex_array, GL_EXTENSION_COUNT }},
-    { "glArrayObjectATI", glArrayObjectATI, 0, 0, { GL_ATI_vertex_array_object, GL_EXTENSION_COUNT }},
-    { "glAsyncCopyBufferSubDataNVX", glAsyncCopyBufferSubDataNVX, 0, 0, { GL_NVX_gpu_multicast2, GL_EXTENSION_COUNT }},
-    { "glAsyncCopyImageSubDataNVX", glAsyncCopyImageSubDataNVX, 0, 0, { GL_NVX_gpu_multicast2, GL_EXTENSION_COUNT }},
-    { "glAsyncMarkerSGIX", glAsyncMarkerSGIX, 0, 0, { GL_SGIX_async, GL_EXTENSION_COUNT }},
-    { "glAttachObjectARB", glAttachObjectARB, 0, 0, { GL_ARB_shader_objects, GL_EXTENSION_COUNT }},
-    { "glAttachShader", glAttachShader, 2, 0, { GL_EXTENSION_COUNT }},
-    { "glBeginConditionalRender", glBeginConditionalRender, 3, 0, { GL_EXTENSION_COUNT }},
-    { "glBeginConditionalRenderNV", glBeginConditionalRenderNV, 0, 0, { GL_NV_conditional_render, GL_EXTENSION_COUNT }},
-    { "glBeginConditionalRenderNVX", glBeginConditionalRenderNVX, 0, 0, { GL_NVX_conditional_render, GL_EXTENSION_COUNT }},
-    { "glBeginFragmentShaderATI", glBeginFragmentShaderATI, 0, 0, { GL_ATI_fragment_shader, GL_EXTENSION_COUNT }},
-    { "glBeginOcclusionQueryNV", glBeginOcclusionQueryNV, 0, 0, { GL_NV_occlusion_query, GL_EXTENSION_COUNT }},
-    { "glBeginPerfMonitorAMD", glBeginPerfMonitorAMD, 0, 0, { GL_AMD_performance_monitor, GL_EXTENSION_COUNT }},
-    { "glBeginPerfQueryINTEL", glBeginPerfQueryINTEL, 0, 0, { GL_INTEL_performance_query, GL_EXTENSION_COUNT }},
-    { "glBeginQuery", glBeginQuery, 1, 5, { GL_EXTENSION_COUNT }},
-    { "glBeginQueryARB", glBeginQueryARB, 0, 0, { GL_ARB_occlusion_query, GL_EXTENSION_COUNT }},
-    { "glBeginQueryIndexed", glBeginQueryIndexed, 4, 0, { GL_ARB_transform_feedback3, GL_EXTENSION_COUNT }},
-    { "glBeginTransformFeedback", glBeginTransformFeedback, 3, 0, { GL_EXTENSION_COUNT }},
-    { "glBeginTransformFeedbackEXT", glBeginTransformFeedbackEXT, 0, 0, { GL_EXT_transform_feedback, GL_EXTENSION_COUNT }},
-    { "glBeginTransformFeedbackNV", glBeginTransformFeedbackNV, 0, 0, { GL_NV_transform_feedback, GL_EXTENSION_COUNT }},
-    { "glBeginVertexShaderEXT", glBeginVertexShaderEXT, 0, 0, { GL_EXT_vertex_shader, GL_EXTENSION_COUNT }},
-    { "glBeginVideoCaptureNV", glBeginVideoCaptureNV, 0, 0, { GL_NV_video_capture, GL_EXTENSION_COUNT }},
-    { "glBindAttribLocation", glBindAttribLocation, 2, 0, { GL_EXTENSION_COUNT }},
-    { "glBindAttribLocationARB", glBindAttribLocationARB, 0, 0, { GL_ARB_vertex_shader, GL_EXTENSION_COUNT }},
-    { "glBindBuffer", glBindBuffer, 1, 5, { GL_EXTENSION_COUNT }},
-    { "glBindBufferARB", glBindBufferARB, 0, 0, { GL_ARB_vertex_buffer_object, GL_EXTENSION_COUNT }},
-    { "glBindBufferBase", glBindBufferBase, 3, 0, { GL_ARB_uniform_buffer_object, GL_EXTENSION_COUNT }},
-    { "glBindBufferBaseEXT", glBindBufferBaseEXT, 0, 0, { GL_EXT_transform_feedback, GL_EXTENSION_COUNT }},
-    { "glBindBufferBaseNV", glBindBufferBaseNV, 0, 0, { GL_NV_transform_feedback, GL_EXTENSION_COUNT }},
-    { "glBindBufferOffsetEXT", glBindBufferOffsetEXT, 0, 0, { GL_EXT_transform_feedback, GL_EXTENSION_COUNT }},
-    { "glBindBufferOffsetNV", glBindBufferOffsetNV, 0, 0, { GL_NV_transform_feedback, GL_EXTENSION_COUNT }},
-    { "glBindBufferRange", glBindBufferRange, 3, 0, { GL_ARB_uniform_buffer_object, GL_EXTENSION_COUNT }},
-    { "glBindBufferRangeEXT", glBindBufferRangeEXT, 0, 0, { GL_EXT_transform_feedback, GL_EXTENSION_COUNT }},
-    { "glBindBufferRangeNV", glBindBufferRangeNV, 0, 0, { GL_NV_transform_feedback, GL_EXTENSION_COUNT }},
-    { "glBindBuffersBase", glBindBuffersBase, 4, 4, { GL_ARB_multi_bind, GL_EXTENSION_COUNT }},
-    { "glBindBuffersRange", glBindBuffersRange, 4, 4, { GL_ARB_multi_bind, GL_EXTENSION_COUNT }},
-    { "glBindFragDataLocation", glBindFragDataLocation, 3, 0, { GL_EXTENSION_COUNT }},
-    { "glBindFragDataLocationEXT", glBindFragDataLocationEXT, 0, 0, { GL_EXT_gpu_shader4, GL_EXTENSION_COUNT }},
-    { "glBindFragDataLocationIndexed", glBindFragDataLocationIndexed, 3, 3, { GL_ARB_blend_func_extended, GL_EXTENSION_COUNT }},
-    { "glBindFragmentShaderATI", glBindFragmentShaderATI, 0, 0, { GL_ATI_fragment_shader, GL_EXTENSION_COUNT }},
-    { "glBindFramebuffer", glBindFramebuffer, 3, 0, { GL_ARB_framebuffer_object, GL_EXTENSION_COUNT }},
-    { "glBindFramebufferEXT", glBindFramebufferEXT, 0, 0, { GL_EXT_framebuffer_object, GL_EXTENSION_COUNT }},
-    { "glBindImageTexture", glBindImageTexture, 4, 2, { GL_ARB_shader_image_load_store, GL_EXTENSION_COUNT }},
-    { "glBindImageTextureEXT", glBindImageTextureEXT, 0, 0, { GL_EXT_shader_image_load_store, GL_EXTENSION_COUNT }},
-    { "glBindImageTextures", glBindImageTextures, 4, 4, { GL_ARB_multi_bind, GL_EXTENSION_COUNT }},
-    { "glBindLightParameterEXT", glBindLightParameterEXT, 0, 0, { GL_EXT_vertex_shader, GL_EXTENSION_COUNT }},
-    { "glBindMaterialParameterEXT", glBindMaterialParameterEXT, 0, 0, { GL_EXT_vertex_shader, GL_EXTENSION_COUNT }},
-    { "glBindMultiTextureEXT", glBindMultiTextureEXT, 0, 0, { GL_EXT_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glBindParameterEXT", glBindParameterEXT, 0, 0, { GL_EXT_vertex_shader, GL_EXTENSION_COUNT }},
-    { "glBindProgramARB", glBindProgramARB, 0, 0, { GL_ARB_fragment_program, GL_ARB_vertex_program, GL_EXTENSION_COUNT }},
-    { "glBindProgramNV", glBindProgramNV, 0, 0, { GL_NV_vertex_program, GL_EXTENSION_COUNT }},
-    { "glBindProgramPipeline", glBindProgramPipeline, 4, 1, { GL_ARB_separate_shader_objects, GL_EXTENSION_COUNT }},
-    { "glBindRenderbuffer", glBindRenderbuffer, 3, 0, { GL_ARB_framebuffer_object, GL_EXTENSION_COUNT }},
-    { "glBindRenderbufferEXT", glBindRenderbufferEXT, 0, 0, { GL_EXT_framebuffer_object, GL_EXTENSION_COUNT }},
-    { "glBindSampler", glBindSampler, 3, 3, { GL_ARB_sampler_objects, GL_EXTENSION_COUNT }},
-    { "glBindSamplers", glBindSamplers, 4, 4, { GL_ARB_multi_bind, GL_EXTENSION_COUNT }},
-    { "glBindShadingRateImageNV", glBindShadingRateImageNV, 0, 0, { GL_NV_shading_rate_image, GL_EXTENSION_COUNT }},
-    { "glBindTexGenParameterEXT", glBindTexGenParameterEXT, 0, 0, { GL_EXT_vertex_shader, GL_EXTENSION_COUNT }},
-    { "glBindTextureEXT", glBindTextureEXT, 0, 0, { GL_EXT_texture_object, GL_EXTENSION_COUNT }},
-    { "glBindTextureUnit", glBindTextureUnit, 4, 5, { GL_ARB_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glBindTextureUnitParameterEXT", glBindTextureUnitParameterEXT, 0, 0, { GL_EXT_vertex_shader, GL_EXTENSION_COUNT }},
-    { "glBindTextures", glBindTextures, 4, 4, { GL_ARB_multi_bind, GL_EXTENSION_COUNT }},
-    { "glBindTransformFeedback", glBindTransformFeedback, 4, 0, { GL_ARB_transform_feedback2, GL_EXTENSION_COUNT }},
-    { "glBindTransformFeedbackNV", glBindTransformFeedbackNV, 0, 0, { GL_NV_transform_feedback2, GL_EXTENSION_COUNT }},
-    { "glBindVertexArray", glBindVertexArray, 3, 0, { GL_ARB_vertex_array_object, GL_EXTENSION_COUNT }},
-    { "glBindVertexArrayAPPLE", glBindVertexArrayAPPLE, 0, 0, { GL_APPLE_vertex_array_object, GL_EXTENSION_COUNT }},
-    { "glBindVertexBuffer", glBindVertexBuffer, 4, 3, { GL_ARB_vertex_attrib_binding, GL_EXTENSION_COUNT }},
-    { "glBindVertexBuffers", glBindVertexBuffers, 4, 4, { GL_ARB_multi_bind, GL_EXTENSION_COUNT }},
-    { "glBindVertexShaderEXT", glBindVertexShaderEXT, 0, 0, { GL_EXT_vertex_shader, GL_EXTENSION_COUNT }},
-    { "glBindVideoCaptureStreamBufferNV", glBindVideoCaptureStreamBufferNV, 0, 0, { GL_NV_video_capture, GL_EXTENSION_COUNT }},
-    { "glBindVideoCaptureStreamTextureNV", glBindVideoCaptureStreamTextureNV, 0, 0, { GL_NV_video_capture, GL_EXTENSION_COUNT }},
-    { "glBinormal3bEXT", glBinormal3bEXT, 0, 0, { GL_EXT_coordinate_frame, GL_EXTENSION_COUNT }},
-    { "glBinormal3bvEXT", glBinormal3bvEXT, 0, 0, { GL_EXT_coordinate_frame, GL_EXTENSION_COUNT }},
-    { "glBinormal3dEXT", glBinormal3dEXT, 0, 0, { GL_EXT_coordinate_frame, GL_EXTENSION_COUNT }},
-    { "glBinormal3dvEXT", glBinormal3dvEXT, 0, 0, { GL_EXT_coordinate_frame, GL_EXTENSION_COUNT }},
-    { "glBinormal3fEXT", glBinormal3fEXT, 0, 0, { GL_EXT_coordinate_frame, GL_EXTENSION_COUNT }},
-    { "glBinormal3fvEXT", glBinormal3fvEXT, 0, 0, { GL_EXT_coordinate_frame, GL_EXTENSION_COUNT }},
-    { "glBinormal3iEXT", glBinormal3iEXT, 0, 0, { GL_EXT_coordinate_frame, GL_EXTENSION_COUNT }},
-    { "glBinormal3ivEXT", glBinormal3ivEXT, 0, 0, { GL_EXT_coordinate_frame, GL_EXTENSION_COUNT }},
-    { "glBinormal3sEXT", glBinormal3sEXT, 0, 0, { GL_EXT_coordinate_frame, GL_EXTENSION_COUNT }},
-    { "glBinormal3svEXT", glBinormal3svEXT, 0, 0, { GL_EXT_coordinate_frame, GL_EXTENSION_COUNT }},
-    { "glBinormalPointerEXT", glBinormalPointerEXT, 0, 0, { GL_EXT_coordinate_frame, GL_EXTENSION_COUNT }},
-    { "glBitmapxOES", glBitmapxOES, 0, 0, { GL_OES_fixed_point, GL_EXTENSION_COUNT }},
-    { "glBlendBarrier", glBlendBarrier, 0, 0, { GL_ARB_ES3_2_compatibility, GL_EXTENSION_COUNT }},
-    { "glBlendBarrierKHR", glBlendBarrierKHR, 0, 0, { GL_KHR_blend_equation_advanced, GL_EXTENSION_COUNT }},
-    { "glBlendBarrierNV", glBlendBarrierNV, 0, 0, { GL_NV_blend_equation_advanced, GL_EXTENSION_COUNT }},
-    { "glBlendColor", glBlendColor, 1, 4, { GL_ARB_imaging, GL_EXTENSION_COUNT }},
-    { "glBlendColorEXT", glBlendColorEXT, 0, 0, { GL_EXT_blend_color, GL_EXTENSION_COUNT }},
-    { "glBlendColorxOES", glBlendColorxOES, 0, 0, { GL_OES_fixed_point, GL_EXTENSION_COUNT }},
-    { "glBlendEquation", glBlendEquation, 1, 4, { GL_ARB_imaging, GL_EXTENSION_COUNT }},
-    { "glBlendEquationEXT", glBlendEquationEXT, 0, 0, { GL_EXT_blend_minmax, GL_EXTENSION_COUNT }},
-    { "glBlendEquationIndexedAMD", glBlendEquationIndexedAMD, 0, 0, { GL_AMD_draw_buffers_blend, GL_EXTENSION_COUNT }},
-    { "glBlendEquationSeparate", glBlendEquationSeparate, 2, 0, { GL_EXTENSION_COUNT }},
-    { "glBlendEquationSeparateEXT", glBlendEquationSeparateEXT, 0, 0, { GL_EXT_blend_equation_separate, GL_ATI_blend_equation_separate, GL_EXTENSION_COUNT }},
-    { "glBlendEquationSeparateIndexedAMD", glBlendEquationSeparateIndexedAMD, 0, 0, { GL_AMD_draw_buffers_blend, GL_EXTENSION_COUNT }},
-    { "glBlendEquationSeparatei", glBlendEquationSeparatei, 4, 0, { GL_EXTENSION_COUNT }},
-    { "glBlendEquationSeparateiARB", glBlendEquationSeparateiARB, 0, 0, { GL_ARB_draw_buffers_blend, GL_EXTENSION_COUNT }},
-    { "glBlendEquationi", glBlendEquationi, 4, 0, { GL_EXTENSION_COUNT }},
-    { "glBlendEquationiARB", glBlendEquationiARB, 0, 0, { GL_ARB_draw_buffers_blend, GL_EXTENSION_COUNT }},
-    { "glBlendFuncIndexedAMD", glBlendFuncIndexedAMD, 0, 0, { GL_AMD_draw_buffers_blend, GL_EXTENSION_COUNT }},
-    { "glBlendFuncSeparate", glBlendFuncSeparate, 1, 4, { GL_EXTENSION_COUNT }},
-    { "glBlendFuncSeparateEXT", glBlendFuncSeparateEXT, 0, 0, { GL_EXT_blend_func_separate, GL_EXTENSION_COUNT }},
-    { "glBlendFuncSeparateINGR", glBlendFuncSeparateINGR, 0, 0, { GL_INGR_blend_func_separate, GL_EXTENSION_COUNT }},
-    { "glBlendFuncSeparateIndexedAMD", glBlendFuncSeparateIndexedAMD, 0, 0, { GL_AMD_draw_buffers_blend, GL_EXTENSION_COUNT }},
-    { "glBlendFuncSeparatei", glBlendFuncSeparatei, 4, 0, { GL_EXTENSION_COUNT }},
-    { "glBlendFuncSeparateiARB", glBlendFuncSeparateiARB, 0, 0, { GL_ARB_draw_buffers_blend, GL_EXTENSION_COUNT }},
-    { "glBlendFunci", glBlendFunci, 4, 0, { GL_EXTENSION_COUNT }},
-    { "glBlendFunciARB", glBlendFunciARB, 0, 0, { GL_ARB_draw_buffers_blend, GL_EXTENSION_COUNT }},
-    { "glBlendParameteriNV", glBlendParameteriNV, 0, 0, { GL_NV_blend_equation_advanced, GL_EXTENSION_COUNT }},
-    { "glBlitFramebuffer", glBlitFramebuffer, 3, 0, { GL_ARB_framebuffer_object, GL_EXTENSION_COUNT }},
-    { "glBlitFramebufferEXT", glBlitFramebufferEXT, 0, 0, { GL_EXT_framebuffer_blit, GL_EXTENSION_COUNT }},
-    { "glBlitFramebufferLayerEXT", glBlitFramebufferLayerEXT, 0, 0, { GL_EXT_framebuffer_blit_layers, GL_EXTENSION_COUNT }},
-    { "glBlitFramebufferLayersEXT", glBlitFramebufferLayersEXT, 0, 0, { GL_EXT_framebuffer_blit_layers, GL_EXTENSION_COUNT }},
-    { "glBlitNamedFramebuffer", glBlitNamedFramebuffer, 4, 5, { GL_ARB_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glBufferAddressRangeNV", glBufferAddressRangeNV, 0, 0, { GL_NV_vertex_buffer_unified_memory, GL_EXTENSION_COUNT }},
-    { "glBufferAttachMemoryNV", glBufferAttachMemoryNV, 0, 0, { GL_NV_memory_attachment, GL_EXTENSION_COUNT }},
-    { "glBufferData", glBufferData, 1, 5, { GL_EXTENSION_COUNT }},
-    { "glBufferDataARB", glBufferDataARB, 0, 0, { GL_ARB_vertex_buffer_object, GL_EXTENSION_COUNT }},
-    { "glBufferPageCommitmentARB", glBufferPageCommitmentARB, 0, 0, { GL_ARB_sparse_buffer, GL_EXTENSION_COUNT }},
-    { "glBufferPageCommitmentMemNV", glBufferPageCommitmentMemNV, 0, 0, { GL_NV_memory_object_sparse, GL_EXTENSION_COUNT }},
-    { "glBufferParameteriAPPLE", glBufferParameteriAPPLE, 0, 0, { GL_APPLE_flush_buffer_range, GL_EXTENSION_COUNT }},
-    { "glBufferRegionEnabled", glBufferRegionEnabled, 0, 0, { GL_KTX_buffer_region, GL_EXTENSION_COUNT }},
-    { "glBufferStorage", glBufferStorage, 4, 4, { GL_ARB_buffer_storage, GL_EXTENSION_COUNT }},
-    { "glBufferStorageExternalEXT", glBufferStorageExternalEXT, 0, 0, { GL_EXT_external_buffer, GL_EXTENSION_COUNT }},
-    { "glBufferStorageMemEXT", glBufferStorageMemEXT, 0, 0, { GL_EXT_memory_object, GL_EXTENSION_COUNT }},
-    { "glBufferSubData", glBufferSubData, 1, 5, { GL_EXTENSION_COUNT }},
-    { "glBufferSubDataARB", glBufferSubDataARB, 0, 0, { GL_ARB_vertex_buffer_object, GL_EXTENSION_COUNT }},
-    { "glCallCommandListNV", glCallCommandListNV, 0, 0, { GL_NV_command_list, GL_EXTENSION_COUNT }},
-    { "glCheckFramebufferStatus", glCheckFramebufferStatus, 3, 0, { GL_ARB_framebuffer_object, GL_EXTENSION_COUNT }},
-    { "glCheckFramebufferStatusEXT", glCheckFramebufferStatusEXT, 0, 0, { GL_EXT_framebuffer_object, GL_EXTENSION_COUNT }},
-    { "glCheckNamedFramebufferStatus", glCheckNamedFramebufferStatus, 4, 5, { GL_ARB_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glCheckNamedFramebufferStatusEXT", glCheckNamedFramebufferStatusEXT, 0, 0, { GL_EXT_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glClampColor", glClampColor, 3, 0, { GL_EXTENSION_COUNT }},
-    { "glClampColorARB", glClampColorARB, 0, 0, { GL_ARB_color_buffer_float, GL_EXTENSION_COUNT }},
-    { "glClearAccumxOES", glClearAccumxOES, 0, 0, { GL_OES_fixed_point, GL_EXTENSION_COUNT }},
-    { "glClearBufferData", glClearBufferData, 4, 3, { GL_ARB_clear_buffer_object, GL_EXTENSION_COUNT }},
-    { "glClearBufferSubData", glClearBufferSubData, 4, 3, { GL_ARB_clear_buffer_object, GL_EXTENSION_COUNT }},
-    { "glClearBufferfi", glClearBufferfi, 3, 0, { GL_EXTENSION_COUNT }},
-    { "glClearBufferfv", glClearBufferfv, 3, 0, { GL_EXTENSION_COUNT }},
-    { "glClearBufferiv", glClearBufferiv, 3, 0, { GL_EXTENSION_COUNT }},
-    { "glClearBufferuiv", glClearBufferuiv, 3, 0, { GL_EXTENSION_COUNT }},
-    { "glClearColorIiEXT", glClearColorIiEXT, 0, 0, { GL_EXT_texture_integer, GL_EXTENSION_COUNT }},
-    { "glClearColorIuiEXT", glClearColorIuiEXT, 0, 0, { GL_EXT_texture_integer, GL_EXTENSION_COUNT }},
-    { "glClearColorx", glClearColorx, 0, 0, { GL_NV_ES1_1_compatibility, GL_EXTENSION_COUNT }},
-    { "glClearColorxOES", glClearColorxOES, 0, 0, { GL_OES_fixed_point, GL_EXTENSION_COUNT }},
-    { "glClearDepthdNV", glClearDepthdNV, 0, 0, { GL_NV_depth_buffer_float, GL_EXTENSION_COUNT }},
-    { "glClearDepthf", glClearDepthf, 4, 1, { GL_ARB_ES2_compatibility, GL_EXTENSION_COUNT }},
-    { "glClearDepthfOES", glClearDepthfOES, 0, 0, { GL_OES_single_precision, GL_EXTENSION_COUNT }},
-    { "glClearDepthx", glClearDepthx, 0, 0, { GL_NV_ES1_1_compatibility, GL_EXTENSION_COUNT }},
-    { "glClearDepthxOES", glClearDepthxOES, 0, 0, { GL_OES_fixed_point, GL_EXTENSION_COUNT }},
-    { "glClearNamedBufferData", glClearNamedBufferData, 4, 5, { GL_ARB_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glClearNamedBufferDataEXT", glClearNamedBufferDataEXT, 0, 0, { GL_EXT_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glClearNamedBufferSubData", glClearNamedBufferSubData, 4, 5, { GL_ARB_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glClearNamedBufferSubDataEXT", glClearNamedBufferSubDataEXT, 0, 0, { GL_EXT_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glClearNamedFramebufferfi", glClearNamedFramebufferfi, 4, 5, { GL_ARB_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glClearNamedFramebufferfv", glClearNamedFramebufferfv, 4, 5, { GL_ARB_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glClearNamedFramebufferiv", glClearNamedFramebufferiv, 4, 5, { GL_ARB_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glClearNamedFramebufferuiv", glClearNamedFramebufferuiv, 4, 5, { GL_ARB_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glClearTexImage", glClearTexImage, 4, 4, { GL_ARB_clear_texture, GL_EXTENSION_COUNT }},
-    { "glClearTexSubImage", glClearTexSubImage, 4, 4, { GL_ARB_clear_texture, GL_EXTENSION_COUNT }},
-    { "glClientActiveTexture", glClientActiveTexture, 1, 3, { GL_EXTENSION_COUNT }},
-    { "glClientActiveTextureARB", glClientActiveTextureARB, 0, 0, { GL_ARB_multitexture, GL_EXTENSION_COUNT }},
-    { "glClientActiveVertexStreamATI", glClientActiveVertexStreamATI, 0, 0, { GL_ATI_vertex_streams, GL_EXTENSION_COUNT }},
-    { "glClientAttribDefaultEXT", glClientAttribDefaultEXT, 0, 0, { GL_EXT_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glClientWaitSemaphoreui64NVX", glClientWaitSemaphoreui64NVX, 0, 0, { GL_NVX_progress_fence, GL_EXTENSION_COUNT }},
-    { "glClientWaitSync", glClientWaitSync, 3, 2, { GL_ARB_sync, GL_EXTENSION_COUNT }},
-    { "glClipControl", glClipControl, 4, 5, { GL_ARB_clip_control, GL_EXTENSION_COUNT }},
-    { "glClipPlanef", glClipPlanef, 0, 0, { GL_NV_ES1_1_compatibility, GL_EXTENSION_COUNT }},
-    { "glClipPlanefOES", glClipPlanefOES, 0, 0, { GL_OES_single_precision, GL_EXTENSION_COUNT }},
-    { "glClipPlanex", glClipPlanex, 0, 0, { GL_NV_ES1_1_compatibility, GL_EXTENSION_COUNT }},
-    { "glClipPlanexOES", glClipPlanexOES, 0, 0, { GL_OES_fixed_point, GL_EXTENSION_COUNT }},
-    { "glColor3fVertex3fSUN", glColor3fVertex3fSUN, 0, 0, { GL_SUN_vertex, GL_EXTENSION_COUNT }},
-    { "glColor3fVertex3fvSUN", glColor3fVertex3fvSUN, 0, 0, { GL_SUN_vertex, GL_EXTENSION_COUNT }},
-    { "glColor3hNV", glColor3hNV, 0, 0, { GL_NV_half_float, GL_EXTENSION_COUNT }},
-    { "glColor3hvNV", glColor3hvNV, 0, 0, { GL_NV_half_float, GL_EXTENSION_COUNT }},
-    { "glColor3xOES", glColor3xOES, 0, 0, { GL_OES_fixed_point, GL_EXTENSION_COUNT }},
-    { "glColor3xvOES", glColor3xvOES, 0, 0, { GL_OES_fixed_point, GL_EXTENSION_COUNT }},
-    { "glColor4fNormal3fVertex3fSUN", glColor4fNormal3fVertex3fSUN, 0, 0, { GL_SUN_vertex, GL_EXTENSION_COUNT }},
-    { "glColor4fNormal3fVertex3fvSUN", glColor4fNormal3fVertex3fvSUN, 0, 0, { GL_SUN_vertex, GL_EXTENSION_COUNT }},
-    { "glColor4hNV", glColor4hNV, 0, 0, { GL_NV_half_float, GL_EXTENSION_COUNT }},
-    { "glColor4hvNV", glColor4hvNV, 0, 0, { GL_NV_half_float, GL_EXTENSION_COUNT }},
-    { "glColor4ubVertex2fSUN", glColor4ubVertex2fSUN, 0, 0, { GL_SUN_vertex, GL_EXTENSION_COUNT }},
-    { "glColor4ubVertex2fvSUN", glColor4ubVertex2fvSUN, 0, 0, { GL_SUN_vertex, GL_EXTENSION_COUNT }},
-    { "glColor4ubVertex3fSUN", glColor4ubVertex3fSUN, 0, 0, { GL_SUN_vertex, GL_EXTENSION_COUNT }},
-    { "glColor4ubVertex3fvSUN", glColor4ubVertex3fvSUN, 0, 0, { GL_SUN_vertex, GL_EXTENSION_COUNT }},
-    { "glColor4x", glColor4x, 0, 0, { GL_NV_ES1_1_compatibility, GL_EXTENSION_COUNT }},
-    { "glColor4xOES", glColor4xOES, 0, 0, { GL_OES_fixed_point, GL_EXTENSION_COUNT }},
-    { "glColor4xvOES", glColor4xvOES, 0, 0, { GL_OES_fixed_point, GL_EXTENSION_COUNT }},
-    { "glColorFormatNV", glColorFormatNV, 0, 0, { GL_NV_vertex_buffer_unified_memory, GL_EXTENSION_COUNT }},
-    { "glColorFragmentOp1ATI", glColorFragmentOp1ATI, 0, 0, { GL_ATI_fragment_shader, GL_EXTENSION_COUNT }},
-    { "glColorFragmentOp2ATI", glColorFragmentOp2ATI, 0, 0, { GL_ATI_fragment_shader, GL_EXTENSION_COUNT }},
-    { "glColorFragmentOp3ATI", glColorFragmentOp3ATI, 0, 0, { GL_ATI_fragment_shader, GL_EXTENSION_COUNT }},
-    { "glColorMaskIndexedEXT", glColorMaskIndexedEXT, 0, 0, { GL_EXT_draw_buffers2, GL_EXTENSION_COUNT }},
-    { "glColorMaski", glColorMaski, 3, 0, { GL_EXTENSION_COUNT }},
-    { "glColorP3ui", glColorP3ui, 3, 3, { GL_ARB_vertex_type_2_10_10_10_rev, GL_EXTENSION_COUNT }},
-    { "glColorP3uiv", glColorP3uiv, 3, 3, { GL_ARB_vertex_type_2_10_10_10_rev, GL_EXTENSION_COUNT }},
-    { "glColorP4ui", glColorP4ui, 3, 3, { GL_ARB_vertex_type_2_10_10_10_rev, GL_EXTENSION_COUNT }},
-    { "glColorP4uiv", glColorP4uiv, 3, 3, { GL_ARB_vertex_type_2_10_10_10_rev, GL_EXTENSION_COUNT }},
-    { "glColorPointerEXT", glColorPointerEXT, 0, 0, { GL_EXT_vertex_array, GL_EXTENSION_COUNT }},
-    { "glColorPointerListIBM", glColorPointerListIBM, 0, 0, { GL_IBM_vertex_array_lists, GL_EXTENSION_COUNT }},
-    { "glColorPointervINTEL", glColorPointervINTEL, 0, 0, { GL_INTEL_parallel_arrays, GL_EXTENSION_COUNT }},
-    { "glColorSubTable", glColorSubTable, 0, 0, { GL_ARB_imaging, GL_EXTENSION_COUNT }},
-    { "glColorSubTableEXT", glColorSubTableEXT, 0, 0, { GL_EXT_color_subtable, GL_EXTENSION_COUNT }},
-    { "glColorTable", glColorTable, 0, 0, { GL_ARB_imaging, GL_EXTENSION_COUNT }},
-    { "glColorTableEXT", glColorTableEXT, 0, 0, { GL_EXT_paletted_texture, GL_EXTENSION_COUNT }},
-    { "glColorTableParameterfv", glColorTableParameterfv, 0, 0, { GL_ARB_imaging, GL_EXTENSION_COUNT }},
-    { "glColorTableParameterfvSGI", glColorTableParameterfvSGI, 0, 0, { GL_SGI_color_table, GL_EXTENSION_COUNT }},
-    { "glColorTableParameteriv", glColorTableParameteriv, 0, 0, { GL_ARB_imaging, GL_EXTENSION_COUNT }},
-    { "glColorTableParameterivSGI", glColorTableParameterivSGI, 0, 0, { GL_SGI_color_table, GL_EXTENSION_COUNT }},
-    { "glColorTableSGI", glColorTableSGI, 0, 0, { GL_SGI_color_table, GL_EXTENSION_COUNT }},
-    { "glCombinerInputNV", glCombinerInputNV, 0, 0, { GL_NV_register_combiners, GL_EXTENSION_COUNT }},
-    { "glCombinerOutputNV", glCombinerOutputNV, 0, 0, { GL_NV_register_combiners, GL_EXTENSION_COUNT }},
-    { "glCombinerParameterfNV", glCombinerParameterfNV, 0, 0, { GL_NV_register_combiners, GL_EXTENSION_COUNT }},
-    { "glCombinerParameterfvNV", glCombinerParameterfvNV, 0, 0, { GL_NV_register_combiners, GL_EXTENSION_COUNT }},
-    { "glCombinerParameteriNV", glCombinerParameteriNV, 0, 0, { GL_NV_register_combiners, GL_EXTENSION_COUNT }},
-    { "glCombinerParameterivNV", glCombinerParameterivNV, 0, 0, { GL_NV_register_combiners, GL_EXTENSION_COUNT }},
-    { "glCombinerStageParameterfvNV", glCombinerStageParameterfvNV, 0, 0, { GL_NV_register_combiners2, GL_EXTENSION_COUNT }},
-    { "glCommandListSegmentsNV", glCommandListSegmentsNV, 0, 0, { GL_NV_command_list, GL_EXTENSION_COUNT }},
-    { "glCompileCommandListNV", glCompileCommandListNV, 0, 0, { GL_NV_command_list, GL_EXTENSION_COUNT }},
-    { "glCompileShader", glCompileShader, 2, 0, { GL_EXTENSION_COUNT }},
-    { "glCompileShaderARB", glCompileShaderARB, 0, 0, { GL_ARB_shader_objects, GL_EXTENSION_COUNT }},
-    { "glCompileShaderIncludeARB", glCompileShaderIncludeARB, 0, 0, { GL_ARB_shading_language_include, GL_EXTENSION_COUNT }},
-    { "glCompressedMultiTexImage1DEXT", glCompressedMultiTexImage1DEXT, 0, 0, { GL_EXT_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glCompressedMultiTexImage2DEXT", glCompressedMultiTexImage2DEXT, 0, 0, { GL_EXT_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glCompressedMultiTexImage3DEXT", glCompressedMultiTexImage3DEXT, 0, 0, { GL_EXT_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glCompressedMultiTexSubImage1DEXT", glCompressedMultiTexSubImage1DEXT, 0, 0, { GL_EXT_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glCompressedMultiTexSubImage2DEXT", glCompressedMultiTexSubImage2DEXT, 0, 0, { GL_EXT_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glCompressedMultiTexSubImage3DEXT", glCompressedMultiTexSubImage3DEXT, 0, 0, { GL_EXT_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glCompressedTexImage1D", glCompressedTexImage1D, 1, 3, { GL_EXTENSION_COUNT }},
-    { "glCompressedTexImage1DARB", glCompressedTexImage1DARB, 1, 3, { GL_ARB_texture_compression, GL_EXTENSION_COUNT }},
-    { "glCompressedTexImage2D", glCompressedTexImage2D, 1, 3, { GL_EXTENSION_COUNT }},
-    { "glCompressedTexImage2DARB", glCompressedTexImage2DARB, 1, 3, { GL_ARB_texture_compression, GL_EXTENSION_COUNT }},
-    { "glCompressedTexImage3D", glCompressedTexImage3D, 1, 3, { GL_EXTENSION_COUNT }},
-    { "glCompressedTexImage3DARB", glCompressedTexImage3DARB, 1, 3, { GL_ARB_texture_compression, GL_EXTENSION_COUNT }},
-    { "glCompressedTexSubImage1D", glCompressedTexSubImage1D, 1, 3, { GL_EXTENSION_COUNT }},
-    { "glCompressedTexSubImage1DARB", glCompressedTexSubImage1DARB, 1, 3, { GL_ARB_texture_compression, GL_EXTENSION_COUNT }},
-    { "glCompressedTexSubImage2D", glCompressedTexSubImage2D, 1, 3, { GL_EXTENSION_COUNT }},
-    { "glCompressedTexSubImage2DARB", glCompressedTexSubImage2DARB, 1, 3, { GL_ARB_texture_compression, GL_EXTENSION_COUNT }},
-    { "glCompressedTexSubImage3D", glCompressedTexSubImage3D, 1, 3, { GL_EXTENSION_COUNT }},
-    { "glCompressedTexSubImage3DARB", glCompressedTexSubImage3DARB, 1, 3, { GL_ARB_texture_compression, GL_EXTENSION_COUNT }},
-    { "glCompressedTextureImage1DEXT", glCompressedTextureImage1DEXT, 0, 0, { GL_EXT_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glCompressedTextureImage2DEXT", glCompressedTextureImage2DEXT, 0, 0, { GL_EXT_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glCompressedTextureImage3DEXT", glCompressedTextureImage3DEXT, 0, 0, { GL_EXT_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glCompressedTextureSubImage1D", glCompressedTextureSubImage1D, 4, 5, { GL_ARB_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glCompressedTextureSubImage1DEXT", glCompressedTextureSubImage1DEXT, 0, 0, { GL_EXT_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glCompressedTextureSubImage2D", glCompressedTextureSubImage2D, 4, 5, { GL_ARB_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glCompressedTextureSubImage2DEXT", glCompressedTextureSubImage2DEXT, 0, 0, { GL_EXT_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glCompressedTextureSubImage3D", glCompressedTextureSubImage3D, 4, 5, { GL_ARB_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glCompressedTextureSubImage3DEXT", glCompressedTextureSubImage3DEXT, 0, 0, { GL_EXT_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glConservativeRasterParameterfNV", glConservativeRasterParameterfNV, 0, 0, { GL_NV_conservative_raster_dilate, GL_EXTENSION_COUNT }},
-    { "glConservativeRasterParameteriNV", glConservativeRasterParameteriNV, 0, 0, { GL_NV_conservative_raster_pre_snap_triangles, GL_EXTENSION_COUNT }},
-    { "glConvolutionFilter1D", glConvolutionFilter1D, 0, 0, { GL_ARB_imaging, GL_EXTENSION_COUNT }},
-    { "glConvolutionFilter1DEXT", glConvolutionFilter1DEXT, 0, 0, { GL_EXT_convolution, GL_EXTENSION_COUNT }},
-    { "glConvolutionFilter2D", glConvolutionFilter2D, 0, 0, { GL_ARB_imaging, GL_EXTENSION_COUNT }},
-    { "glConvolutionFilter2DEXT", glConvolutionFilter2DEXT, 0, 0, { GL_EXT_convolution, GL_EXTENSION_COUNT }},
-    { "glConvolutionParameterf", glConvolutionParameterf, 0, 0, { GL_ARB_imaging, GL_EXTENSION_COUNT }},
-    { "glConvolutionParameterfEXT", glConvolutionParameterfEXT, 0, 0, { GL_EXT_convolution, GL_EXTENSION_COUNT }},
-    { "glConvolutionParameterfv", glConvolutionParameterfv, 0, 0, { GL_ARB_imaging, GL_EXTENSION_COUNT }},
-    { "glConvolutionParameterfvEXT", glConvolutionParameterfvEXT, 0, 0, { GL_EXT_convolution, GL_EXTENSION_COUNT }},
-    { "glConvolutionParameteri", glConvolutionParameteri, 0, 0, { GL_ARB_imaging, GL_EXTENSION_COUNT }},
-    { "glConvolutionParameteriEXT", glConvolutionParameteriEXT, 0, 0, { GL_EXT_convolution, GL_EXTENSION_COUNT }},
-    { "glConvolutionParameteriv", glConvolutionParameteriv, 0, 0, { GL_ARB_imaging, GL_EXTENSION_COUNT }},
-    { "glConvolutionParameterivEXT", glConvolutionParameterivEXT, 0, 0, { GL_EXT_convolution, GL_EXTENSION_COUNT }},
-    { "glConvolutionParameterxOES", glConvolutionParameterxOES, 0, 0, { GL_OES_fixed_point, GL_EXTENSION_COUNT }},
-    { "glConvolutionParameterxvOES", glConvolutionParameterxvOES, 0, 0, { GL_OES_fixed_point, GL_EXTENSION_COUNT }},
-    { "glCopyBufferSubData", glCopyBufferSubData, 3, 1, { GL_ARB_copy_buffer, GL_EXT_copy_buffer, GL_EXTENSION_COUNT }},
-    { "glCopyColorSubTable", glCopyColorSubTable, 0, 0, { GL_ARB_imaging, GL_EXTENSION_COUNT }},
-    { "glCopyColorSubTableEXT", glCopyColorSubTableEXT, 0, 0, { GL_EXT_color_subtable, GL_EXTENSION_COUNT }},
-    { "glCopyColorTable", glCopyColorTable, 0, 0, { GL_ARB_imaging, GL_EXTENSION_COUNT }},
-    { "glCopyColorTableSGI", glCopyColorTableSGI, 0, 0, { GL_SGI_color_table, GL_EXTENSION_COUNT }},
-    { "glCopyConvolutionFilter1D", glCopyConvolutionFilter1D, 0, 0, { GL_ARB_imaging, GL_EXTENSION_COUNT }},
-    { "glCopyConvolutionFilter1DEXT", glCopyConvolutionFilter1DEXT, 0, 0, { GL_EXT_convolution, GL_EXTENSION_COUNT }},
-    { "glCopyConvolutionFilter2D", glCopyConvolutionFilter2D, 0, 0, { GL_ARB_imaging, GL_EXTENSION_COUNT }},
-    { "glCopyConvolutionFilter2DEXT", glCopyConvolutionFilter2DEXT, 0, 0, { GL_EXT_convolution, GL_EXTENSION_COUNT }},
-    { "glCopyImageSubData", glCopyImageSubData, 4, 3, { GL_ARB_copy_image, GL_EXTENSION_COUNT }},
-    { "glCopyImageSubDataNV", glCopyImageSubDataNV, 0, 0, { GL_NV_copy_image, GL_EXTENSION_COUNT }},
-    { "glCopyMultiTexImage1DEXT", glCopyMultiTexImage1DEXT, 0, 0, { GL_EXT_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glCopyMultiTexImage2DEXT", glCopyMultiTexImage2DEXT, 0, 0, { GL_EXT_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glCopyMultiTexSubImage1DEXT", glCopyMultiTexSubImage1DEXT, 0, 0, { GL_EXT_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glCopyMultiTexSubImage2DEXT", glCopyMultiTexSubImage2DEXT, 0, 0, { GL_EXT_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glCopyMultiTexSubImage3DEXT", glCopyMultiTexSubImage3DEXT, 0, 0, { GL_EXT_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glCopyNamedBufferSubData", glCopyNamedBufferSubData, 4, 5, { GL_ARB_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glCopyPathNV", glCopyPathNV, 0, 0, { GL_NV_path_rendering, GL_EXTENSION_COUNT }},
-    { "glCopyTexImage1DEXT", glCopyTexImage1DEXT, 1, 2, { GL_EXT_copy_texture, GL_EXTENSION_COUNT }},
-    { "glCopyTexImage2DEXT", glCopyTexImage2DEXT, 1, 2, { GL_EXT_copy_texture, GL_EXTENSION_COUNT }},
-    { "glCopyTexSubImage1DEXT", glCopyTexSubImage1DEXT, 1, 2, { GL_EXT_copy_texture, GL_EXTENSION_COUNT }},
-    { "glCopyTexSubImage2DEXT", glCopyTexSubImage2DEXT, 1, 2, { GL_EXT_copy_texture, GL_EXTENSION_COUNT }},
-    { "glCopyTexSubImage3D", glCopyTexSubImage3D, 1, 2, { GL_EXTENSION_COUNT }},
-    { "glCopyTexSubImage3DEXT", glCopyTexSubImage3DEXT, 1, 2, { GL_EXT_copy_texture, GL_EXTENSION_COUNT }},
-    { "glCopyTextureImage1DEXT", glCopyTextureImage1DEXT, 0, 0, { GL_EXT_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glCopyTextureImage2DEXT", glCopyTextureImage2DEXT, 0, 0, { GL_EXT_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glCopyTextureSubImage1D", glCopyTextureSubImage1D, 4, 5, { GL_ARB_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glCopyTextureSubImage1DEXT", glCopyTextureSubImage1DEXT, 0, 0, { GL_EXT_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glCopyTextureSubImage2D", glCopyTextureSubImage2D, 4, 5, { GL_ARB_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glCopyTextureSubImage2DEXT", glCopyTextureSubImage2DEXT, 0, 0, { GL_EXT_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glCopyTextureSubImage3D", glCopyTextureSubImage3D, 4, 5, { GL_ARB_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glCopyTextureSubImage3DEXT", glCopyTextureSubImage3DEXT, 0, 0, { GL_EXT_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glCoverFillPathInstancedNV", glCoverFillPathInstancedNV, 0, 0, { GL_NV_path_rendering, GL_EXTENSION_COUNT }},
-    { "glCoverFillPathNV", glCoverFillPathNV, 0, 0, { GL_NV_path_rendering, GL_EXTENSION_COUNT }},
-    { "glCoverStrokePathInstancedNV", glCoverStrokePathInstancedNV, 0, 0, { GL_NV_path_rendering, GL_EXTENSION_COUNT }},
-    { "glCoverStrokePathNV", glCoverStrokePathNV, 0, 0, { GL_NV_path_rendering, GL_EXTENSION_COUNT }},
-    { "glCoverageModulationNV", glCoverageModulationNV, 0, 0, { GL_NV_framebuffer_mixed_samples, GL_EXTENSION_COUNT }},
-    { "glCoverageModulationTableNV", glCoverageModulationTableNV, 0, 0, { GL_NV_framebuffer_mixed_samples, GL_EXTENSION_COUNT }},
-    { "glCreateBuffers", glCreateBuffers, 4, 5, { GL_ARB_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glCreateCommandListsNV", glCreateCommandListsNV, 0, 0, { GL_NV_command_list, GL_EXTENSION_COUNT }},
-    { "glCreateFramebuffers", glCreateFramebuffers, 4, 5, { GL_ARB_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glCreateMemoryObjectsEXT", glCreateMemoryObjectsEXT, 0, 0, { GL_EXT_memory_object, GL_EXTENSION_COUNT }},
-    { "glCreatePerfQueryINTEL", glCreatePerfQueryINTEL, 0, 0, { GL_INTEL_performance_query, GL_EXTENSION_COUNT }},
-    { "glCreateProgram", glCreateProgram, 2, 0, { GL_EXTENSION_COUNT }},
-    { "glCreateProgramObjectARB", glCreateProgramObjectARB, 0, 0, { GL_ARB_shader_objects, GL_EXTENSION_COUNT }},
-    { "glCreateProgramPipelines", glCreateProgramPipelines, 4, 5, { GL_ARB_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glCreateProgressFenceNVX", glCreateProgressFenceNVX, 0, 0, { GL_NVX_progress_fence, GL_EXTENSION_COUNT }},
-    { "glCreateQueries", glCreateQueries, 4, 5, { GL_ARB_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glCreateRenderbuffers", glCreateRenderbuffers, 4, 5, { GL_ARB_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glCreateSamplers", glCreateSamplers, 4, 5, { GL_ARB_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glCreateSemaphoresNV", glCreateSemaphoresNV, 0, 0, { GL_NV_timeline_semaphore, GL_EXTENSION_COUNT }},
-    { "glCreateShader", glCreateShader, 2, 0, { GL_EXTENSION_COUNT }},
-    { "glCreateShaderObjectARB", glCreateShaderObjectARB, 0, 0, { GL_ARB_shader_objects, GL_EXTENSION_COUNT }},
-    { "glCreateShaderProgramEXT", glCreateShaderProgramEXT, 0, 0, { GL_EXT_separate_shader_objects, GL_EXTENSION_COUNT }},
-    { "glCreateShaderProgramv", glCreateShaderProgramv, 4, 1, { GL_ARB_separate_shader_objects, GL_EXTENSION_COUNT }},
-    { "glCreateStatesNV", glCreateStatesNV, 0, 0, { GL_NV_command_list, GL_EXTENSION_COUNT }},
-    { "glCreateSyncFromCLeventARB", glCreateSyncFromCLeventARB, 0, 0, { GL_ARB_cl_event, GL_EXTENSION_COUNT }},
-    { "glCreateTextures", glCreateTextures, 4, 5, { GL_ARB_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glCreateTransformFeedbacks", glCreateTransformFeedbacks, 4, 5, { GL_ARB_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glCreateVertexArrays", glCreateVertexArrays, 4, 5, { GL_ARB_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glCullParameterdvEXT", glCullParameterdvEXT, 0, 0, { GL_EXT_cull_vertex, GL_EXTENSION_COUNT }},
-    { "glCullParameterfvEXT", glCullParameterfvEXT, 0, 0, { GL_EXT_cull_vertex, GL_EXTENSION_COUNT }},
-    { "glCurrentPaletteMatrixARB", glCurrentPaletteMatrixARB, 0, 0, { GL_ARB_matrix_palette, GL_EXTENSION_COUNT }},
-    { "glDebugMessageCallback", glDebugMessageCallback, 4, 3, { GL_KHR_debug, GL_EXTENSION_COUNT }},
-    { "glDebugMessageCallbackAMD", glDebugMessageCallbackAMD, 0, 0, { GL_AMD_debug_output, GL_AMDX_debug_output, GL_EXTENSION_COUNT }},
-    { "glDebugMessageCallbackARB", glDebugMessageCallbackARB, 0, 0, { GL_ARB_debug_output, GL_EXTENSION_COUNT }},
-    { "glDebugMessageControl", glDebugMessageControl, 4, 3, { GL_KHR_debug, GL_EXTENSION_COUNT }},
-    { "glDebugMessageControlARB", glDebugMessageControlARB, 0, 0, { GL_ARB_debug_output, GL_EXTENSION_COUNT }},
-    { "glDebugMessageEnableAMD", glDebugMessageEnableAMD, 0, 0, { GL_AMD_debug_output, GL_AMDX_debug_output, GL_EXTENSION_COUNT }},
-    { "glDebugMessageInsert", glDebugMessageInsert, 4, 3, { GL_KHR_debug, GL_EXTENSION_COUNT }},
-    { "glDebugMessageInsertAMD", glDebugMessageInsertAMD, 0, 0, { GL_AMD_debug_output, GL_AMDX_debug_output, GL_EXTENSION_COUNT }},
-    { "glDebugMessageInsertARB", glDebugMessageInsertARB, 0, 0, { GL_ARB_debug_output, GL_EXTENSION_COUNT }},
-    { "glDeformSGIX", glDeformSGIX, 0, 0, { GL_SGIX_polynomial_ffd, GL_EXTENSION_COUNT }},
-    { "glDeformationMap3dSGIX", glDeformationMap3dSGIX, 0, 0, { GL_SGIX_polynomial_ffd, GL_EXTENSION_COUNT }},
-    { "glDeformationMap3fSGIX", glDeformationMap3fSGIX, 0, 0, { GL_SGIX_polynomial_ffd, GL_EXTENSION_COUNT }},
-    { "glDeleteAsyncMarkersSGIX", glDeleteAsyncMarkersSGIX, 0, 0, { GL_SGIX_async, GL_EXTENSION_COUNT }},
-    { "glDeleteBufferRegion", glDeleteBufferRegion, 0, 0, { GL_KTX_buffer_region, GL_EXTENSION_COUNT }},
-    { "glDeleteBuffers", glDeleteBuffers, 1, 5, { GL_EXTENSION_COUNT }},
-    { "glDeleteBuffersARB", glDeleteBuffersARB, 0, 0, { GL_ARB_vertex_buffer_object, GL_EXTENSION_COUNT }},
-    { "glDeleteCommandListsNV", glDeleteCommandListsNV, 0, 0, { GL_NV_command_list, GL_EXTENSION_COUNT }},
-    { "glDeleteFencesAPPLE", glDeleteFencesAPPLE, 0, 0, { GL_APPLE_fence, GL_EXTENSION_COUNT }},
-    { "glDeleteFencesNV", glDeleteFencesNV, 0, 0, { GL_NV_fence, GL_EXTENSION_COUNT }},
-    { "glDeleteFragmentShaderATI", glDeleteFragmentShaderATI, 0, 0, { GL_ATI_fragment_shader, GL_EXTENSION_COUNT }},
-    { "glDeleteFramebuffers", glDeleteFramebuffers, 3, 0, { GL_ARB_framebuffer_object, GL_EXTENSION_COUNT }},
-    { "glDeleteFramebuffersEXT", glDeleteFramebuffersEXT, 0, 0, { GL_EXT_framebuffer_object, GL_EXTENSION_COUNT }},
-    { "glDeleteMemoryObjectsEXT", glDeleteMemoryObjectsEXT, 0, 0, { GL_EXT_memory_object, GL_EXTENSION_COUNT }},
-    { "glDeleteNamedStringARB", glDeleteNamedStringARB, 0, 0, { GL_ARB_shading_language_include, GL_EXTENSION_COUNT }},
-    { "glDeleteNamesAMD", glDeleteNamesAMD, 0, 0, { GL_AMD_name_gen_delete, GL_EXTENSION_COUNT }},
-    { "glDeleteObjectARB", glDeleteObjectARB, 0, 0, { GL_ARB_shader_objects, GL_EXTENSION_COUNT }},
-    { "glDeleteObjectBufferATI", glDeleteObjectBufferATI, 0, 0, { GL_ATI_vertex_array_object, GL_EXTENSION_COUNT }},
-    { "glDeleteOcclusionQueriesNV", glDeleteOcclusionQueriesNV, 0, 0, { GL_NV_occlusion_query, GL_EXTENSION_COUNT }},
-    { "glDeletePathsNV", glDeletePathsNV, 0, 0, { GL_NV_path_rendering, GL_EXTENSION_COUNT }},
-    { "glDeletePerfMonitorsAMD", glDeletePerfMonitorsAMD, 0, 0, { GL_AMD_performance_monitor, GL_EXTENSION_COUNT }},
-    { "glDeletePerfQueryINTEL", glDeletePerfQueryINTEL, 0, 0, { GL_INTEL_performance_query, GL_EXTENSION_COUNT }},
-    { "glDeleteProgram", glDeleteProgram, 2, 0, { GL_EXTENSION_COUNT }},
-    { "glDeleteProgramPipelines", glDeleteProgramPipelines, 4, 1, { GL_ARB_separate_shader_objects, GL_EXTENSION_COUNT }},
-    { "glDeleteProgramsARB", glDeleteProgramsARB, 0, 0, { GL_ARB_fragment_program, GL_ARB_vertex_program, GL_EXTENSION_COUNT }},
-    { "glDeleteProgramsNV", glDeleteProgramsNV, 0, 0, { GL_NV_vertex_program, GL_EXTENSION_COUNT }},
-    { "glDeleteQueries", glDeleteQueries, 1, 5, { GL_EXTENSION_COUNT }},
-    { "glDeleteQueriesARB", glDeleteQueriesARB, 0, 0, { GL_ARB_occlusion_query, GL_EXTENSION_COUNT }},
-    { "glDeleteQueryResourceTagNV", glDeleteQueryResourceTagNV, 0, 0, { GL_NV_query_resource_tag, GL_EXTENSION_COUNT }},
-    { "glDeleteRenderbuffers", glDeleteRenderbuffers, 3, 0, { GL_ARB_framebuffer_object, GL_EXTENSION_COUNT }},
-    { "glDeleteRenderbuffersEXT", glDeleteRenderbuffersEXT, 0, 0, { GL_EXT_framebuffer_object, GL_EXTENSION_COUNT }},
-    { "glDeleteSamplers", glDeleteSamplers, 3, 3, { GL_ARB_sampler_objects, GL_EXTENSION_COUNT }},
-    { "glDeleteSemaphoresEXT", glDeleteSemaphoresEXT, 0, 0, { GL_EXT_semaphore, GL_EXTENSION_COUNT }},
-    { "glDeleteShader", glDeleteShader, 2, 0, { GL_EXTENSION_COUNT }},
-    { "glDeleteStatesNV", glDeleteStatesNV, 0, 0, { GL_NV_command_list, GL_EXTENSION_COUNT }},
-    { "glDeleteSync", glDeleteSync, 3, 2, { GL_ARB_sync, GL_EXTENSION_COUNT }},
-    { "glDeleteTexturesEXT", glDeleteTexturesEXT, 0, 0, { GL_EXT_texture_object, GL_EXTENSION_COUNT }},
-    { "glDeleteTransformFeedbacks", glDeleteTransformFeedbacks, 4, 0, { GL_ARB_transform_feedback2, GL_EXTENSION_COUNT }},
-    { "glDeleteTransformFeedbacksNV", glDeleteTransformFeedbacksNV, 0, 0, { GL_NV_transform_feedback2, GL_EXTENSION_COUNT }},
-    { "glDeleteVertexArrays", glDeleteVertexArrays, 3, 0, { GL_ARB_vertex_array_object, GL_EXTENSION_COUNT }},
-    { "glDeleteVertexArraysAPPLE", glDeleteVertexArraysAPPLE, 0, 0, { GL_APPLE_vertex_array_object, GL_EXTENSION_COUNT }},
-    { "glDeleteVertexShaderEXT", glDeleteVertexShaderEXT, 0, 0, { GL_EXT_vertex_shader, GL_EXTENSION_COUNT }},
-    { "glDepthBoundsEXT", glDepthBoundsEXT, 0, 0, { GL_EXT_depth_bounds_test, GL_EXTENSION_COUNT }},
-    { "glDepthBoundsdNV", glDepthBoundsdNV, 0, 0, { GL_NV_depth_buffer_float, GL_EXTENSION_COUNT }},
-    { "glDepthRangeArraydvNV", glDepthRangeArraydvNV, 0, 0, { GL_ARB_viewport_array, GL_EXTENSION_COUNT }},
-    { "glDepthRangeArrayv", glDepthRangeArrayv, 4, 1, { GL_ARB_viewport_array, GL_EXTENSION_COUNT }},
-    { "glDepthRangeIndexed", glDepthRangeIndexed, 4, 1, { GL_ARB_viewport_array, GL_EXTENSION_COUNT }},
-    { "glDepthRangeIndexeddNV", glDepthRangeIndexeddNV, 0, 0, { GL_ARB_viewport_array, GL_EXTENSION_COUNT }},
-    { "glDepthRangedNV", glDepthRangedNV, 0, 0, { GL_NV_depth_buffer_float, GL_EXTENSION_COUNT }},
-    { "glDepthRangef", glDepthRangef, 4, 1, { GL_ARB_ES2_compatibility, GL_EXTENSION_COUNT }},
-    { "glDepthRangefOES", glDepthRangefOES, 0, 0, { GL_OES_single_precision, GL_EXTENSION_COUNT }},
-    { "glDepthRangex", glDepthRangex, 0, 0, { GL_NV_ES1_1_compatibility, GL_EXTENSION_COUNT }},
-    { "glDepthRangexOES", glDepthRangexOES, 0, 0, { GL_OES_fixed_point, GL_EXTENSION_COUNT }},
-    { "glDetachObjectARB", glDetachObjectARB, 0, 0, { GL_ARB_shader_objects, GL_EXTENSION_COUNT }},
-    { "glDetachShader", glDetachShader, 2, 0, { GL_EXTENSION_COUNT }},
-    { "glDetailTexFuncSGIS", glDetailTexFuncSGIS, 0, 0, { GL_SGIS_detail_texture, GL_EXTENSION_COUNT }},
-    { "glDisableClientStateIndexedEXT", glDisableClientStateIndexedEXT, 0, 0, { GL_EXT_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glDisableClientStateiEXT", glDisableClientStateiEXT, 0, 0, { GL_EXT_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glDisableIndexedEXT", glDisableIndexedEXT, 0, 0, { GL_EXT_direct_state_access, GL_EXT_draw_buffers2, GL_EXTENSION_COUNT }},
-    { "glDisableVariantClientStateEXT", glDisableVariantClientStateEXT, 0, 0, { GL_EXT_vertex_shader, GL_EXTENSION_COUNT }},
-    { "glDisableVertexArrayAttrib", glDisableVertexArrayAttrib, 4, 5, { GL_ARB_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glDisableVertexArrayAttribEXT", glDisableVertexArrayAttribEXT, 0, 0, { GL_EXT_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glDisableVertexArrayEXT", glDisableVertexArrayEXT, 0, 0, { GL_EXT_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glDisableVertexAttribAPPLE", glDisableVertexAttribAPPLE, 0, 0, { GL_APPLE_vertex_program_evaluators, GL_EXTENSION_COUNT }},
-    { "glDisableVertexAttribArray", glDisableVertexAttribArray, 2, 0, { GL_EXTENSION_COUNT }},
-    { "glDisableVertexAttribArrayARB", glDisableVertexAttribArrayARB, 0, 0, { GL_ARB_vertex_program, GL_ARB_vertex_shader, GL_EXTENSION_COUNT }},
-    { "glDisablei", glDisablei, 3, 0, { GL_EXTENSION_COUNT }},
-    { "glDispatchCompute", glDispatchCompute, 4, 3, { GL_ARB_compute_shader, GL_EXTENSION_COUNT }},
-    { "glDispatchComputeGroupSizeARB", glDispatchComputeGroupSizeARB, 0, 0, { GL_ARB_compute_variable_group_size, GL_EXTENSION_COUNT }},
-    { "glDispatchComputeIndirect", glDispatchComputeIndirect, 4, 3, { GL_ARB_compute_shader, GL_EXTENSION_COUNT }},
-    { "glDrawArraysEXT", glDrawArraysEXT, 0, 0, { GL_EXT_vertex_array, GL_EXTENSION_COUNT }},
-    { "glDrawArraysIndirect", glDrawArraysIndirect, 4, 0, { GL_ARB_draw_indirect, GL_EXTENSION_COUNT }},
-    { "glDrawArraysInstanced", glDrawArraysInstanced, 3, 1, { GL_EXTENSION_COUNT }},
-    { "glDrawArraysInstancedARB", glDrawArraysInstancedARB, 0, 0, { GL_ARB_draw_instanced, GL_EXTENSION_COUNT }},
-    { "glDrawArraysInstancedBaseInstance", glDrawArraysInstancedBaseInstance, 4, 2, { GL_ARB_base_instance, GL_EXTENSION_COUNT }},
-    { "glDrawArraysInstancedEXT", glDrawArraysInstancedEXT, 0, 0, { GL_EXT_draw_instanced, GL_EXTENSION_COUNT }},
-    { "glDrawBufferRegion", glDrawBufferRegion, 0, 0, { GL_KTX_buffer_region, GL_EXTENSION_COUNT }},
-    { "glDrawBuffers", glDrawBuffers, 2, 0, { GL_EXTENSION_COUNT }},
-    { "glDrawBuffersARB", glDrawBuffersARB, 0, 0, { GL_ARB_draw_buffers, GL_EXTENSION_COUNT }},
-    { "glDrawBuffersATI", glDrawBuffersATI, 0, 0, { GL_ATI_draw_buffers, GL_EXTENSION_COUNT }},
-    { "glDrawCommandsAddressNV", glDrawCommandsAddressNV, 0, 0, { GL_NV_command_list, GL_EXTENSION_COUNT }},
-    { "glDrawCommandsNV", glDrawCommandsNV, 0, 0, { GL_NV_command_list, GL_EXTENSION_COUNT }},
-    { "glDrawCommandsStatesAddressNV", glDrawCommandsStatesAddressNV, 0, 0, { GL_NV_command_list, GL_EXTENSION_COUNT }},
-    { "glDrawCommandsStatesNV", glDrawCommandsStatesNV, 0, 0, { GL_NV_command_list, GL_EXTENSION_COUNT }},
-    { "glDrawElementArrayAPPLE", glDrawElementArrayAPPLE, 0, 0, { GL_APPLE_element_array, GL_EXTENSION_COUNT }},
-    { "glDrawElementArrayATI", glDrawElementArrayATI, 0, 0, { GL_ATI_element_array, GL_EXTENSION_COUNT }},
-    { "glDrawElementsBaseVertex", glDrawElementsBaseVertex, 3, 2, { GL_ARB_draw_elements_base_vertex, GL_EXTENSION_COUNT }},
-    { "glDrawElementsIndirect", glDrawElementsIndirect, 4, 0, { GL_ARB_draw_indirect, GL_EXTENSION_COUNT }},
-    { "glDrawElementsInstanced", glDrawElementsInstanced, 3, 1, { GL_EXTENSION_COUNT }},
-    { "glDrawElementsInstancedARB", glDrawElementsInstancedARB, 0, 0, { GL_ARB_draw_instanced, GL_EXTENSION_COUNT }},
-    { "glDrawElementsInstancedBaseInstance", glDrawElementsInstancedBaseInstance, 4, 2, { GL_ARB_base_instance, GL_EXTENSION_COUNT }},
-    { "glDrawElementsInstancedBaseVertex", glDrawElementsInstancedBaseVertex, 3, 2, { GL_ARB_draw_elements_base_vertex, GL_EXTENSION_COUNT }},
-    { "glDrawElementsInstancedBaseVertexBaseInstance", glDrawElementsInstancedBaseVertexBaseInstance, 4, 2, { GL_ARB_base_instance, GL_EXTENSION_COUNT }},
-    { "glDrawElementsInstancedEXT", glDrawElementsInstancedEXT, 0, 0, { GL_EXT_draw_instanced, GL_EXTENSION_COUNT }},
-    { "glDrawMeshArraysSUN", glDrawMeshArraysSUN, 0, 0, { GL_SUN_mesh_array, GL_EXTENSION_COUNT }},
-    { "glDrawMeshTasksEXT", glDrawMeshTasksEXT, 0, 0, { GL_EXT_mesh_shader, GL_EXTENSION_COUNT }},
-    { "glDrawMeshTasksIndirectEXT", glDrawMeshTasksIndirectEXT, 0, 0, { GL_EXT_mesh_shader, GL_EXTENSION_COUNT }},
-    { "glDrawMeshTasksIndirectNV", glDrawMeshTasksIndirectNV, 0, 0, { GL_NV_mesh_shader, GL_EXTENSION_COUNT }},
-    { "glDrawMeshTasksNV", glDrawMeshTasksNV, 0, 0, { GL_NV_mesh_shader, GL_EXTENSION_COUNT }},
-    { "glDrawRangeElementArrayAPPLE", glDrawRangeElementArrayAPPLE, 0, 0, { GL_APPLE_element_array, GL_EXTENSION_COUNT }},
-    { "glDrawRangeElementArrayATI", glDrawRangeElementArrayATI, 0, 0, { GL_ATI_element_array, GL_EXTENSION_COUNT }},
-    { "glDrawRangeElements", glDrawRangeElements, 1, 2, { GL_EXTENSION_COUNT }},
-    { "glDrawRangeElementsBaseVertex", glDrawRangeElementsBaseVertex, 3, 2, { GL_ARB_draw_elements_base_vertex, GL_EXTENSION_COUNT }},
-    { "glDrawRangeElementsEXT", glDrawRangeElementsEXT, 0, 0, { GL_EXT_draw_range_elements, GL_EXTENSION_COUNT }},
-    { "glDrawTextureNV", glDrawTextureNV, 0, 0, { GL_NV_draw_texture, GL_EXTENSION_COUNT }},
-    { "glDrawTransformFeedback", glDrawTransformFeedback, 4, 0, { GL_ARB_transform_feedback2, GL_EXTENSION_COUNT }},
-    { "glDrawTransformFeedbackInstanced", glDrawTransformFeedbackInstanced, 4, 2, { GL_ARB_transform_feedback_instanced, GL_EXTENSION_COUNT }},
-    { "glDrawTransformFeedbackNV", glDrawTransformFeedbackNV, 0, 0, { GL_NV_transform_feedback2, GL_EXTENSION_COUNT }},
-    { "glDrawTransformFeedbackStream", glDrawTransformFeedbackStream, 4, 0, { GL_ARB_transform_feedback3, GL_EXTENSION_COUNT }},
-    { "glDrawTransformFeedbackStreamInstanced", glDrawTransformFeedbackStreamInstanced, 4, 2, { GL_ARB_transform_feedback_instanced, GL_EXTENSION_COUNT }},
-    { "glDrawVkImageNV", glDrawVkImageNV, 0, 0, { GL_NV_draw_vulkan_image, GL_EXTENSION_COUNT }},
-    { "glEGLImageTargetTexStorageEXT", glEGLImageTargetTexStorageEXT, 0, 0, { GL_EXT_EGL_image_storage, GL_EXTENSION_COUNT }},
-    { "glEGLImageTargetTextureStorageEXT", glEGLImageTargetTextureStorageEXT, 0, 0, { GL_EXT_EGL_image_storage, GL_EXTENSION_COUNT }},
-    { "glEdgeFlagFormatNV", glEdgeFlagFormatNV, 0, 0, { GL_NV_vertex_buffer_unified_memory, GL_EXTENSION_COUNT }},
-    { "glEdgeFlagPointerEXT", glEdgeFlagPointerEXT, 0, 0, { GL_EXT_vertex_array, GL_EXTENSION_COUNT }},
-    { "glEdgeFlagPointerListIBM", glEdgeFlagPointerListIBM, 0, 0, { GL_IBM_vertex_array_lists, GL_EXTENSION_COUNT }},
-    { "glElementPointerAPPLE", glElementPointerAPPLE, 0, 0, { GL_APPLE_element_array, GL_EXTENSION_COUNT }},
-    { "glElementPointerATI", glElementPointerATI, 0, 0, { GL_ATI_element_array, GL_EXTENSION_COUNT }},
-    { "glEnableClientStateIndexedEXT", glEnableClientStateIndexedEXT, 0, 0, { GL_EXT_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glEnableClientStateiEXT", glEnableClientStateiEXT, 0, 0, { GL_EXT_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glEnableIndexedEXT", glEnableIndexedEXT, 0, 0, { GL_EXT_direct_state_access, GL_EXT_draw_buffers2, GL_EXTENSION_COUNT }},
-    { "glEnableVariantClientStateEXT", glEnableVariantClientStateEXT, 0, 0, { GL_EXT_vertex_shader, GL_EXTENSION_COUNT }},
-    { "glEnableVertexArrayAttrib", glEnableVertexArrayAttrib, 4, 5, { GL_ARB_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glEnableVertexArrayAttribEXT", glEnableVertexArrayAttribEXT, 0, 0, { GL_EXT_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glEnableVertexArrayEXT", glEnableVertexArrayEXT, 0, 0, { GL_EXT_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glEnableVertexAttribAPPLE", glEnableVertexAttribAPPLE, 0, 0, { GL_APPLE_vertex_program_evaluators, GL_EXTENSION_COUNT }},
-    { "glEnableVertexAttribArray", glEnableVertexAttribArray, 2, 0, { GL_EXTENSION_COUNT }},
-    { "glEnableVertexAttribArrayARB", glEnableVertexAttribArrayARB, 0, 0, { GL_ARB_vertex_program, GL_ARB_vertex_shader, GL_EXTENSION_COUNT }},
-    { "glEnablei", glEnablei, 3, 0, { GL_EXTENSION_COUNT }},
-    { "glEndConditionalRender", glEndConditionalRender, 3, 0, { GL_EXTENSION_COUNT }},
-    { "glEndConditionalRenderNV", glEndConditionalRenderNV, 0, 0, { GL_NV_conditional_render, GL_EXTENSION_COUNT }},
-    { "glEndConditionalRenderNVX", glEndConditionalRenderNVX, 0, 0, { GL_NVX_conditional_render, GL_EXTENSION_COUNT }},
-    { "glEndFragmentShaderATI", glEndFragmentShaderATI, 0, 0, { GL_ATI_fragment_shader, GL_EXTENSION_COUNT }},
-    { "glEndOcclusionQueryNV", glEndOcclusionQueryNV, 0, 0, { GL_NV_occlusion_query, GL_EXTENSION_COUNT }},
-    { "glEndPerfMonitorAMD", glEndPerfMonitorAMD, 0, 0, { GL_AMD_performance_monitor, GL_EXTENSION_COUNT }},
-    { "glEndPerfQueryINTEL", glEndPerfQueryINTEL, 0, 0, { GL_INTEL_performance_query, GL_EXTENSION_COUNT }},
-    { "glEndQuery", glEndQuery, 1, 5, { GL_EXTENSION_COUNT }},
-    { "glEndQueryARB", glEndQueryARB, 0, 0, { GL_ARB_occlusion_query, GL_EXTENSION_COUNT }},
-    { "glEndQueryIndexed", glEndQueryIndexed, 4, 0, { GL_ARB_transform_feedback3, GL_EXTENSION_COUNT }},
-    { "glEndTransformFeedback", glEndTransformFeedback, 3, 0, { GL_EXTENSION_COUNT }},
-    { "glEndTransformFeedbackEXT", glEndTransformFeedbackEXT, 0, 0, { GL_EXT_transform_feedback, GL_EXTENSION_COUNT }},
-    { "glEndTransformFeedbackNV", glEndTransformFeedbackNV, 0, 0, { GL_NV_transform_feedback, GL_EXTENSION_COUNT }},
-    { "glEndVertexShaderEXT", glEndVertexShaderEXT, 0, 0, { GL_EXT_vertex_shader, GL_EXTENSION_COUNT }},
-    { "glEndVideoCaptureNV", glEndVideoCaptureNV, 0, 0, { GL_NV_video_capture, GL_EXTENSION_COUNT }},
-    { "glEvalCoord1xOES", glEvalCoord1xOES, 0, 0, { GL_OES_fixed_point, GL_EXTENSION_COUNT }},
-    { "glEvalCoord1xvOES", glEvalCoord1xvOES, 0, 0, { GL_OES_fixed_point, GL_EXTENSION_COUNT }},
-    { "glEvalCoord2xOES", glEvalCoord2xOES, 0, 0, { GL_OES_fixed_point, GL_EXTENSION_COUNT }},
-    { "glEvalCoord2xvOES", glEvalCoord2xvOES, 0, 0, { GL_OES_fixed_point, GL_EXTENSION_COUNT }},
-    { "glEvalMapsNV", glEvalMapsNV, 0, 0, { GL_NV_evaluators, GL_EXTENSION_COUNT }},
-    { "glEvaluateDepthValuesARB", glEvaluateDepthValuesARB, 0, 0, { GL_ARB_sample_locations, GL_EXTENSION_COUNT }},
-    { "glExecuteProgramNV", glExecuteProgramNV, 0, 0, { GL_NV_vertex_program, GL_EXTENSION_COUNT }},
-    { "glExtractComponentEXT", glExtractComponentEXT, 0, 0, { GL_EXT_vertex_shader, GL_EXTENSION_COUNT }},
-    { "glFeedbackBufferxOES", glFeedbackBufferxOES, 0, 0, { GL_OES_fixed_point, GL_EXTENSION_COUNT }},
-    { "glFenceSync", glFenceSync, 3, 2, { GL_ARB_sync, GL_EXTENSION_COUNT }},
-    { "glFinalCombinerInputNV", glFinalCombinerInputNV, 0, 0, { GL_NV_register_combiners, GL_EXTENSION_COUNT }},
-    { "glFinishAsyncSGIX", glFinishAsyncSGIX, 0, 0, { GL_SGIX_async, GL_EXTENSION_COUNT }},
-    { "glFinishFenceAPPLE", glFinishFenceAPPLE, 0, 0, { GL_APPLE_fence, GL_EXTENSION_COUNT }},
-    { "glFinishFenceNV", glFinishFenceNV, 0, 0, { GL_NV_fence, GL_EXTENSION_COUNT }},
-    { "glFinishObjectAPPLE", glFinishObjectAPPLE, 0, 0, { GL_APPLE_fence, GL_EXTENSION_COUNT }},
-    { "glFinishTextureSUNX", glFinishTextureSUNX, 0, 0, { GL_SUNX_constant_data, GL_EXTENSION_COUNT }},
-    { "glFlushMappedBufferRange", glFlushMappedBufferRange, 3, 0, { GL_ARB_map_buffer_range, GL_EXTENSION_COUNT }},
-    { "glFlushMappedBufferRangeAPPLE", glFlushMappedBufferRangeAPPLE, 0, 0, { GL_APPLE_flush_buffer_range, GL_EXTENSION_COUNT }},
-    { "glFlushMappedNamedBufferRange", glFlushMappedNamedBufferRange, 4, 5, { GL_ARB_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glFlushMappedNamedBufferRangeEXT", glFlushMappedNamedBufferRangeEXT, 0, 0, { GL_EXT_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glFlushPixelDataRangeNV", glFlushPixelDataRangeNV, 0, 0, { GL_NV_pixel_data_range, GL_EXTENSION_COUNT }},
-    { "glFlushRasterSGIX", glFlushRasterSGIX, 0, 0, { GL_SGIX_flush_raster, GL_EXTENSION_COUNT }},
-    { "glFlushStaticDataIBM", glFlushStaticDataIBM, 0, 0, { GL_IBM_static_data, GL_EXTENSION_COUNT }},
-    { "glFlushVertexArrayRangeAPPLE", glFlushVertexArrayRangeAPPLE, 0, 0, { GL_APPLE_vertex_array_range, GL_EXTENSION_COUNT }},
-    { "glFlushVertexArrayRangeNV", glFlushVertexArrayRangeNV, 0, 0, { GL_NV_vertex_array_range, GL_EXTENSION_COUNT }},
-    { "glFogCoordFormatNV", glFogCoordFormatNV, 0, 0, { GL_NV_vertex_buffer_unified_memory, GL_EXTENSION_COUNT }},
-    { "glFogCoordPointer", glFogCoordPointer, 1, 4, { GL_EXTENSION_COUNT }},
-    { "glFogCoordPointerEXT", glFogCoordPointerEXT, 0, 0, { GL_EXT_fog_coord, GL_EXTENSION_COUNT }},
-    { "glFogCoordPointerListIBM", glFogCoordPointerListIBM, 0, 0, { GL_IBM_vertex_array_lists, GL_EXTENSION_COUNT }},
-    { "glFogCoordd", glFogCoordd, 1, 4, { GL_EXTENSION_COUNT }},
-    { "glFogCoorddEXT", glFogCoorddEXT, 0, 0, { GL_EXT_fog_coord, GL_EXTENSION_COUNT }},
-    { "glFogCoorddv", glFogCoorddv, 1, 4, { GL_EXTENSION_COUNT }},
-    { "glFogCoorddvEXT", glFogCoorddvEXT, 0, 0, { GL_EXT_fog_coord, GL_EXTENSION_COUNT }},
-    { "glFogCoordf", glFogCoordf, 1, 4, { GL_EXTENSION_COUNT }},
-    { "glFogCoordfEXT", glFogCoordfEXT, 0, 0, { GL_EXT_fog_coord, GL_EXTENSION_COUNT }},
-    { "glFogCoordfv", glFogCoordfv, 1, 4, { GL_EXTENSION_COUNT }},
-    { "glFogCoordfvEXT", glFogCoordfvEXT, 0, 0, { GL_EXT_fog_coord, GL_EXTENSION_COUNT }},
-    { "glFogCoordhNV", glFogCoordhNV, 0, 0, { GL_NV_half_float, GL_EXTENSION_COUNT }},
-    { "glFogCoordhvNV", glFogCoordhvNV, 0, 0, { GL_NV_half_float, GL_EXTENSION_COUNT }},
-    { "glFogFuncSGIS", glFogFuncSGIS, 0, 0, { GL_SGIS_fog_function, GL_EXTENSION_COUNT }},
-    { "glFogx", glFogx, 0, 0, { GL_NV_ES1_1_compatibility, GL_EXTENSION_COUNT }},
-    { "glFogxOES", glFogxOES, 0, 0, { GL_OES_fixed_point, GL_EXTENSION_COUNT }},
-    { "glFogxv", glFogxv, 0, 0, { GL_NV_ES1_1_compatibility, GL_EXTENSION_COUNT }},
-    { "glFogxvOES", glFogxvOES, 0, 0, { GL_OES_fixed_point, GL_EXTENSION_COUNT }},
-    { "glFragmentColorMaterialSGIX", glFragmentColorMaterialSGIX, 0, 0, { GL_SGIX_fragment_lighting, GL_EXTENSION_COUNT }},
-    { "glFragmentCoverageColorNV", glFragmentCoverageColorNV, 0, 0, { GL_NV_fragment_coverage_to_color, GL_EXTENSION_COUNT }},
-    { "glFragmentLightModelfSGIX", glFragmentLightModelfSGIX, 0, 0, { GL_SGIX_fragment_lighting, GL_EXTENSION_COUNT }},
-    { "glFragmentLightModelfvSGIX", glFragmentLightModelfvSGIX, 0, 0, { GL_SGIX_fragment_lighting, GL_EXTENSION_COUNT }},
-    { "glFragmentLightModeliSGIX", glFragmentLightModeliSGIX, 0, 0, { GL_SGIX_fragment_lighting, GL_EXTENSION_COUNT }},
-    { "glFragmentLightModelivSGIX", glFragmentLightModelivSGIX, 0, 0, { GL_SGIX_fragment_lighting, GL_EXTENSION_COUNT }},
-    { "glFragmentLightfSGIX", glFragmentLightfSGIX, 0, 0, { GL_SGIX_fragment_lighting, GL_EXTENSION_COUNT }},
-    { "glFragmentLightfvSGIX", glFragmentLightfvSGIX, 0, 0, { GL_SGIX_fragment_lighting, GL_EXTENSION_COUNT }},
-    { "glFragmentLightiSGIX", glFragmentLightiSGIX, 0, 0, { GL_SGIX_fragment_lighting, GL_EXTENSION_COUNT }},
-    { "glFragmentLightivSGIX", glFragmentLightivSGIX, 0, 0, { GL_SGIX_fragment_lighting, GL_EXTENSION_COUNT }},
-    { "glFragmentMaterialfSGIX", glFragmentMaterialfSGIX, 0, 0, { GL_SGIX_fragment_lighting, GL_EXTENSION_COUNT }},
-    { "glFragmentMaterialfvSGIX", glFragmentMaterialfvSGIX, 0, 0, { GL_SGIX_fragment_lighting, GL_EXTENSION_COUNT }},
-    { "glFragmentMaterialiSGIX", glFragmentMaterialiSGIX, 0, 0, { GL_SGIX_fragment_lighting, GL_EXTENSION_COUNT }},
-    { "glFragmentMaterialivSGIX", glFragmentMaterialivSGIX, 0, 0, { GL_SGIX_fragment_lighting, GL_EXTENSION_COUNT }},
-    { "glFrameTerminatorGREMEDY", glFrameTerminatorGREMEDY, 0, 0, { GL_GREMEDY_frame_terminator, GL_EXTENSION_COUNT }},
-    { "glFrameZoomSGIX", glFrameZoomSGIX, 0, 0, { GL_SGIX_framezoom, GL_EXTENSION_COUNT }},
-    { "glFramebufferDrawBufferEXT", glFramebufferDrawBufferEXT, 0, 0, { GL_EXT_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glFramebufferDrawBuffersEXT", glFramebufferDrawBuffersEXT, 0, 0, { GL_EXT_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glFramebufferFetchBarrierEXT", glFramebufferFetchBarrierEXT, 0, 0, { GL_EXT_shader_framebuffer_fetch_non_coherent, GL_EXTENSION_COUNT }},
-    { "glFramebufferParameteri", glFramebufferParameteri, 4, 3, { GL_ARB_framebuffer_no_attachments, GL_EXTENSION_COUNT }},
-    { "glFramebufferParameteriMESA", glFramebufferParameteriMESA, 0, 0, { GL_MESA_framebuffer_flip_y, GL_EXTENSION_COUNT }},
-    { "glFramebufferReadBufferEXT", glFramebufferReadBufferEXT, 0, 0, { GL_EXT_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glFramebufferRenderbuffer", glFramebufferRenderbuffer, 3, 0, { GL_ARB_framebuffer_object, GL_EXTENSION_COUNT }},
-    { "glFramebufferRenderbufferEXT", glFramebufferRenderbufferEXT, 0, 0, { GL_EXT_framebuffer_object, GL_EXTENSION_COUNT }},
-    { "glFramebufferSampleLocationsfvARB", glFramebufferSampleLocationsfvARB, 0, 0, { GL_ARB_sample_locations, GL_EXTENSION_COUNT }},
-    { "glFramebufferSampleLocationsfvNV", glFramebufferSampleLocationsfvNV, 0, 0, { GL_NV_sample_locations, GL_EXTENSION_COUNT }},
-    { "glFramebufferSamplePositionsfvAMD", glFramebufferSamplePositionsfvAMD, 0, 0, { GL_AMD_framebuffer_sample_positions, GL_EXTENSION_COUNT }},
-    { "glFramebufferShadingRateEXT", glFramebufferShadingRateEXT, 0, 0, { GL_EXT_fragment_shading_rate, GL_EXT_fragment_shading_rate_primitive, GL_EXT_fragment_shading_rate_attachment, GL_EXTENSION_COUNT }},
-    { "glFramebufferTexture", glFramebufferTexture, 3, 2, { GL_EXTENSION_COUNT }},
-    { "glFramebufferTexture1D", glFramebufferTexture1D, 3, 0, { GL_ARB_framebuffer_object, GL_EXTENSION_COUNT }},
-    { "glFramebufferTexture1DEXT", glFramebufferTexture1DEXT, 0, 0, { GL_EXT_framebuffer_object, GL_EXTENSION_COUNT }},
-    { "glFramebufferTexture2D", glFramebufferTexture2D, 3, 0, { GL_ARB_framebuffer_object, GL_EXTENSION_COUNT }},
-    { "glFramebufferTexture2DEXT", glFramebufferTexture2DEXT, 0, 0, { GL_EXT_framebuffer_object, GL_EXTENSION_COUNT }},
-    { "glFramebufferTexture3D", glFramebufferTexture3D, 3, 0, { GL_ARB_framebuffer_object, GL_EXTENSION_COUNT }},
-    { "glFramebufferTexture3DEXT", glFramebufferTexture3DEXT, 0, 0, { GL_EXT_framebuffer_object, GL_EXTENSION_COUNT }},
-    { "glFramebufferTextureARB", glFramebufferTextureARB, 0, 0, { GL_ARB_geometry_shader4, GL_EXTENSION_COUNT }},
-    { "glFramebufferTextureEXT", glFramebufferTextureEXT, 0, 0, { GL_NV_geometry_program4, GL_EXTENSION_COUNT }},
-    { "glFramebufferTextureFaceARB", glFramebufferTextureFaceARB, 0, 0, { GL_ARB_geometry_shader4, GL_EXTENSION_COUNT }},
-    { "glFramebufferTextureFaceEXT", glFramebufferTextureFaceEXT, 0, 0, { GL_NV_geometry_program4, GL_EXTENSION_COUNT }},
-    { "glFramebufferTextureLayer", glFramebufferTextureLayer, 3, 0, { GL_ARB_framebuffer_object, GL_EXTENSION_COUNT }},
-    { "glFramebufferTextureLayerARB", glFramebufferTextureLayerARB, 0, 0, { GL_ARB_geometry_shader4, GL_EXTENSION_COUNT }},
-    { "glFramebufferTextureLayerEXT", glFramebufferTextureLayerEXT, 0, 0, { GL_EXT_texture_array, GL_NV_geometry_program4, GL_EXTENSION_COUNT }},
-    { "glFramebufferTextureMultiviewOVR", glFramebufferTextureMultiviewOVR, 0, 0, { GL_OVR_multiview, GL_EXTENSION_COUNT }},
-    { "glFreeObjectBufferATI", glFreeObjectBufferATI, 0, 0, { GL_ATI_vertex_array_object, GL_EXTENSION_COUNT }},
-    { "glFrustumf", glFrustumf, 0, 0, { GL_NV_ES1_1_compatibility, GL_EXTENSION_COUNT }},
-    { "glFrustumfOES", glFrustumfOES, 0, 0, { GL_OES_single_precision, GL_EXTENSION_COUNT }},
-    { "glFrustumx", glFrustumx, 0, 0, { GL_NV_ES1_1_compatibility, GL_EXTENSION_COUNT }},
-    { "glFrustumxOES", glFrustumxOES, 0, 0, { GL_OES_fixed_point, GL_EXTENSION_COUNT }},
-    { "glGenAsyncMarkersSGIX", glGenAsyncMarkersSGIX, 0, 0, { GL_SGIX_async, GL_EXTENSION_COUNT }},
-    { "glGenBuffers", glGenBuffers, 1, 5, { GL_EXTENSION_COUNT }},
-    { "glGenBuffersARB", glGenBuffersARB, 0, 0, { GL_ARB_vertex_buffer_object, GL_EXTENSION_COUNT }},
-    { "glGenFencesAPPLE", glGenFencesAPPLE, 0, 0, { GL_APPLE_fence, GL_EXTENSION_COUNT }},
-    { "glGenFencesNV", glGenFencesNV, 0, 0, { GL_NV_fence, GL_EXTENSION_COUNT }},
-    { "glGenFragmentShadersATI", glGenFragmentShadersATI, 0, 0, { GL_ATI_fragment_shader, GL_EXTENSION_COUNT }},
-    { "glGenFramebuffers", glGenFramebuffers, 3, 0, { GL_ARB_framebuffer_object, GL_EXTENSION_COUNT }},
-    { "glGenFramebuffersEXT", glGenFramebuffersEXT, 0, 0, { GL_EXT_framebuffer_object, GL_EXTENSION_COUNT }},
-    { "glGenNamesAMD", glGenNamesAMD, 0, 0, { GL_AMD_name_gen_delete, GL_EXTENSION_COUNT }},
-    { "glGenOcclusionQueriesNV", glGenOcclusionQueriesNV, 0, 0, { GL_NV_occlusion_query, GL_EXTENSION_COUNT }},
-    { "glGenPathsNV", glGenPathsNV, 0, 0, { GL_NV_path_rendering, GL_EXTENSION_COUNT }},
-    { "glGenPerfMonitorsAMD", glGenPerfMonitorsAMD, 0, 0, { GL_AMD_performance_monitor, GL_EXTENSION_COUNT }},
-    { "glGenProgramPipelines", glGenProgramPipelines, 4, 1, { GL_ARB_separate_shader_objects, GL_EXTENSION_COUNT }},
-    { "glGenProgramsARB", glGenProgramsARB, 0, 0, { GL_ARB_fragment_program, GL_ARB_vertex_program, GL_EXTENSION_COUNT }},
-    { "glGenProgramsNV", glGenProgramsNV, 0, 0, { GL_NV_vertex_program, GL_EXTENSION_COUNT }},
-    { "glGenQueries", glGenQueries, 1, 5, { GL_EXTENSION_COUNT }},
-    { "glGenQueriesARB", glGenQueriesARB, 0, 0, { GL_ARB_occlusion_query, GL_EXTENSION_COUNT }},
-    { "glGenQueryResourceTagNV", glGenQueryResourceTagNV, 0, 0, { GL_NV_query_resource_tag, GL_EXTENSION_COUNT }},
-    { "glGenRenderbuffers", glGenRenderbuffers, 3, 0, { GL_ARB_framebuffer_object, GL_EXTENSION_COUNT }},
-    { "glGenRenderbuffersEXT", glGenRenderbuffersEXT, 0, 0, { GL_EXT_framebuffer_object, GL_EXTENSION_COUNT }},
-    { "glGenSamplers", glGenSamplers, 3, 3, { GL_ARB_sampler_objects, GL_EXTENSION_COUNT }},
-    { "glGenSemaphoresEXT", glGenSemaphoresEXT, 0, 0, { GL_EXT_semaphore, GL_EXTENSION_COUNT }},
-    { "glGenSymbolsEXT", glGenSymbolsEXT, 0, 0, { GL_EXT_vertex_shader, GL_EXTENSION_COUNT }},
-    { "glGenTexturesEXT", glGenTexturesEXT, 0, 0, { GL_EXT_texture_object, GL_EXTENSION_COUNT }},
-    { "glGenTransformFeedbacks", glGenTransformFeedbacks, 4, 0, { GL_ARB_transform_feedback2, GL_EXTENSION_COUNT }},
-    { "glGenTransformFeedbacksNV", glGenTransformFeedbacksNV, 0, 0, { GL_NV_transform_feedback2, GL_EXTENSION_COUNT }},
-    { "glGenVertexArrays", glGenVertexArrays, 3, 0, { GL_ARB_vertex_array_object, GL_EXTENSION_COUNT }},
-    { "glGenVertexArraysAPPLE", glGenVertexArraysAPPLE, 0, 0, { GL_APPLE_vertex_array_object, GL_EXTENSION_COUNT }},
-    { "glGenVertexShadersEXT", glGenVertexShadersEXT, 0, 0, { GL_EXT_vertex_shader, GL_EXTENSION_COUNT }},
-    { "glGenerateMipmap", glGenerateMipmap, 3, 0, { GL_ARB_framebuffer_object, GL_EXTENSION_COUNT }},
-    { "glGenerateMipmapEXT", glGenerateMipmapEXT, 0, 0, { GL_EXT_framebuffer_object, GL_EXTENSION_COUNT }},
-    { "glGenerateMultiTexMipmapEXT", glGenerateMultiTexMipmapEXT, 0, 0, { GL_EXT_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glGenerateTextureMipmap", glGenerateTextureMipmap, 4, 5, { GL_ARB_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glGenerateTextureMipmapEXT", glGenerateTextureMipmapEXT, 0, 0, { GL_EXT_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glGetActiveAtomicCounterBufferiv", glGetActiveAtomicCounterBufferiv, 4, 2, { GL_ARB_shader_atomic_counters, GL_EXTENSION_COUNT }},
-    { "glGetActiveAttrib", glGetActiveAttrib, 2, 0, { GL_EXTENSION_COUNT }},
-    { "glGetActiveAttribARB", glGetActiveAttribARB, 0, 0, { GL_ARB_vertex_shader, GL_EXTENSION_COUNT }},
-    { "glGetActiveSubroutineName", glGetActiveSubroutineName, 4, 0, { GL_ARB_shader_subroutine, GL_EXTENSION_COUNT }},
-    { "glGetActiveSubroutineUniformName", glGetActiveSubroutineUniformName, 4, 0, { GL_ARB_shader_subroutine, GL_EXTENSION_COUNT }},
-    { "glGetActiveSubroutineUniformiv", glGetActiveSubroutineUniformiv, 4, 0, { GL_ARB_shader_subroutine, GL_EXTENSION_COUNT }},
-    { "glGetActiveUniform", glGetActiveUniform, 2, 0, { GL_EXTENSION_COUNT }},
-    { "glGetActiveUniformARB", glGetActiveUniformARB, 0, 0, { GL_ARB_shader_objects, GL_EXTENSION_COUNT }},
-    { "glGetActiveUniformBlockName", glGetActiveUniformBlockName, 3, 1, { GL_ARB_uniform_buffer_object, GL_EXTENSION_COUNT }},
-    { "glGetActiveUniformBlockiv", glGetActiveUniformBlockiv, 3, 1, { GL_ARB_uniform_buffer_object, GL_EXTENSION_COUNT }},
-    { "glGetActiveUniformName", glGetActiveUniformName, 3, 1, { GL_ARB_uniform_buffer_object, GL_EXTENSION_COUNT }},
-    { "glGetActiveUniformsiv", glGetActiveUniformsiv, 3, 1, { GL_ARB_uniform_buffer_object, GL_EXTENSION_COUNT }},
-    { "glGetActiveVaryingNV", glGetActiveVaryingNV, 0, 0, { GL_NV_transform_feedback, GL_EXTENSION_COUNT }},
-    { "glGetArrayObjectfvATI", glGetArrayObjectfvATI, 0, 0, { GL_ATI_vertex_array_object, GL_EXTENSION_COUNT }},
-    { "glGetArrayObjectivATI", glGetArrayObjectivATI, 0, 0, { GL_ATI_vertex_array_object, GL_EXTENSION_COUNT }},
-    { "glGetAttachedObjectsARB", glGetAttachedObjectsARB, 0, 0, { GL_ARB_shader_objects, GL_EXTENSION_COUNT }},
-    { "glGetAttachedShaders", glGetAttachedShaders, 2, 0, { GL_EXTENSION_COUNT }},
-    { "glGetAttribLocation", glGetAttribLocation, 2, 0, { GL_EXTENSION_COUNT }},
-    { "glGetAttribLocationARB", glGetAttribLocationARB, 0, 0, { GL_ARB_vertex_shader, GL_EXTENSION_COUNT }},
-    { "glGetBooleanIndexedvEXT", glGetBooleanIndexedvEXT, 0, 0, { GL_EXT_direct_state_access, GL_EXT_draw_buffers2, GL_EXTENSION_COUNT }},
-    { "glGetBooleani_v", glGetBooleani_v, 3, 0, { GL_EXTENSION_COUNT }},
-    { "glGetBufferParameteri64v", glGetBufferParameteri64v, 3, 2, { GL_EXTENSION_COUNT }},
-    { "glGetBufferParameteriv", glGetBufferParameteriv, 1, 5, { GL_EXTENSION_COUNT }},
-    { "glGetBufferParameterivARB", glGetBufferParameterivARB, 0, 0, { GL_ARB_vertex_buffer_object, GL_EXTENSION_COUNT }},
-    { "glGetBufferParameterui64vNV", glGetBufferParameterui64vNV, 0, 0, { GL_NV_shader_buffer_load, GL_EXTENSION_COUNT }},
-    { "glGetBufferPointerv", glGetBufferPointerv, 1, 5, { GL_EXTENSION_COUNT }},
-    { "glGetBufferPointervARB", glGetBufferPointervARB, 0, 0, { GL_ARB_vertex_buffer_object, GL_EXTENSION_COUNT }},
-    { "glGetBufferSubData", glGetBufferSubData, 1, 5, { GL_EXTENSION_COUNT }},
-    { "glGetBufferSubDataARB", glGetBufferSubDataARB, 0, 0, { GL_ARB_vertex_buffer_object, GL_EXTENSION_COUNT }},
-    { "glGetClipPlanef", glGetClipPlanef, 0, 0, { GL_NV_ES1_1_compatibility, GL_EXTENSION_COUNT }},
-    { "glGetClipPlanefOES", glGetClipPlanefOES, 0, 0, { GL_OES_single_precision, GL_EXTENSION_COUNT }},
-    { "glGetClipPlanex", glGetClipPlanex, 0, 0, { GL_NV_ES1_1_compatibility, GL_EXTENSION_COUNT }},
-    { "glGetClipPlanexOES", glGetClipPlanexOES, 0, 0, { GL_OES_fixed_point, GL_EXTENSION_COUNT }},
-    { "glGetColorTable", glGetColorTable, 0, 0, { GL_ARB_imaging, GL_EXTENSION_COUNT }},
-    { "glGetColorTableEXT", glGetColorTableEXT, 0, 0, { GL_EXT_paletted_texture, GL_EXTENSION_COUNT }},
-    { "glGetColorTableParameterfv", glGetColorTableParameterfv, 0, 0, { GL_ARB_imaging, GL_EXTENSION_COUNT }},
-    { "glGetColorTableParameterfvEXT", glGetColorTableParameterfvEXT, 0, 0, { GL_EXT_paletted_texture, GL_EXTENSION_COUNT }},
-    { "glGetColorTableParameterfvSGI", glGetColorTableParameterfvSGI, 0, 0, { GL_SGI_color_table, GL_EXTENSION_COUNT }},
-    { "glGetColorTableParameteriv", glGetColorTableParameteriv, 0, 0, { GL_ARB_imaging, GL_EXTENSION_COUNT }},
-    { "glGetColorTableParameterivEXT", glGetColorTableParameterivEXT, 0, 0, { GL_EXT_paletted_texture, GL_EXTENSION_COUNT }},
-    { "glGetColorTableParameterivSGI", glGetColorTableParameterivSGI, 0, 0, { GL_SGI_color_table, GL_EXTENSION_COUNT }},
-    { "glGetColorTableSGI", glGetColorTableSGI, 0, 0, { GL_SGI_color_table, GL_EXTENSION_COUNT }},
-    { "glGetCombinerInputParameterfvNV", glGetCombinerInputParameterfvNV, 0, 0, { GL_NV_register_combiners, GL_EXTENSION_COUNT }},
-    { "glGetCombinerInputParameterivNV", glGetCombinerInputParameterivNV, 0, 0, { GL_NV_register_combiners, GL_EXTENSION_COUNT }},
-    { "glGetCombinerOutputParameterfvNV", glGetCombinerOutputParameterfvNV, 0, 0, { GL_NV_register_combiners, GL_EXTENSION_COUNT }},
-    { "glGetCombinerOutputParameterivNV", glGetCombinerOutputParameterivNV, 0, 0, { GL_NV_register_combiners, GL_EXTENSION_COUNT }},
-    { "glGetCombinerStageParameterfvNV", glGetCombinerStageParameterfvNV, 0, 0, { GL_NV_register_combiners2, GL_EXTENSION_COUNT }},
-    { "glGetCommandHeaderNV", glGetCommandHeaderNV, 0, 0, { GL_NV_command_list, GL_EXTENSION_COUNT }},
-    { "glGetCompressedMultiTexImageEXT", glGetCompressedMultiTexImageEXT, 0, 0, { GL_EXT_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glGetCompressedTexImage", glGetCompressedTexImage, 1, 3, { GL_EXTENSION_COUNT }},
-    { "glGetCompressedTexImageARB", glGetCompressedTexImageARB, 1, 3, { GL_ARB_texture_compression, GL_EXTENSION_COUNT }},
-    { "glGetCompressedTextureImage", glGetCompressedTextureImage, 4, 5, { GL_ARB_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glGetCompressedTextureImageEXT", glGetCompressedTextureImageEXT, 0, 0, { GL_EXT_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glGetCompressedTextureSubImage", glGetCompressedTextureSubImage, 4, 5, { GL_ARB_get_texture_sub_image, GL_EXTENSION_COUNT }},
-    { "glGetConvolutionFilter", glGetConvolutionFilter, 0, 0, { GL_ARB_imaging, GL_EXTENSION_COUNT }},
-    { "glGetConvolutionFilterEXT", glGetConvolutionFilterEXT, 0, 0, { GL_EXT_convolution, GL_EXTENSION_COUNT }},
-    { "glGetConvolutionParameterfv", glGetConvolutionParameterfv, 0, 0, { GL_ARB_imaging, GL_EXTENSION_COUNT }},
-    { "glGetConvolutionParameterfvEXT", glGetConvolutionParameterfvEXT, 0, 0, { GL_EXT_convolution, GL_EXTENSION_COUNT }},
-    { "glGetConvolutionParameteriv", glGetConvolutionParameteriv, 0, 0, { GL_ARB_imaging, GL_EXTENSION_COUNT }},
-    { "glGetConvolutionParameterivEXT", glGetConvolutionParameterivEXT, 0, 0, { GL_EXT_convolution, GL_EXTENSION_COUNT }},
-    { "glGetConvolutionParameterxvOES", glGetConvolutionParameterxvOES, 0, 0, { GL_OES_fixed_point, GL_EXTENSION_COUNT }},
-    { "glGetCoverageModulationTableNV", glGetCoverageModulationTableNV, 0, 0, { GL_NV_framebuffer_mixed_samples, GL_EXTENSION_COUNT }},
-    { "glGetDebugMessageLog", glGetDebugMessageLog, 4, 3, { GL_KHR_debug, GL_EXTENSION_COUNT }},
-    { "glGetDebugMessageLogAMD", glGetDebugMessageLogAMD, 0, 0, { GL_AMD_debug_output, GL_AMDX_debug_output, GL_EXTENSION_COUNT }},
-    { "glGetDebugMessageLogARB", glGetDebugMessageLogARB, 0, 0, { GL_ARB_debug_output, GL_EXTENSION_COUNT }},
-    { "glGetDetailTexFuncSGIS", glGetDetailTexFuncSGIS, 0, 0, { GL_SGIS_detail_texture, GL_EXTENSION_COUNT }},
-    { "glGetDoubleIndexedvEXT", glGetDoubleIndexedvEXT, 0, 0, { GL_EXT_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glGetDoublei_v", glGetDoublei_v, 4, 1, { GL_ARB_viewport_array, GL_EXTENSION_COUNT }},
-    { "glGetDoublei_vEXT", glGetDoublei_vEXT, 0, 0, { GL_EXT_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glGetFenceivNV", glGetFenceivNV, 0, 0, { GL_NV_fence, GL_EXTENSION_COUNT }},
-    { "glGetFinalCombinerInputParameterfvNV", glGetFinalCombinerInputParameterfvNV, 0, 0, { GL_NV_register_combiners, GL_EXTENSION_COUNT }},
-    { "glGetFinalCombinerInputParameterivNV", glGetFinalCombinerInputParameterivNV, 0, 0, { GL_NV_register_combiners, GL_EXTENSION_COUNT }},
-    { "glGetFirstPerfQueryIdINTEL", glGetFirstPerfQueryIdINTEL, 0, 0, { GL_INTEL_performance_query, GL_EXTENSION_COUNT }},
-    { "glGetFixedv", glGetFixedv, 0, 0, { GL_NV_ES1_1_compatibility, GL_EXTENSION_COUNT }},
-    { "glGetFixedvOES", glGetFixedvOES, 0, 0, { GL_OES_fixed_point, GL_EXTENSION_COUNT }},
-    { "glGetFloatIndexedvEXT", glGetFloatIndexedvEXT, 0, 0, { GL_EXT_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glGetFloati_v", glGetFloati_v, 4, 1, { GL_ARB_viewport_array, GL_EXTENSION_COUNT }},
-    { "glGetFloati_vEXT", glGetFloati_vEXT, 0, 0, { GL_EXT_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glGetFogFuncSGIS", glGetFogFuncSGIS, 0, 0, { GL_SGIS_fog_function, GL_EXTENSION_COUNT }},
-    { "glGetFragDataIndex", glGetFragDataIndex, 3, 3, { GL_ARB_blend_func_extended, GL_EXTENSION_COUNT }},
-    { "glGetFragDataLocation", glGetFragDataLocation, 3, 0, { GL_EXTENSION_COUNT }},
-    { "glGetFragDataLocationEXT", glGetFragDataLocationEXT, 0, 0, { GL_EXT_gpu_shader4, GL_EXTENSION_COUNT }},
-    { "glGetFragmentLightfvSGIX", glGetFragmentLightfvSGIX, 0, 0, { GL_SGIX_fragment_lighting, GL_EXTENSION_COUNT }},
-    { "glGetFragmentLightivSGIX", glGetFragmentLightivSGIX, 0, 0, { GL_SGIX_fragment_lighting, GL_EXTENSION_COUNT }},
-    { "glGetFragmentMaterialfvSGIX", glGetFragmentMaterialfvSGIX, 0, 0, { GL_SGIX_fragment_lighting, GL_EXTENSION_COUNT }},
-    { "glGetFragmentMaterialivSGIX", glGetFragmentMaterialivSGIX, 0, 0, { GL_SGIX_fragment_lighting, GL_EXTENSION_COUNT }},
-    { "glGetFragmentShadingRatesEXT", glGetFragmentShadingRatesEXT, 0, 0, { GL_EXT_fragment_shading_rate, GL_EXT_fragment_shading_rate_primitive, GL_EXT_fragment_shading_rate_attachment, GL_EXTENSION_COUNT }},
-    { "glGetFramebufferAttachmentParameteriv", glGetFramebufferAttachmentParameteriv, 3, 0, { GL_ARB_framebuffer_object, GL_EXTENSION_COUNT }},
-    { "glGetFramebufferAttachmentParameterivEXT", glGetFramebufferAttachmentParameterivEXT, 0, 0, { GL_EXT_framebuffer_object, GL_EXTENSION_COUNT }},
-    { "glGetFramebufferParameterfvAMD", glGetFramebufferParameterfvAMD, 0, 0, { GL_AMD_framebuffer_sample_positions, GL_EXTENSION_COUNT }},
-    { "glGetFramebufferParameteriv", glGetFramebufferParameteriv, 4, 3, { GL_ARB_framebuffer_no_attachments, GL_EXTENSION_COUNT }},
-    { "glGetFramebufferParameterivEXT", glGetFramebufferParameterivEXT, 0, 0, { GL_EXT_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glGetFramebufferParameterivMESA", glGetFramebufferParameterivMESA, 0, 0, { GL_MESA_framebuffer_flip_y, GL_EXTENSION_COUNT }},
-    { "glGetGraphicsResetStatus", glGetGraphicsResetStatus, 4, 5, { GL_KHR_robustness, GL_EXTENSION_COUNT }},
-    { "glGetGraphicsResetStatusARB", glGetGraphicsResetStatusARB, 0, 0, { GL_ARB_robustness, GL_EXTENSION_COUNT }},
-    { "glGetHandleARB", glGetHandleARB, 0, 0, { GL_ARB_shader_objects, GL_EXTENSION_COUNT }},
-    { "glGetHistogram", glGetHistogram, 0, 0, { GL_ARB_imaging, GL_EXTENSION_COUNT }},
-    { "glGetHistogramEXT", glGetHistogramEXT, 0, 0, { GL_EXT_histogram, GL_EXTENSION_COUNT }},
-    { "glGetHistogramParameterfv", glGetHistogramParameterfv, 0, 0, { GL_ARB_imaging, GL_EXTENSION_COUNT }},
-    { "glGetHistogramParameterfvEXT", glGetHistogramParameterfvEXT, 0, 0, { GL_EXT_histogram, GL_EXTENSION_COUNT }},
-    { "glGetHistogramParameteriv", glGetHistogramParameteriv, 0, 0, { GL_ARB_imaging, GL_EXTENSION_COUNT }},
-    { "glGetHistogramParameterivEXT", glGetHistogramParameterivEXT, 0, 0, { GL_EXT_histogram, GL_EXTENSION_COUNT }},
-    { "glGetHistogramParameterxvOES", glGetHistogramParameterxvOES, 0, 0, { GL_OES_fixed_point, GL_EXTENSION_COUNT }},
-    { "glGetImageHandleARB", glGetImageHandleARB, 0, 0, { GL_ARB_bindless_texture, GL_EXTENSION_COUNT }},
-    { "glGetImageHandleNV", glGetImageHandleNV, 0, 0, { GL_NV_bindless_texture, GL_EXTENSION_COUNT }},
-    { "glGetImageTransformParameterfvHP", glGetImageTransformParameterfvHP, 0, 0, { GL_HP_image_transform, GL_EXTENSION_COUNT }},
-    { "glGetImageTransformParameterivHP", glGetImageTransformParameterivHP, 0, 0, { GL_HP_image_transform, GL_EXTENSION_COUNT }},
-    { "glGetInfoLogARB", glGetInfoLogARB, 0, 0, { GL_ARB_shader_objects, GL_EXTENSION_COUNT }},
-    { "glGetInstrumentsSGIX", glGetInstrumentsSGIX, 0, 0, { GL_SGIX_instruments, GL_EXTENSION_COUNT }},
-    { "glGetInteger64i_v", glGetInteger64i_v, 3, 2, { GL_EXTENSION_COUNT }},
-    { "glGetInteger64v", glGetInteger64v, 3, 2, { GL_ARB_sync, GL_EXTENSION_COUNT }},
-    { "glGetIntegerIndexedvEXT", glGetIntegerIndexedvEXT, 0, 0, { GL_EXT_direct_state_access, GL_EXT_draw_buffers2, GL_EXTENSION_COUNT }},
-    { "glGetIntegeri_v", glGetIntegeri_v, 3, 0, { GL_ARB_uniform_buffer_object, GL_EXTENSION_COUNT }},
-    { "glGetIntegerui64i_vNV", glGetIntegerui64i_vNV, 0, 0, { GL_NV_vertex_buffer_unified_memory, GL_EXTENSION_COUNT }},
-    { "glGetIntegerui64vNV", glGetIntegerui64vNV, 0, 0, { GL_NV_shader_buffer_load, GL_EXTENSION_COUNT }},
-    { "glGetInternalformatSampleivNV", glGetInternalformatSampleivNV, 0, 0, { GL_NV_internalformat_sample_query, GL_EXTENSION_COUNT }},
-    { "glGetInternalformati64v", glGetInternalformati64v, 4, 3, { GL_ARB_internalformat_query2, GL_EXTENSION_COUNT }},
-    { "glGetInternalformativ", glGetInternalformativ, 4, 2, { GL_ARB_internalformat_query, GL_EXTENSION_COUNT }},
-    { "glGetInvariantBooleanvEXT", glGetInvariantBooleanvEXT, 0, 0, { GL_EXT_vertex_shader, GL_EXTENSION_COUNT }},
-    { "glGetInvariantFloatvEXT", glGetInvariantFloatvEXT, 0, 0, { GL_EXT_vertex_shader, GL_EXTENSION_COUNT }},
-    { "glGetInvariantIntegervEXT", glGetInvariantIntegervEXT, 0, 0, { GL_EXT_vertex_shader, GL_EXTENSION_COUNT }},
-    { "glGetLightxOES", glGetLightxOES, 0, 0, { GL_OES_fixed_point, GL_EXTENSION_COUNT }},
-    { "glGetLightxv", glGetLightxv, 0, 0, { GL_NV_ES1_1_compatibility, GL_EXTENSION_COUNT }},
-    { "glGetListParameterfvSGIX", glGetListParameterfvSGIX, 0, 0, { GL_SGIX_list_priority, GL_EXTENSION_COUNT }},
-    { "glGetListParameterivSGIX", glGetListParameterivSGIX, 0, 0, { GL_SGIX_list_priority, GL_EXTENSION_COUNT }},
-    { "glGetLocalConstantBooleanvEXT", glGetLocalConstantBooleanvEXT, 0, 0, { GL_EXT_vertex_shader, GL_EXTENSION_COUNT }},
-    { "glGetLocalConstantFloatvEXT", glGetLocalConstantFloatvEXT, 0, 0, { GL_EXT_vertex_shader, GL_EXTENSION_COUNT }},
-    { "glGetLocalConstantIntegervEXT", glGetLocalConstantIntegervEXT, 0, 0, { GL_EXT_vertex_shader, GL_EXTENSION_COUNT }},
-    { "glGetMapAttribParameterfvNV", glGetMapAttribParameterfvNV, 0, 0, { GL_NV_evaluators, GL_EXTENSION_COUNT }},
-    { "glGetMapAttribParameterivNV", glGetMapAttribParameterivNV, 0, 0, { GL_NV_evaluators, GL_EXTENSION_COUNT }},
-    { "glGetMapControlPointsNV", glGetMapControlPointsNV, 0, 0, { GL_NV_evaluators, GL_EXTENSION_COUNT }},
-    { "glGetMapParameterfvNV", glGetMapParameterfvNV, 0, 0, { GL_NV_evaluators, GL_EXTENSION_COUNT }},
-    { "glGetMapParameterivNV", glGetMapParameterivNV, 0, 0, { GL_NV_evaluators, GL_EXTENSION_COUNT }},
-    { "glGetMapxvOES", glGetMapxvOES, 0, 0, { GL_OES_fixed_point, GL_EXTENSION_COUNT }},
-    { "glGetMaterialxOES", glGetMaterialxOES, 0, 0, { GL_OES_fixed_point, GL_EXTENSION_COUNT }},
-    { "glGetMaterialxv", glGetMaterialxv, 0, 0, { GL_NV_ES1_1_compatibility, GL_EXTENSION_COUNT }},
-    { "glGetMemoryObjectDetachedResourcesuivNV", glGetMemoryObjectDetachedResourcesuivNV, 0, 0, { GL_NV_memory_attachment, GL_EXTENSION_COUNT }},
-    { "glGetMemoryObjectParameterivEXT", glGetMemoryObjectParameterivEXT, 0, 0, { GL_EXT_memory_object, GL_EXTENSION_COUNT }},
-    { "glGetMinmax", glGetMinmax, 0, 0, { GL_ARB_imaging, GL_EXTENSION_COUNT }},
-    { "glGetMinmaxEXT", glGetMinmaxEXT, 0, 0, { GL_EXT_histogram, GL_EXTENSION_COUNT }},
-    { "glGetMinmaxParameterfv", glGetMinmaxParameterfv, 0, 0, { GL_ARB_imaging, GL_EXTENSION_COUNT }},
-    { "glGetMinmaxParameterfvEXT", glGetMinmaxParameterfvEXT, 0, 0, { GL_EXT_histogram, GL_EXTENSION_COUNT }},
-    { "glGetMinmaxParameteriv", glGetMinmaxParameteriv, 0, 0, { GL_ARB_imaging, GL_EXTENSION_COUNT }},
-    { "glGetMinmaxParameterivEXT", glGetMinmaxParameterivEXT, 0, 0, { GL_EXT_histogram, GL_EXTENSION_COUNT }},
-    { "glGetMultiTexEnvfvEXT", glGetMultiTexEnvfvEXT, 0, 0, { GL_EXT_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glGetMultiTexEnvivEXT", glGetMultiTexEnvivEXT, 0, 0, { GL_EXT_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glGetMultiTexGendvEXT", glGetMultiTexGendvEXT, 0, 0, { GL_EXT_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glGetMultiTexGenfvEXT", glGetMultiTexGenfvEXT, 0, 0, { GL_EXT_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glGetMultiTexGenivEXT", glGetMultiTexGenivEXT, 0, 0, { GL_EXT_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glGetMultiTexImageEXT", glGetMultiTexImageEXT, 0, 0, { GL_EXT_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glGetMultiTexLevelParameterfvEXT", glGetMultiTexLevelParameterfvEXT, 0, 0, { GL_EXT_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glGetMultiTexLevelParameterivEXT", glGetMultiTexLevelParameterivEXT, 0, 0, { GL_EXT_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glGetMultiTexParameterIivEXT", glGetMultiTexParameterIivEXT, 0, 0, { GL_EXT_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glGetMultiTexParameterIuivEXT", glGetMultiTexParameterIuivEXT, 0, 0, { GL_EXT_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glGetMultiTexParameterfvEXT", glGetMultiTexParameterfvEXT, 0, 0, { GL_EXT_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glGetMultiTexParameterivEXT", glGetMultiTexParameterivEXT, 0, 0, { GL_EXT_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glGetMultisamplefv", glGetMultisamplefv, 3, 2, { GL_ARB_texture_multisample, GL_EXTENSION_COUNT }},
-    { "glGetMultisamplefvNV", glGetMultisamplefvNV, 0, 0, { GL_NV_explicit_multisample, GL_EXTENSION_COUNT }},
-    { "glGetNamedBufferParameteri64v", glGetNamedBufferParameteri64v, 4, 5, { GL_ARB_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glGetNamedBufferParameteriv", glGetNamedBufferParameteriv, 4, 5, { GL_ARB_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glGetNamedBufferParameterivEXT", glGetNamedBufferParameterivEXT, 0, 0, { GL_EXT_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glGetNamedBufferParameterui64vNV", glGetNamedBufferParameterui64vNV, 0, 0, { GL_NV_shader_buffer_load, GL_EXTENSION_COUNT }},
-    { "glGetNamedBufferPointerv", glGetNamedBufferPointerv, 4, 5, { GL_ARB_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glGetNamedBufferPointervEXT", glGetNamedBufferPointervEXT, 0, 0, { GL_EXT_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glGetNamedBufferSubData", glGetNamedBufferSubData, 4, 5, { GL_ARB_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glGetNamedBufferSubDataEXT", glGetNamedBufferSubDataEXT, 0, 0, { GL_EXT_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glGetNamedFramebufferAttachmentParameteriv", glGetNamedFramebufferAttachmentParameteriv, 4, 5, { GL_ARB_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glGetNamedFramebufferAttachmentParameterivEXT", glGetNamedFramebufferAttachmentParameterivEXT, 0, 0, { GL_EXT_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glGetNamedFramebufferParameterfvAMD", glGetNamedFramebufferParameterfvAMD, 0, 0, { GL_AMD_framebuffer_sample_positions, GL_EXTENSION_COUNT }},
-    { "glGetNamedFramebufferParameteriv", glGetNamedFramebufferParameteriv, 4, 5, { GL_ARB_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glGetNamedFramebufferParameterivEXT", glGetNamedFramebufferParameterivEXT, 0, 0, { GL_EXT_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glGetNamedProgramLocalParameterIivEXT", glGetNamedProgramLocalParameterIivEXT, 0, 0, { GL_EXT_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glGetNamedProgramLocalParameterIuivEXT", glGetNamedProgramLocalParameterIuivEXT, 0, 0, { GL_EXT_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glGetNamedProgramLocalParameterdvEXT", glGetNamedProgramLocalParameterdvEXT, 0, 0, { GL_EXT_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glGetNamedProgramLocalParameterfvEXT", glGetNamedProgramLocalParameterfvEXT, 0, 0, { GL_EXT_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glGetNamedProgramStringEXT", glGetNamedProgramStringEXT, 0, 0, { GL_EXT_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glGetNamedProgramivEXT", glGetNamedProgramivEXT, 0, 0, { GL_EXT_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glGetNamedRenderbufferParameteriv", glGetNamedRenderbufferParameteriv, 4, 5, { GL_ARB_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glGetNamedRenderbufferParameterivEXT", glGetNamedRenderbufferParameterivEXT, 0, 0, { GL_EXT_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glGetNamedStringARB", glGetNamedStringARB, 0, 0, { GL_ARB_shading_language_include, GL_EXTENSION_COUNT }},
-    { "glGetNamedStringivARB", glGetNamedStringivARB, 0, 0, { GL_ARB_shading_language_include, GL_EXTENSION_COUNT }},
-    { "glGetNextPerfQueryIdINTEL", glGetNextPerfQueryIdINTEL, 0, 0, { GL_INTEL_performance_query, GL_EXTENSION_COUNT }},
-    { "glGetObjectBufferfvATI", glGetObjectBufferfvATI, 0, 0, { GL_ATI_vertex_array_object, GL_EXTENSION_COUNT }},
-    { "glGetObjectBufferivATI", glGetObjectBufferivATI, 0, 0, { GL_ATI_vertex_array_object, GL_EXTENSION_COUNT }},
-    { "glGetObjectLabel", glGetObjectLabel, 4, 3, { GL_KHR_debug, GL_EXTENSION_COUNT }},
-    { "glGetObjectLabelEXT", glGetObjectLabelEXT, 0, 0, { GL_EXT_debug_label, GL_EXTENSION_COUNT }},
-    { "glGetObjectParameterfvARB", glGetObjectParameterfvARB, 0, 0, { GL_ARB_shader_objects, GL_EXTENSION_COUNT }},
-    { "glGetObjectParameterivAPPLE", glGetObjectParameterivAPPLE, 0, 0, { GL_APPLE_object_purgeable, GL_EXTENSION_COUNT }},
-    { "glGetObjectParameterivARB", glGetObjectParameterivARB, 0, 0, { GL_ARB_shader_objects, GL_EXTENSION_COUNT }},
-    { "glGetObjectPtrLabel", glGetObjectPtrLabel, 4, 3, { GL_KHR_debug, GL_EXTENSION_COUNT }},
-    { "glGetOcclusionQueryivNV", glGetOcclusionQueryivNV, 0, 0, { GL_NV_occlusion_query, GL_EXTENSION_COUNT }},
-    { "glGetOcclusionQueryuivNV", glGetOcclusionQueryuivNV, 0, 0, { GL_NV_occlusion_query, GL_EXTENSION_COUNT }},
-    { "glGetPathColorGenfvNV", glGetPathColorGenfvNV, 0, 0, { GL_NV_path_rendering, GL_EXTENSION_COUNT }},
-    { "glGetPathColorGenivNV", glGetPathColorGenivNV, 0, 0, { GL_NV_path_rendering, GL_EXTENSION_COUNT }},
-    { "glGetPathCommandsNV", glGetPathCommandsNV, 0, 0, { GL_NV_path_rendering, GL_EXTENSION_COUNT }},
-    { "glGetPathCoordsNV", glGetPathCoordsNV, 0, 0, { GL_NV_path_rendering, GL_EXTENSION_COUNT }},
-    { "glGetPathDashArrayNV", glGetPathDashArrayNV, 0, 0, { GL_NV_path_rendering, GL_EXTENSION_COUNT }},
-    { "glGetPathLengthNV", glGetPathLengthNV, 0, 0, { GL_NV_path_rendering, GL_EXTENSION_COUNT }},
-    { "glGetPathMetricRangeNV", glGetPathMetricRangeNV, 0, 0, { GL_NV_path_rendering, GL_EXTENSION_COUNT }},
-    { "glGetPathMetricsNV", glGetPathMetricsNV, 0, 0, { GL_NV_path_rendering, GL_EXTENSION_COUNT }},
-    { "glGetPathParameterfvNV", glGetPathParameterfvNV, 0, 0, { GL_NV_path_rendering, GL_EXTENSION_COUNT }},
-    { "glGetPathParameterivNV", glGetPathParameterivNV, 0, 0, { GL_NV_path_rendering, GL_EXTENSION_COUNT }},
-    { "glGetPathSpacingNV", glGetPathSpacingNV, 0, 0, { GL_NV_path_rendering, GL_EXTENSION_COUNT }},
-    { "glGetPathTexGenfvNV", glGetPathTexGenfvNV, 0, 0, { GL_NV_path_rendering, GL_EXTENSION_COUNT }},
-    { "glGetPathTexGenivNV", glGetPathTexGenivNV, 0, 0, { GL_NV_path_rendering, GL_EXTENSION_COUNT }},
-    { "glGetPerfCounterInfoINTEL", glGetPerfCounterInfoINTEL, 0, 0, { GL_INTEL_performance_query, GL_EXTENSION_COUNT }},
-    { "glGetPerfMonitorCounterDataAMD", glGetPerfMonitorCounterDataAMD, 0, 0, { GL_AMD_performance_monitor, GL_EXTENSION_COUNT }},
-    { "glGetPerfMonitorCounterInfoAMD", glGetPerfMonitorCounterInfoAMD, 0, 0, { GL_AMD_performance_monitor, GL_EXTENSION_COUNT }},
-    { "glGetPerfMonitorCounterStringAMD", glGetPerfMonitorCounterStringAMD, 0, 0, { GL_AMD_performance_monitor, GL_EXTENSION_COUNT }},
-    { "glGetPerfMonitorCountersAMD", glGetPerfMonitorCountersAMD, 0, 0, { GL_AMD_performance_monitor, GL_EXTENSION_COUNT }},
-    { "glGetPerfMonitorGroupStringAMD", glGetPerfMonitorGroupStringAMD, 0, 0, { GL_AMD_performance_monitor, GL_EXTENSION_COUNT }},
-    { "glGetPerfMonitorGroupsAMD", glGetPerfMonitorGroupsAMD, 0, 0, { GL_AMD_performance_monitor, GL_EXTENSION_COUNT }},
-    { "glGetPerfQueryDataINTEL", glGetPerfQueryDataINTEL, 0, 0, { GL_INTEL_performance_query, GL_EXTENSION_COUNT }},
-    { "glGetPerfQueryIdByNameINTEL", glGetPerfQueryIdByNameINTEL, 0, 0, { GL_INTEL_performance_query, GL_EXTENSION_COUNT }},
-    { "glGetPerfQueryInfoINTEL", glGetPerfQueryInfoINTEL, 0, 0, { GL_INTEL_performance_query, GL_EXTENSION_COUNT }},
-    { "glGetPixelMapxv", glGetPixelMapxv, 0, 0, { GL_OES_fixed_point, GL_EXTENSION_COUNT }},
-    { "glGetPixelTexGenParameterfvSGIS", glGetPixelTexGenParameterfvSGIS, 0, 0, { GL_SGIS_pixel_texture, GL_EXTENSION_COUNT }},
-    { "glGetPixelTexGenParameterivSGIS", glGetPixelTexGenParameterivSGIS, 0, 0, { GL_SGIS_pixel_texture, GL_EXTENSION_COUNT }},
-    { "glGetPixelTransformParameterfvEXT", glGetPixelTransformParameterfvEXT, 0, 0, { GL_EXT_pixel_transform, GL_EXTENSION_COUNT }},
-    { "glGetPixelTransformParameterivEXT", glGetPixelTransformParameterivEXT, 0, 0, { GL_EXT_pixel_transform, GL_EXTENSION_COUNT }},
-    { "glGetPointerIndexedvEXT", glGetPointerIndexedvEXT, 0, 0, { GL_EXT_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glGetPointeri_vEXT", glGetPointeri_vEXT, 0, 0, { GL_EXT_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glGetPointervEXT", glGetPointervEXT, 0, 0, { GL_EXT_vertex_array, GL_EXTENSION_COUNT }},
-    { "glGetProgramBinary", glGetProgramBinary, 4, 1, { GL_ARB_get_program_binary, GL_EXTENSION_COUNT }},
-    { "glGetProgramEnvParameterIivNV", glGetProgramEnvParameterIivNV, 0, 0, { GL_NV_gpu_program4, GL_EXTENSION_COUNT }},
-    { "glGetProgramEnvParameterIuivNV", glGetProgramEnvParameterIuivNV, 0, 0, { GL_NV_gpu_program4, GL_EXTENSION_COUNT }},
-    { "glGetProgramEnvParameterdvARB", glGetProgramEnvParameterdvARB, 0, 0, { GL_ARB_fragment_program, GL_ARB_vertex_program, GL_EXTENSION_COUNT }},
-    { "glGetProgramEnvParameterfvARB", glGetProgramEnvParameterfvARB, 0, 0, { GL_ARB_fragment_program, GL_ARB_vertex_program, GL_EXTENSION_COUNT }},
-    { "glGetProgramInfoLog", glGetProgramInfoLog, 2, 0, { GL_EXTENSION_COUNT }},
-    { "glGetProgramInterfaceiv", glGetProgramInterfaceiv, 4, 3, { GL_ARB_program_interface_query, GL_EXTENSION_COUNT }},
-    { "glGetProgramLocalParameterIivNV", glGetProgramLocalParameterIivNV, 0, 0, { GL_NV_gpu_program4, GL_EXTENSION_COUNT }},
-    { "glGetProgramLocalParameterIuivNV", glGetProgramLocalParameterIuivNV, 0, 0, { GL_NV_gpu_program4, GL_EXTENSION_COUNT }},
-    { "glGetProgramLocalParameterdvARB", glGetProgramLocalParameterdvARB, 0, 0, { GL_ARB_fragment_program, GL_ARB_vertex_program, GL_EXTENSION_COUNT }},
-    { "glGetProgramLocalParameterfvARB", glGetProgramLocalParameterfvARB, 0, 0, { GL_ARB_fragment_program, GL_ARB_vertex_program, GL_EXTENSION_COUNT }},
-    { "glGetProgramNamedParameterdvNV", glGetProgramNamedParameterdvNV, 0, 0, { GL_NV_fragment_program, GL_EXTENSION_COUNT }},
-    { "glGetProgramNamedParameterfvNV", glGetProgramNamedParameterfvNV, 0, 0, { GL_NV_fragment_program, GL_EXTENSION_COUNT }},
-    { "glGetProgramParameterdvNV", glGetProgramParameterdvNV, 0, 0, { GL_NV_vertex_program, GL_EXTENSION_COUNT }},
-    { "glGetProgramParameterfvNV", glGetProgramParameterfvNV, 0, 0, { GL_NV_vertex_program, GL_EXTENSION_COUNT }},
-    { "glGetProgramPipelineInfoLog", glGetProgramPipelineInfoLog, 4, 1, { GL_ARB_separate_shader_objects, GL_EXTENSION_COUNT }},
-    { "glGetProgramPipelineiv", glGetProgramPipelineiv, 4, 1, { GL_ARB_separate_shader_objects, GL_EXTENSION_COUNT }},
-    { "glGetProgramResourceIndex", glGetProgramResourceIndex, 4, 3, { GL_ARB_program_interface_query, GL_EXTENSION_COUNT }},
-    { "glGetProgramResourceLocation", glGetProgramResourceLocation, 4, 3, { GL_ARB_program_interface_query, GL_EXTENSION_COUNT }},
-    { "glGetProgramResourceLocationIndex", glGetProgramResourceLocationIndex, 4, 3, { GL_ARB_program_interface_query, GL_EXTENSION_COUNT }},
-    { "glGetProgramResourceName", glGetProgramResourceName, 4, 3, { GL_ARB_program_interface_query, GL_EXTENSION_COUNT }},
-    { "glGetProgramResourcefvNV", glGetProgramResourcefvNV, 0, 0, { GL_NV_path_rendering, GL_EXTENSION_COUNT }},
-    { "glGetProgramResourceiv", glGetProgramResourceiv, 4, 3, { GL_ARB_program_interface_query, GL_EXTENSION_COUNT }},
-    { "glGetProgramStageiv", glGetProgramStageiv, 4, 0, { GL_ARB_shader_subroutine, GL_EXTENSION_COUNT }},
-    { "glGetProgramStringARB", glGetProgramStringARB, 0, 0, { GL_ARB_fragment_program, GL_ARB_vertex_program, GL_EXTENSION_COUNT }},
-    { "glGetProgramStringNV", glGetProgramStringNV, 0, 0, { GL_NV_vertex_program, GL_EXTENSION_COUNT }},
-    { "glGetProgramSubroutineParameteruivNV", glGetProgramSubroutineParameteruivNV, 0, 0, { GL_NV_gpu_program5, GL_NV_gpu_program_fp64, GL_EXTENSION_COUNT }},
-    { "glGetProgramiv", glGetProgramiv, 2, 0, { GL_EXTENSION_COUNT }},
-    { "glGetProgramivARB", glGetProgramivARB, 0, 0, { GL_ARB_fragment_program, GL_ARB_vertex_program, GL_EXTENSION_COUNT }},
-    { "glGetProgramivNV", glGetProgramivNV, 0, 0, { GL_NV_vertex_program, GL_EXTENSION_COUNT }},
-    { "glGetQueryBufferObjecti64v", glGetQueryBufferObjecti64v, 4, 5, { GL_ARB_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glGetQueryBufferObjectiv", glGetQueryBufferObjectiv, 4, 5, { GL_ARB_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glGetQueryBufferObjectui64v", glGetQueryBufferObjectui64v, 4, 5, { GL_ARB_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glGetQueryBufferObjectuiv", glGetQueryBufferObjectuiv, 4, 5, { GL_ARB_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glGetQueryIndexediv", glGetQueryIndexediv, 4, 0, { GL_ARB_transform_feedback3, GL_EXTENSION_COUNT }},
-    { "glGetQueryObjecti64v", glGetQueryObjecti64v, 3, 3, { GL_ARB_timer_query, GL_EXTENSION_COUNT }},
-    { "glGetQueryObjecti64vEXT", glGetQueryObjecti64vEXT, 0, 0, { GL_EXT_timer_query, GL_EXTENSION_COUNT }},
-    { "glGetQueryObjectiv", glGetQueryObjectiv, 1, 5, { GL_EXTENSION_COUNT }},
-    { "glGetQueryObjectivARB", glGetQueryObjectivARB, 0, 0, { GL_ARB_occlusion_query, GL_EXTENSION_COUNT }},
-    { "glGetQueryObjectui64v", glGetQueryObjectui64v, 3, 3, { GL_ARB_timer_query, GL_EXTENSION_COUNT }},
-    { "glGetQueryObjectui64vEXT", glGetQueryObjectui64vEXT, 0, 0, { GL_EXT_timer_query, GL_EXTENSION_COUNT }},
-    { "glGetQueryObjectuiv", glGetQueryObjectuiv, 1, 5, { GL_EXTENSION_COUNT }},
-    { "glGetQueryObjectuivARB", glGetQueryObjectuivARB, 0, 0, { GL_ARB_occlusion_query, GL_EXTENSION_COUNT }},
-    { "glGetQueryiv", glGetQueryiv, 1, 5, { GL_EXTENSION_COUNT }},
-    { "glGetQueryivARB", glGetQueryivARB, 0, 0, { GL_ARB_occlusion_query, GL_EXTENSION_COUNT }},
-    { "glGetRenderbufferParameteriv", glGetRenderbufferParameteriv, 3, 0, { GL_ARB_framebuffer_object, GL_EXTENSION_COUNT }},
-    { "glGetRenderbufferParameterivEXT", glGetRenderbufferParameterivEXT, 0, 0, { GL_EXT_framebuffer_object, GL_EXTENSION_COUNT }},
-    { "glGetSamplerParameterIiv", glGetSamplerParameterIiv, 3, 3, { GL_ARB_sampler_objects, GL_EXTENSION_COUNT }},
-    { "glGetSamplerParameterIuiv", glGetSamplerParameterIuiv, 3, 3, { GL_ARB_sampler_objects, GL_EXTENSION_COUNT }},
-    { "glGetSamplerParameterfv", glGetSamplerParameterfv, 3, 3, { GL_ARB_sampler_objects, GL_EXTENSION_COUNT }},
-    { "glGetSamplerParameteriv", glGetSamplerParameteriv, 3, 3, { GL_ARB_sampler_objects, GL_EXTENSION_COUNT }},
-    { "glGetSemaphoreParameterivNV", glGetSemaphoreParameterivNV, 0, 0, { GL_NV_timeline_semaphore, GL_EXTENSION_COUNT }},
-    { "glGetSemaphoreParameterui64vEXT", glGetSemaphoreParameterui64vEXT, 0, 0, { GL_EXT_semaphore, GL_EXTENSION_COUNT }},
-    { "glGetSeparableFilter", glGetSeparableFilter, 0, 0, { GL_ARB_imaging, GL_EXTENSION_COUNT }},
-    { "glGetSeparableFilterEXT", glGetSeparableFilterEXT, 0, 0, { GL_EXT_convolution, GL_EXTENSION_COUNT }},
-    { "glGetShaderInfoLog", glGetShaderInfoLog, 2, 0, { GL_EXTENSION_COUNT }},
-    { "glGetShaderPrecisionFormat", glGetShaderPrecisionFormat, 4, 1, { GL_ARB_ES2_compatibility, GL_EXTENSION_COUNT }},
-    { "glGetShaderSource", glGetShaderSource, 2, 0, { GL_EXTENSION_COUNT }},
-    { "glGetShaderSourceARB", glGetShaderSourceARB, 0, 0, { GL_ARB_shader_objects, GL_EXTENSION_COUNT }},
-    { "glGetShaderiv", glGetShaderiv, 2, 0, { GL_EXTENSION_COUNT }},
-    { "glGetShadingRateImagePaletteNV", glGetShadingRateImagePaletteNV, 0, 0, { GL_NV_shading_rate_image, GL_EXTENSION_COUNT }},
-    { "glGetShadingRateSampleLocationivNV", glGetShadingRateSampleLocationivNV, 0, 0, { GL_NV_shading_rate_image, GL_EXTENSION_COUNT }},
-    { "glGetSharpenTexFuncSGIS", glGetSharpenTexFuncSGIS, 0, 0, { GL_SGIS_sharpen_texture, GL_EXTENSION_COUNT }},
-    { "glGetStageIndexNV", glGetStageIndexNV, 0, 0, { GL_NV_command_list, GL_EXTENSION_COUNT }},
-    { "glGetStringi", glGetStringi, 3, 0, { GL_EXTENSION_COUNT }},
-    { "glGetSubroutineIndex", glGetSubroutineIndex, 4, 0, { GL_ARB_shader_subroutine, GL_EXTENSION_COUNT }},
-    { "glGetSubroutineUniformLocation", glGetSubroutineUniformLocation, 4, 0, { GL_ARB_shader_subroutine, GL_EXTENSION_COUNT }},
-    { "glGetSynciv", glGetSynciv, 3, 2, { GL_ARB_sync, GL_EXTENSION_COUNT }},
-    { "glGetTexBumpParameterfvATI", glGetTexBumpParameterfvATI, 0, 0, { GL_ATI_envmap_bumpmap, GL_EXTENSION_COUNT }},
-    { "glGetTexBumpParameterivATI", glGetTexBumpParameterivATI, 0, 0, { GL_ATI_envmap_bumpmap, GL_EXTENSION_COUNT }},
-    { "glGetTexEnvxv", glGetTexEnvxv, 0, 0, { GL_NV_ES1_1_compatibility, GL_EXTENSION_COUNT }},
-    { "glGetTexEnvxvOES", glGetTexEnvxvOES, 0, 0, { GL_OES_fixed_point, GL_EXTENSION_COUNT }},
-    { "glGetTexFilterFuncSGIS", glGetTexFilterFuncSGIS, 0, 0, { GL_SGIS_texture_filter4, GL_EXTENSION_COUNT }},
-    { "glGetTexGenxvOES", glGetTexGenxvOES, 0, 0, { GL_OES_fixed_point, GL_EXTENSION_COUNT }},
-    { "glGetTexLevelParameterxvOES", glGetTexLevelParameterxvOES, 0, 0, { GL_OES_fixed_point, GL_EXTENSION_COUNT }},
-    { "glGetTexParameterIiv", glGetTexParameterIiv, 3, 0, { GL_EXTENSION_COUNT }},
-    { "glGetTexParameterIivEXT", glGetTexParameterIivEXT, 0, 0, { GL_EXT_texture_integer, GL_EXTENSION_COUNT }},
-    { "glGetTexParameterIuiv", glGetTexParameterIuiv, 3, 0, { GL_EXTENSION_COUNT }},
-    { "glGetTexParameterIuivEXT", glGetTexParameterIuivEXT, 0, 0, { GL_EXT_texture_integer, GL_EXTENSION_COUNT }},
-    { "glGetTexParameterPointervAPPLE", glGetTexParameterPointervAPPLE, 0, 0, { GL_APPLE_texture_range, GL_EXTENSION_COUNT }},
-    { "glGetTexParameterxv", glGetTexParameterxv, 0, 0, { GL_NV_ES1_1_compatibility, GL_EXTENSION_COUNT }},
-    { "glGetTexParameterxvOES", glGetTexParameterxvOES, 0, 0, { GL_OES_fixed_point, GL_EXTENSION_COUNT }},
-    { "glGetTextureHandleARB", glGetTextureHandleARB, 0, 0, { GL_ARB_bindless_texture, GL_EXTENSION_COUNT }},
-    { "glGetTextureHandleNV", glGetTextureHandleNV, 0, 0, { GL_NV_bindless_texture, GL_EXTENSION_COUNT }},
-    { "glGetTextureImage", glGetTextureImage, 4, 5, { GL_ARB_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glGetTextureImageEXT", glGetTextureImageEXT, 0, 0, { GL_EXT_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glGetTextureLevelParameterfv", glGetTextureLevelParameterfv, 4, 5, { GL_ARB_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glGetTextureLevelParameterfvEXT", glGetTextureLevelParameterfvEXT, 0, 0, { GL_EXT_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glGetTextureLevelParameteriv", glGetTextureLevelParameteriv, 4, 5, { GL_ARB_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glGetTextureLevelParameterivEXT", glGetTextureLevelParameterivEXT, 0, 0, { GL_EXT_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glGetTextureParameterIiv", glGetTextureParameterIiv, 4, 5, { GL_ARB_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glGetTextureParameterIivEXT", glGetTextureParameterIivEXT, 0, 0, { GL_EXT_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glGetTextureParameterIuiv", glGetTextureParameterIuiv, 4, 5, { GL_ARB_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glGetTextureParameterIuivEXT", glGetTextureParameterIuivEXT, 0, 0, { GL_EXT_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glGetTextureParameterfv", glGetTextureParameterfv, 4, 5, { GL_ARB_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glGetTextureParameterfvEXT", glGetTextureParameterfvEXT, 0, 0, { GL_EXT_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glGetTextureParameteriv", glGetTextureParameteriv, 4, 5, { GL_ARB_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glGetTextureParameterivEXT", glGetTextureParameterivEXT, 0, 0, { GL_EXT_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glGetTextureSamplerHandleARB", glGetTextureSamplerHandleARB, 0, 0, { GL_ARB_bindless_texture, GL_EXTENSION_COUNT }},
-    { "glGetTextureSamplerHandleNV", glGetTextureSamplerHandleNV, 0, 0, { GL_NV_bindless_texture, GL_EXTENSION_COUNT }},
-    { "glGetTextureSubImage", glGetTextureSubImage, 4, 5, { GL_ARB_get_texture_sub_image, GL_EXTENSION_COUNT }},
-    { "glGetTrackMatrixivNV", glGetTrackMatrixivNV, 0, 0, { GL_NV_vertex_program, GL_EXTENSION_COUNT }},
-    { "glGetTransformFeedbackVarying", glGetTransformFeedbackVarying, 3, 0, { GL_EXTENSION_COUNT }},
-    { "glGetTransformFeedbackVaryingEXT", glGetTransformFeedbackVaryingEXT, 0, 0, { GL_EXT_transform_feedback, GL_EXTENSION_COUNT }},
-    { "glGetTransformFeedbackVaryingNV", glGetTransformFeedbackVaryingNV, 0, 0, { GL_NV_transform_feedback, GL_EXTENSION_COUNT }},
-    { "glGetTransformFeedbacki64_v", glGetTransformFeedbacki64_v, 4, 5, { GL_ARB_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glGetTransformFeedbacki_v", glGetTransformFeedbacki_v, 4, 5, { GL_ARB_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glGetTransformFeedbackiv", glGetTransformFeedbackiv, 4, 5, { GL_ARB_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glGetUniformBlockIndex", glGetUniformBlockIndex, 3, 1, { GL_ARB_uniform_buffer_object, GL_EXTENSION_COUNT }},
-    { "glGetUniformBufferSizeEXT", glGetUniformBufferSizeEXT, 0, 0, { GL_EXT_bindable_uniform, GL_EXTENSION_COUNT }},
-    { "glGetUniformIndices", glGetUniformIndices, 3, 1, { GL_ARB_uniform_buffer_object, GL_EXTENSION_COUNT }},
-    { "glGetUniformLocation", glGetUniformLocation, 2, 0, { GL_EXTENSION_COUNT }},
-    { "glGetUniformLocationARB", glGetUniformLocationARB, 0, 0, { GL_ARB_shader_objects, GL_EXTENSION_COUNT }},
-    { "glGetUniformOffsetEXT", glGetUniformOffsetEXT, 0, 0, { GL_EXT_bindable_uniform, GL_EXTENSION_COUNT }},
-    { "glGetUniformSubroutineuiv", glGetUniformSubroutineuiv, 4, 0, { GL_ARB_shader_subroutine, GL_EXTENSION_COUNT }},
-    { "glGetUniformdv", glGetUniformdv, 4, 0, { GL_ARB_gpu_shader_fp64, GL_EXTENSION_COUNT }},
-    { "glGetUniformfv", glGetUniformfv, 2, 0, { GL_EXTENSION_COUNT }},
-    { "glGetUniformfvARB", glGetUniformfvARB, 0, 0, { GL_ARB_shader_objects, GL_EXTENSION_COUNT }},
-    { "glGetUniformi64vARB", glGetUniformi64vARB, 0, 0, { GL_ARB_gpu_shader_int64, GL_EXTENSION_COUNT }},
-    { "glGetUniformi64vNV", glGetUniformi64vNV, 0, 0, { GL_AMD_gpu_shader_int64, GL_NV_gpu_shader5, GL_EXTENSION_COUNT }},
-    { "glGetUniformiv", glGetUniformiv, 2, 0, { GL_EXTENSION_COUNT }},
-    { "glGetUniformivARB", glGetUniformivARB, 0, 0, { GL_ARB_shader_objects, GL_EXTENSION_COUNT }},
-    { "glGetUniformui64vARB", glGetUniformui64vARB, 0, 0, { GL_ARB_gpu_shader_int64, GL_EXTENSION_COUNT }},
-    { "glGetUniformui64vNV", glGetUniformui64vNV, 0, 0, { GL_AMD_gpu_shader_int64, GL_NV_shader_buffer_load, GL_EXTENSION_COUNT }},
-    { "glGetUniformuiv", glGetUniformuiv, 3, 0, { GL_EXTENSION_COUNT }},
-    { "glGetUniformuivEXT", glGetUniformuivEXT, 0, 0, { GL_EXT_gpu_shader4, GL_EXTENSION_COUNT }},
-    { "glGetUnsignedBytei_vEXT", glGetUnsignedBytei_vEXT, 0, 0, { GL_EXT_memory_object, GL_EXT_semaphore, GL_EXTENSION_COUNT }},
-    { "glGetUnsignedBytevEXT", glGetUnsignedBytevEXT, 0, 0, { GL_EXT_memory_object, GL_EXT_semaphore, GL_EXTENSION_COUNT }},
-    { "glGetVariantArrayObjectfvATI", glGetVariantArrayObjectfvATI, 0, 0, { GL_ATI_vertex_array_object, GL_EXTENSION_COUNT }},
-    { "glGetVariantArrayObjectivATI", glGetVariantArrayObjectivATI, 0, 0, { GL_ATI_vertex_array_object, GL_EXTENSION_COUNT }},
-    { "glGetVariantBooleanvEXT", glGetVariantBooleanvEXT, 0, 0, { GL_EXT_vertex_shader, GL_EXTENSION_COUNT }},
-    { "glGetVariantFloatvEXT", glGetVariantFloatvEXT, 0, 0, { GL_EXT_vertex_shader, GL_EXTENSION_COUNT }},
-    { "glGetVariantIntegervEXT", glGetVariantIntegervEXT, 0, 0, { GL_EXT_vertex_shader, GL_EXTENSION_COUNT }},
-    { "glGetVariantPointervEXT", glGetVariantPointervEXT, 0, 0, { GL_EXT_vertex_shader, GL_EXTENSION_COUNT }},
-    { "glGetVaryingLocationNV", glGetVaryingLocationNV, 0, 0, { GL_NV_transform_feedback, GL_EXTENSION_COUNT }},
-    { "glGetVertexArrayIndexed64iv", glGetVertexArrayIndexed64iv, 4, 5, { GL_ARB_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glGetVertexArrayIndexediv", glGetVertexArrayIndexediv, 4, 5, { GL_ARB_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glGetVertexArrayIntegeri_vEXT", glGetVertexArrayIntegeri_vEXT, 0, 0, { GL_EXT_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glGetVertexArrayIntegervEXT", glGetVertexArrayIntegervEXT, 0, 0, { GL_EXT_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glGetVertexArrayPointeri_vEXT", glGetVertexArrayPointeri_vEXT, 0, 0, { GL_EXT_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glGetVertexArrayPointervEXT", glGetVertexArrayPointervEXT, 0, 0, { GL_EXT_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glGetVertexArrayiv", glGetVertexArrayiv, 4, 5, { GL_ARB_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glGetVertexAttribArrayObjectfvATI", glGetVertexAttribArrayObjectfvATI, 0, 0, { GL_ATI_vertex_attrib_array_object, GL_EXTENSION_COUNT }},
-    { "glGetVertexAttribArrayObjectivATI", glGetVertexAttribArrayObjectivATI, 0, 0, { GL_ATI_vertex_attrib_array_object, GL_EXTENSION_COUNT }},
-    { "glGetVertexAttribIiv", glGetVertexAttribIiv, 3, 0, { GL_EXTENSION_COUNT }},
-    { "glGetVertexAttribIivEXT", glGetVertexAttribIivEXT, 0, 0, { GL_EXT_gpu_shader4, GL_NV_vertex_program4, GL_EXTENSION_COUNT }},
-    { "glGetVertexAttribIuiv", glGetVertexAttribIuiv, 3, 0, { GL_EXTENSION_COUNT }},
-    { "glGetVertexAttribIuivEXT", glGetVertexAttribIuivEXT, 0, 0, { GL_EXT_gpu_shader4, GL_NV_vertex_program4, GL_EXTENSION_COUNT }},
-    { "glGetVertexAttribLdv", glGetVertexAttribLdv, 4, 1, { GL_ARB_vertex_attrib_64bit, GL_EXTENSION_COUNT }},
-    { "glGetVertexAttribLdvEXT", glGetVertexAttribLdvEXT, 0, 0, { GL_EXT_vertex_attrib_64bit, GL_EXTENSION_COUNT }},
-    { "glGetVertexAttribLi64vNV", glGetVertexAttribLi64vNV, 0, 0, { GL_NV_vertex_attrib_integer_64bit, GL_EXTENSION_COUNT }},
-    { "glGetVertexAttribLui64vARB", glGetVertexAttribLui64vARB, 0, 0, { GL_ARB_bindless_texture, GL_EXTENSION_COUNT }},
-    { "glGetVertexAttribLui64vNV", glGetVertexAttribLui64vNV, 0, 0, { GL_NV_vertex_attrib_integer_64bit, GL_EXTENSION_COUNT }},
-    { "glGetVertexAttribPointerv", glGetVertexAttribPointerv, 2, 0, { GL_EXTENSION_COUNT }},
-    { "glGetVertexAttribPointervARB", glGetVertexAttribPointervARB, 0, 0, { GL_ARB_vertex_program, GL_ARB_vertex_shader, GL_EXTENSION_COUNT }},
-    { "glGetVertexAttribPointervNV", glGetVertexAttribPointervNV, 0, 0, { GL_NV_vertex_program, GL_EXTENSION_COUNT }},
-    { "glGetVertexAttribdv", glGetVertexAttribdv, 2, 0, { GL_EXTENSION_COUNT }},
-    { "glGetVertexAttribdvARB", glGetVertexAttribdvARB, 0, 0, { GL_ARB_vertex_program, GL_ARB_vertex_shader, GL_EXTENSION_COUNT }},
-    { "glGetVertexAttribdvNV", glGetVertexAttribdvNV, 0, 0, { GL_NV_vertex_program, GL_EXTENSION_COUNT }},
-    { "glGetVertexAttribfv", glGetVertexAttribfv, 2, 0, { GL_EXTENSION_COUNT }},
-    { "glGetVertexAttribfvARB", glGetVertexAttribfvARB, 0, 0, { GL_ARB_vertex_program, GL_ARB_vertex_shader, GL_EXTENSION_COUNT }},
-    { "glGetVertexAttribfvNV", glGetVertexAttribfvNV, 0, 0, { GL_NV_vertex_program, GL_EXTENSION_COUNT }},
-    { "glGetVertexAttribiv", glGetVertexAttribiv, 2, 0, { GL_EXTENSION_COUNT }},
-    { "glGetVertexAttribivARB", glGetVertexAttribivARB, 0, 0, { GL_ARB_vertex_program, GL_ARB_vertex_shader, GL_EXTENSION_COUNT }},
-    { "glGetVertexAttribivNV", glGetVertexAttribivNV, 0, 0, { GL_NV_vertex_program, GL_EXTENSION_COUNT }},
-    { "glGetVideoCaptureStreamdvNV", glGetVideoCaptureStreamdvNV, 0, 0, { GL_NV_video_capture, GL_EXTENSION_COUNT }},
-    { "glGetVideoCaptureStreamfvNV", glGetVideoCaptureStreamfvNV, 0, 0, { GL_NV_video_capture, GL_EXTENSION_COUNT }},
-    { "glGetVideoCaptureStreamivNV", glGetVideoCaptureStreamivNV, 0, 0, { GL_NV_video_capture, GL_EXTENSION_COUNT }},
-    { "glGetVideoCaptureivNV", glGetVideoCaptureivNV, 0, 0, { GL_NV_video_capture, GL_EXTENSION_COUNT }},
-    { "glGetVideoi64vNV", glGetVideoi64vNV, 0, 0, { GL_NV_present_video, GL_EXTENSION_COUNT }},
-    { "glGetVideoivNV", glGetVideoivNV, 0, 0, { GL_NV_present_video, GL_EXTENSION_COUNT }},
-    { "glGetVideoui64vNV", glGetVideoui64vNV, 0, 0, { GL_NV_present_video, GL_EXTENSION_COUNT }},
-    { "glGetVideouivNV", glGetVideouivNV, 0, 0, { GL_NV_present_video, GL_EXTENSION_COUNT }},
-    { "glGetVkProcAddrNV", glGetVkProcAddrNV, 0, 0, { GL_NV_draw_vulkan_image, GL_EXTENSION_COUNT }},
-    { "glGetnColorTable", glGetnColorTable, 4, 5, { GL_EXTENSION_COUNT }},
-    { "glGetnColorTableARB", glGetnColorTableARB, 0, 0, { GL_ARB_robustness, GL_EXTENSION_COUNT }},
-    { "glGetnCompressedTexImage", glGetnCompressedTexImage, 4, 5, { GL_EXTENSION_COUNT }},
-    { "glGetnCompressedTexImageARB", glGetnCompressedTexImageARB, 0, 0, { GL_ARB_robustness, GL_EXTENSION_COUNT }},
-    { "glGetnConvolutionFilter", glGetnConvolutionFilter, 4, 5, { GL_EXTENSION_COUNT }},
-    { "glGetnConvolutionFilterARB", glGetnConvolutionFilterARB, 0, 0, { GL_ARB_robustness, GL_EXTENSION_COUNT }},
-    { "glGetnHistogram", glGetnHistogram, 4, 5, { GL_EXTENSION_COUNT }},
-    { "glGetnHistogramARB", glGetnHistogramARB, 0, 0, { GL_ARB_robustness, GL_EXTENSION_COUNT }},
-    { "glGetnMapdv", glGetnMapdv, 4, 5, { GL_EXTENSION_COUNT }},
-    { "glGetnMapdvARB", glGetnMapdvARB, 0, 0, { GL_ARB_robustness, GL_EXTENSION_COUNT }},
-    { "glGetnMapfv", glGetnMapfv, 4, 5, { GL_EXTENSION_COUNT }},
-    { "glGetnMapfvARB", glGetnMapfvARB, 0, 0, { GL_ARB_robustness, GL_EXTENSION_COUNT }},
-    { "glGetnMapiv", glGetnMapiv, 4, 5, { GL_EXTENSION_COUNT }},
-    { "glGetnMapivARB", glGetnMapivARB, 0, 0, { GL_ARB_robustness, GL_EXTENSION_COUNT }},
-    { "glGetnMinmax", glGetnMinmax, 4, 5, { GL_EXTENSION_COUNT }},
-    { "glGetnMinmaxARB", glGetnMinmaxARB, 0, 0, { GL_ARB_robustness, GL_EXTENSION_COUNT }},
-    { "glGetnPixelMapfv", glGetnPixelMapfv, 4, 5, { GL_EXTENSION_COUNT }},
-    { "glGetnPixelMapfvARB", glGetnPixelMapfvARB, 0, 0, { GL_ARB_robustness, GL_EXTENSION_COUNT }},
-    { "glGetnPixelMapuiv", glGetnPixelMapuiv, 4, 5, { GL_EXTENSION_COUNT }},
-    { "glGetnPixelMapuivARB", glGetnPixelMapuivARB, 0, 0, { GL_ARB_robustness, GL_EXTENSION_COUNT }},
-    { "glGetnPixelMapusv", glGetnPixelMapusv, 4, 5, { GL_EXTENSION_COUNT }},
-    { "glGetnPixelMapusvARB", glGetnPixelMapusvARB, 0, 0, { GL_ARB_robustness, GL_EXTENSION_COUNT }},
-    { "glGetnPolygonStipple", glGetnPolygonStipple, 4, 5, { GL_EXTENSION_COUNT }},
-    { "glGetnPolygonStippleARB", glGetnPolygonStippleARB, 0, 0, { GL_ARB_robustness, GL_EXTENSION_COUNT }},
-    { "glGetnSeparableFilter", glGetnSeparableFilter, 4, 5, { GL_EXTENSION_COUNT }},
-    { "glGetnSeparableFilterARB", glGetnSeparableFilterARB, 0, 0, { GL_ARB_robustness, GL_EXTENSION_COUNT }},
-    { "glGetnTexImage", glGetnTexImage, 4, 5, { GL_EXTENSION_COUNT }},
-    { "glGetnTexImageARB", glGetnTexImageARB, 0, 0, { GL_ARB_robustness, GL_EXTENSION_COUNT }},
-    { "glGetnUniformdv", glGetnUniformdv, 4, 5, { GL_EXTENSION_COUNT }},
-    { "glGetnUniformdvARB", glGetnUniformdvARB, 0, 0, { GL_ARB_robustness, GL_EXTENSION_COUNT }},
-    { "glGetnUniformfv", glGetnUniformfv, 4, 5, { GL_KHR_robustness, GL_EXTENSION_COUNT }},
-    { "glGetnUniformfvARB", glGetnUniformfvARB, 0, 0, { GL_ARB_robustness, GL_EXTENSION_COUNT }},
-    { "glGetnUniformi64vARB", glGetnUniformi64vARB, 0, 0, { GL_ARB_gpu_shader_int64, GL_EXTENSION_COUNT }},
-    { "glGetnUniformiv", glGetnUniformiv, 4, 5, { GL_KHR_robustness, GL_EXTENSION_COUNT }},
-    { "glGetnUniformivARB", glGetnUniformivARB, 0, 0, { GL_ARB_robustness, GL_EXTENSION_COUNT }},
-    { "glGetnUniformui64vARB", glGetnUniformui64vARB, 0, 0, { GL_ARB_gpu_shader_int64, GL_EXTENSION_COUNT }},
-    { "glGetnUniformuiv", glGetnUniformuiv, 4, 5, { GL_KHR_robustness, GL_EXTENSION_COUNT }},
-    { "glGetnUniformuivARB", glGetnUniformuivARB, 0, 0, { GL_ARB_robustness, GL_EXTENSION_COUNT }},
-    { "glGlobalAlphaFactorbSUN", glGlobalAlphaFactorbSUN, 0, 0, { GL_SUN_global_alpha, GL_EXTENSION_COUNT }},
-    { "glGlobalAlphaFactordSUN", glGlobalAlphaFactordSUN, 0, 0, { GL_SUN_global_alpha, GL_EXTENSION_COUNT }},
-    { "glGlobalAlphaFactorfSUN", glGlobalAlphaFactorfSUN, 0, 0, { GL_SUN_global_alpha, GL_EXTENSION_COUNT }},
-    { "glGlobalAlphaFactoriSUN", glGlobalAlphaFactoriSUN, 0, 0, { GL_SUN_global_alpha, GL_EXTENSION_COUNT }},
-    { "glGlobalAlphaFactorsSUN", glGlobalAlphaFactorsSUN, 0, 0, { GL_SUN_global_alpha, GL_EXTENSION_COUNT }},
-    { "glGlobalAlphaFactorubSUN", glGlobalAlphaFactorubSUN, 0, 0, { GL_SUN_global_alpha, GL_EXTENSION_COUNT }},
-    { "glGlobalAlphaFactoruiSUN", glGlobalAlphaFactoruiSUN, 0, 0, { GL_SUN_global_alpha, GL_EXTENSION_COUNT }},
-    { "glGlobalAlphaFactorusSUN", glGlobalAlphaFactorusSUN, 0, 0, { GL_SUN_global_alpha, GL_EXTENSION_COUNT }},
-    { "glHintPGI", glHintPGI, 0, 0, { GL_PGI_misc_hints, GL_EXTENSION_COUNT }},
-    { "glHistogram", glHistogram, 0, 0, { GL_ARB_imaging, GL_EXTENSION_COUNT }},
-    { "glHistogramEXT", glHistogramEXT, 0, 0, { GL_EXT_histogram, GL_EXTENSION_COUNT }},
-    { "glIglooInterfaceSGIX", glIglooInterfaceSGIX, 0, 0, { GL_SGIX_igloo_interface, GL_EXTENSION_COUNT }},
-    { "glImageTransformParameterfHP", glImageTransformParameterfHP, 0, 0, { GL_HP_image_transform, GL_EXTENSION_COUNT }},
-    { "glImageTransformParameterfvHP", glImageTransformParameterfvHP, 0, 0, { GL_HP_image_transform, GL_EXTENSION_COUNT }},
-    { "glImageTransformParameteriHP", glImageTransformParameteriHP, 0, 0, { GL_HP_image_transform, GL_EXTENSION_COUNT }},
-    { "glImageTransformParameterivHP", glImageTransformParameterivHP, 0, 0, { GL_HP_image_transform, GL_EXTENSION_COUNT }},
-    { "glImportMemoryWin32HandleEXT", glImportMemoryWin32HandleEXT, 0, 0, { GL_EXT_memory_object_win32, GL_EXTENSION_COUNT }},
-    { "glImportMemoryWin32NameEXT", glImportMemoryWin32NameEXT, 0, 0, { GL_EXT_memory_object_win32, GL_EXTENSION_COUNT }},
-    { "glImportSemaphoreWin32HandleEXT", glImportSemaphoreWin32HandleEXT, 0, 0, { GL_EXT_semaphore_win32, GL_EXTENSION_COUNT }},
-    { "glImportSemaphoreWin32NameEXT", glImportSemaphoreWin32NameEXT, 0, 0, { GL_EXT_semaphore_win32, GL_EXTENSION_COUNT }},
-    { "glImportSyncEXT", glImportSyncEXT, 0, 0, { GL_EXT_x11_sync_object, GL_EXTENSION_COUNT }},
-    { "glIndexFormatNV", glIndexFormatNV, 0, 0, { GL_NV_vertex_buffer_unified_memory, GL_EXTENSION_COUNT }},
-    { "glIndexFuncEXT", glIndexFuncEXT, 0, 0, { GL_EXT_index_func, GL_EXTENSION_COUNT }},
-    { "glIndexMaterialEXT", glIndexMaterialEXT, 0, 0, { GL_EXT_index_material, GL_EXTENSION_COUNT }},
-    { "glIndexPointerEXT", glIndexPointerEXT, 0, 0, { GL_EXT_vertex_array, GL_EXTENSION_COUNT }},
-    { "glIndexPointerListIBM", glIndexPointerListIBM, 0, 0, { GL_IBM_vertex_array_lists, GL_EXTENSION_COUNT }},
-    { "glIndexxOES", glIndexxOES, 0, 0, { GL_OES_fixed_point, GL_EXTENSION_COUNT }},
-    { "glIndexxvOES", glIndexxvOES, 0, 0, { GL_OES_fixed_point, GL_EXTENSION_COUNT }},
-    { "glInsertComponentEXT", glInsertComponentEXT, 0, 0, { GL_EXT_vertex_shader, GL_EXTENSION_COUNT }},
-    { "glInsertEventMarkerEXT", glInsertEventMarkerEXT, 0, 0, { GL_EXT_debug_marker, GL_EXTENSION_COUNT }},
-    { "glInstrumentsBufferSGIX", glInstrumentsBufferSGIX, 0, 0, { GL_SGIX_instruments, GL_EXTENSION_COUNT }},
-    { "glInterpolatePathsNV", glInterpolatePathsNV, 0, 0, { GL_NV_path_rendering, GL_EXTENSION_COUNT }},
-    { "glInvalidateBufferData", glInvalidateBufferData, 4, 3, { GL_ARB_invalidate_subdata, GL_EXTENSION_COUNT }},
-    { "glInvalidateBufferSubData", glInvalidateBufferSubData, 4, 3, { GL_ARB_invalidate_subdata, GL_EXTENSION_COUNT }},
-    { "glInvalidateFramebuffer", glInvalidateFramebuffer, 4, 3, { GL_ARB_invalidate_subdata, GL_EXTENSION_COUNT }},
-    { "glInvalidateNamedFramebufferData", glInvalidateNamedFramebufferData, 4, 5, { GL_ARB_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glInvalidateNamedFramebufferSubData", glInvalidateNamedFramebufferSubData, 4, 5, { GL_ARB_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glInvalidateSubFramebuffer", glInvalidateSubFramebuffer, 4, 3, { GL_ARB_invalidate_subdata, GL_EXTENSION_COUNT }},
-    { "glInvalidateTexImage", glInvalidateTexImage, 4, 3, { GL_ARB_invalidate_subdata, GL_EXTENSION_COUNT }},
-    { "glInvalidateTexSubImage", glInvalidateTexSubImage, 4, 3, { GL_ARB_invalidate_subdata, GL_EXTENSION_COUNT }},
-    { "glIsAsyncMarkerSGIX", glIsAsyncMarkerSGIX, 0, 0, { GL_SGIX_async, GL_EXTENSION_COUNT }},
-    { "glIsBuffer", glIsBuffer, 1, 5, { GL_EXTENSION_COUNT }},
-    { "glIsBufferARB", glIsBufferARB, 0, 0, { GL_ARB_vertex_buffer_object, GL_EXTENSION_COUNT }},
-    { "glIsBufferResidentNV", glIsBufferResidentNV, 0, 0, { GL_NV_shader_buffer_load, GL_EXTENSION_COUNT }},
-    { "glIsCommandListNV", glIsCommandListNV, 0, 0, { GL_NV_command_list, GL_EXTENSION_COUNT }},
-    { "glIsEnabledIndexedEXT", glIsEnabledIndexedEXT, 0, 0, { GL_EXT_direct_state_access, GL_EXT_draw_buffers2, GL_EXTENSION_COUNT }},
-    { "glIsEnabledi", glIsEnabledi, 3, 0, { GL_EXTENSION_COUNT }},
-    { "glIsFenceAPPLE", glIsFenceAPPLE, 0, 0, { GL_APPLE_fence, GL_EXTENSION_COUNT }},
-    { "glIsFenceNV", glIsFenceNV, 0, 0, { GL_NV_fence, GL_EXTENSION_COUNT }},
-    { "glIsFramebuffer", glIsFramebuffer, 3, 0, { GL_ARB_framebuffer_object, GL_EXTENSION_COUNT }},
-    { "glIsFramebufferEXT", glIsFramebufferEXT, 0, 0, { GL_EXT_framebuffer_object, GL_EXTENSION_COUNT }},
-    { "glIsImageHandleResidentARB", glIsImageHandleResidentARB, 0, 0, { GL_ARB_bindless_texture, GL_EXTENSION_COUNT }},
-    { "glIsImageHandleResidentNV", glIsImageHandleResidentNV, 0, 0, { GL_NV_bindless_texture, GL_EXTENSION_COUNT }},
-    { "glIsMemoryObjectEXT", glIsMemoryObjectEXT, 0, 0, { GL_EXT_memory_object, GL_EXTENSION_COUNT }},
-    { "glIsNameAMD", glIsNameAMD, 0, 0, { GL_AMD_name_gen_delete, GL_EXTENSION_COUNT }},
-    { "glIsNamedBufferResidentNV", glIsNamedBufferResidentNV, 0, 0, { GL_NV_shader_buffer_load, GL_EXTENSION_COUNT }},
-    { "glIsNamedStringARB", glIsNamedStringARB, 0, 0, { GL_ARB_shading_language_include, GL_EXTENSION_COUNT }},
-    { "glIsObjectBufferATI", glIsObjectBufferATI, 0, 0, { GL_ATI_vertex_array_object, GL_EXTENSION_COUNT }},
-    { "glIsOcclusionQueryNV", glIsOcclusionQueryNV, 0, 0, { GL_NV_occlusion_query, GL_EXTENSION_COUNT }},
-    { "glIsPathNV", glIsPathNV, 0, 0, { GL_NV_path_rendering, GL_EXTENSION_COUNT }},
-    { "glIsPointInFillPathNV", glIsPointInFillPathNV, 0, 0, { GL_NV_path_rendering, GL_EXTENSION_COUNT }},
-    { "glIsPointInStrokePathNV", glIsPointInStrokePathNV, 0, 0, { GL_NV_path_rendering, GL_EXTENSION_COUNT }},
-    { "glIsProgram", glIsProgram, 2, 0, { GL_EXTENSION_COUNT }},
-    { "glIsProgramARB", glIsProgramARB, 0, 0, { GL_ARB_fragment_program, GL_ARB_vertex_program, GL_EXTENSION_COUNT }},
-    { "glIsProgramNV", glIsProgramNV, 0, 0, { GL_NV_vertex_program, GL_EXTENSION_COUNT }},
-    { "glIsProgramPipeline", glIsProgramPipeline, 4, 1, { GL_ARB_separate_shader_objects, GL_EXTENSION_COUNT }},
-    { "glIsQuery", glIsQuery, 1, 5, { GL_EXTENSION_COUNT }},
-    { "glIsQueryARB", glIsQueryARB, 0, 0, { GL_ARB_occlusion_query, GL_EXTENSION_COUNT }},
-    { "glIsRenderbuffer", glIsRenderbuffer, 3, 0, { GL_ARB_framebuffer_object, GL_EXTENSION_COUNT }},
-    { "glIsRenderbufferEXT", glIsRenderbufferEXT, 0, 0, { GL_EXT_framebuffer_object, GL_EXTENSION_COUNT }},
-    { "glIsSampler", glIsSampler, 3, 3, { GL_ARB_sampler_objects, GL_EXTENSION_COUNT }},
-    { "glIsSemaphoreEXT", glIsSemaphoreEXT, 0, 0, { GL_EXT_semaphore, GL_EXTENSION_COUNT }},
-    { "glIsShader", glIsShader, 2, 0, { GL_EXTENSION_COUNT }},
-    { "glIsStateNV", glIsStateNV, 0, 0, { GL_NV_command_list, GL_EXTENSION_COUNT }},
-    { "glIsSync", glIsSync, 3, 2, { GL_ARB_sync, GL_EXTENSION_COUNT }},
-    { "glIsTextureEXT", glIsTextureEXT, 0, 0, { GL_EXT_texture_object, GL_EXTENSION_COUNT }},
-    { "glIsTextureHandleResidentARB", glIsTextureHandleResidentARB, 0, 0, { GL_ARB_bindless_texture, GL_EXTENSION_COUNT }},
-    { "glIsTextureHandleResidentNV", glIsTextureHandleResidentNV, 0, 0, { GL_NV_bindless_texture, GL_EXTENSION_COUNT }},
-    { "glIsTransformFeedback", glIsTransformFeedback, 4, 0, { GL_ARB_transform_feedback2, GL_EXTENSION_COUNT }},
-    { "glIsTransformFeedbackNV", glIsTransformFeedbackNV, 0, 0, { GL_NV_transform_feedback2, GL_EXTENSION_COUNT }},
-    { "glIsVariantEnabledEXT", glIsVariantEnabledEXT, 0, 0, { GL_EXT_vertex_shader, GL_EXTENSION_COUNT }},
-    { "glIsVertexArray", glIsVertexArray, 3, 0, { GL_ARB_vertex_array_object, GL_EXTENSION_COUNT }},
-    { "glIsVertexArrayAPPLE", glIsVertexArrayAPPLE, 0, 0, { GL_APPLE_vertex_array_object, GL_EXTENSION_COUNT }},
-    { "glIsVertexAttribEnabledAPPLE", glIsVertexAttribEnabledAPPLE, 0, 0, { GL_APPLE_vertex_program_evaluators, GL_EXTENSION_COUNT }},
-    { "glLGPUCopyImageSubDataNVX", glLGPUCopyImageSubDataNVX, 0, 0, { GL_NVX_linked_gpu_multicast, GL_EXTENSION_COUNT }},
-    { "glLGPUInterlockNVX", glLGPUInterlockNVX, 0, 0, { GL_NVX_linked_gpu_multicast, GL_EXTENSION_COUNT }},
-    { "glLGPUNamedBufferSubDataNVX", glLGPUNamedBufferSubDataNVX, 0, 0, { GL_NVX_linked_gpu_multicast, GL_EXTENSION_COUNT }},
-    { "glLabelObjectEXT", glLabelObjectEXT, 0, 0, { GL_EXT_debug_label, GL_EXTENSION_COUNT }},
-    { "glLightEnviSGIX", glLightEnviSGIX, 0, 0, { GL_SGIX_fragment_lighting, GL_EXTENSION_COUNT }},
-    { "glLightModelx", glLightModelx, 0, 0, { GL_NV_ES1_1_compatibility, GL_EXTENSION_COUNT }},
-    { "glLightModelxOES", glLightModelxOES, 0, 0, { GL_OES_fixed_point, GL_EXTENSION_COUNT }},
-    { "glLightModelxv", glLightModelxv, 0, 0, { GL_NV_ES1_1_compatibility, GL_EXTENSION_COUNT }},
-    { "glLightModelxvOES", glLightModelxvOES, 0, 0, { GL_OES_fixed_point, GL_EXTENSION_COUNT }},
-    { "glLightx", glLightx, 0, 0, { GL_NV_ES1_1_compatibility, GL_EXTENSION_COUNT }},
-    { "glLightxOES", glLightxOES, 0, 0, { GL_OES_fixed_point, GL_EXTENSION_COUNT }},
-    { "glLightxv", glLightxv, 0, 0, { GL_NV_ES1_1_compatibility, GL_EXTENSION_COUNT }},
-    { "glLightxvOES", glLightxvOES, 0, 0, { GL_OES_fixed_point, GL_EXTENSION_COUNT }},
-    { "glLineWidthx", glLineWidthx, 0, 0, { GL_NV_ES1_1_compatibility, GL_EXTENSION_COUNT }},
-    { "glLineWidthxOES", glLineWidthxOES, 0, 0, { GL_OES_fixed_point, GL_EXTENSION_COUNT }},
-    { "glLinkProgram", glLinkProgram, 2, 0, { GL_EXTENSION_COUNT }},
-    { "glLinkProgramARB", glLinkProgramARB, 0, 0, { GL_ARB_shader_objects, GL_EXTENSION_COUNT }},
-    { "glListDrawCommandsStatesClientNV", glListDrawCommandsStatesClientNV, 0, 0, { GL_NV_command_list, GL_EXTENSION_COUNT }},
-    { "glListParameterfSGIX", glListParameterfSGIX, 0, 0, { GL_SGIX_list_priority, GL_EXTENSION_COUNT }},
-    { "glListParameterfvSGIX", glListParameterfvSGIX, 0, 0, { GL_SGIX_list_priority, GL_EXTENSION_COUNT }},
-    { "glListParameteriSGIX", glListParameteriSGIX, 0, 0, { GL_SGIX_list_priority, GL_EXTENSION_COUNT }},
-    { "glListParameterivSGIX", glListParameterivSGIX, 0, 0, { GL_SGIX_list_priority, GL_EXTENSION_COUNT }},
-    { "glLoadIdentityDeformationMapSGIX", glLoadIdentityDeformationMapSGIX, 0, 0, { GL_SGIX_polynomial_ffd, GL_EXTENSION_COUNT }},
-    { "glLoadMatrixx", glLoadMatrixx, 0, 0, { GL_NV_ES1_1_compatibility, GL_EXTENSION_COUNT }},
-    { "glLoadMatrixxOES", glLoadMatrixxOES, 0, 0, { GL_OES_fixed_point, GL_EXTENSION_COUNT }},
-    { "glLoadProgramNV", glLoadProgramNV, 0, 0, { GL_NV_vertex_program, GL_EXTENSION_COUNT }},
-    { "glLoadTransposeMatrixd", glLoadTransposeMatrixd, 1, 3, { GL_EXTENSION_COUNT }},
-    { "glLoadTransposeMatrixdARB", glLoadTransposeMatrixdARB, 0, 0, { GL_ARB_transpose_matrix, GL_EXTENSION_COUNT }},
-    { "glLoadTransposeMatrixf", glLoadTransposeMatrixf, 1, 3, { GL_EXTENSION_COUNT }},
-    { "glLoadTransposeMatrixfARB", glLoadTransposeMatrixfARB, 0, 0, { GL_ARB_transpose_matrix, GL_EXTENSION_COUNT }},
-    { "glLoadTransposeMatrixxOES", glLoadTransposeMatrixxOES, 0, 0, { GL_OES_fixed_point, GL_EXTENSION_COUNT }},
-    { "glLockArraysEXT", glLockArraysEXT, 0, 0, { GL_EXT_compiled_vertex_array, GL_EXTENSION_COUNT }},
-    { "glMTexCoord2fSGIS", glMTexCoord2fSGIS, 0, 0, { GL_SGIS_multitexture, GL_EXTENSION_COUNT }},
-    { "glMTexCoord2fvSGIS", glMTexCoord2fvSGIS, 0, 0, { GL_SGIS_multitexture, GL_EXTENSION_COUNT }},
-    { "glMakeBufferNonResidentNV", glMakeBufferNonResidentNV, 0, 0, { GL_NV_shader_buffer_load, GL_EXTENSION_COUNT }},
-    { "glMakeBufferResidentNV", glMakeBufferResidentNV, 0, 0, { GL_NV_shader_buffer_load, GL_EXTENSION_COUNT }},
-    { "glMakeImageHandleNonResidentARB", glMakeImageHandleNonResidentARB, 0, 0, { GL_ARB_bindless_texture, GL_EXTENSION_COUNT }},
-    { "glMakeImageHandleNonResidentNV", glMakeImageHandleNonResidentNV, 0, 0, { GL_NV_bindless_texture, GL_EXTENSION_COUNT }},
-    { "glMakeImageHandleResidentARB", glMakeImageHandleResidentARB, 0, 0, { GL_ARB_bindless_texture, GL_EXTENSION_COUNT }},
-    { "glMakeImageHandleResidentNV", glMakeImageHandleResidentNV, 0, 0, { GL_NV_bindless_texture, GL_EXTENSION_COUNT }},
-    { "glMakeNamedBufferNonResidentNV", glMakeNamedBufferNonResidentNV, 0, 0, { GL_NV_shader_buffer_load, GL_EXTENSION_COUNT }},
-    { "glMakeNamedBufferResidentNV", glMakeNamedBufferResidentNV, 0, 0, { GL_NV_shader_buffer_load, GL_EXTENSION_COUNT }},
-    { "glMakeTextureHandleNonResidentARB", glMakeTextureHandleNonResidentARB, 0, 0, { GL_ARB_bindless_texture, GL_EXTENSION_COUNT }},
-    { "glMakeTextureHandleNonResidentNV", glMakeTextureHandleNonResidentNV, 0, 0, { GL_NV_bindless_texture, GL_EXTENSION_COUNT }},
-    { "glMakeTextureHandleResidentARB", glMakeTextureHandleResidentARB, 0, 0, { GL_ARB_bindless_texture, GL_EXTENSION_COUNT }},
-    { "glMakeTextureHandleResidentNV", glMakeTextureHandleResidentNV, 0, 0, { GL_NV_bindless_texture, GL_EXTENSION_COUNT }},
-    { "glMap1xOES", glMap1xOES, 0, 0, { GL_OES_fixed_point, GL_EXTENSION_COUNT }},
-    { "glMap2xOES", glMap2xOES, 0, 0, { GL_OES_fixed_point, GL_EXTENSION_COUNT }},
-    { "glMapBuffer", glMapBuffer, 1, 5, { GL_EXTENSION_COUNT }},
-    { "glMapBufferARB", glMapBufferARB, 0, 0, { GL_ARB_vertex_buffer_object, GL_EXTENSION_COUNT }},
-    { "glMapBufferRange", glMapBufferRange, 3, 0, { GL_ARB_map_buffer_range, GL_EXTENSION_COUNT }},
-    { "glMapControlPointsNV", glMapControlPointsNV, 0, 0, { GL_NV_evaluators, GL_EXTENSION_COUNT }},
-    { "glMapGrid1xOES", glMapGrid1xOES, 0, 0, { GL_OES_fixed_point, GL_EXTENSION_COUNT }},
-    { "glMapGrid2xOES", glMapGrid2xOES, 0, 0, { GL_OES_fixed_point, GL_EXTENSION_COUNT }},
-    { "glMapNamedBuffer", glMapNamedBuffer, 4, 5, { GL_ARB_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glMapNamedBufferEXT", glMapNamedBufferEXT, 0, 0, { GL_EXT_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glMapNamedBufferRange", glMapNamedBufferRange, 4, 5, { GL_ARB_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glMapNamedBufferRangeEXT", glMapNamedBufferRangeEXT, 0, 0, { GL_EXT_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glMapObjectBufferATI", glMapObjectBufferATI, 0, 0, { GL_ATI_map_object_buffer, GL_EXTENSION_COUNT }},
-    { "glMapParameterfvNV", glMapParameterfvNV, 0, 0, { GL_NV_evaluators, GL_EXTENSION_COUNT }},
-    { "glMapParameterivNV", glMapParameterivNV, 0, 0, { GL_NV_evaluators, GL_EXTENSION_COUNT }},
-    { "glMapTexture2DINTEL", glMapTexture2DINTEL, 0, 0, { GL_INTEL_map_texture, GL_EXTENSION_COUNT }},
-    { "glMapVertexAttrib1dAPPLE", glMapVertexAttrib1dAPPLE, 0, 0, { GL_APPLE_vertex_program_evaluators, GL_EXTENSION_COUNT }},
-    { "glMapVertexAttrib1fAPPLE", glMapVertexAttrib1fAPPLE, 0, 0, { GL_APPLE_vertex_program_evaluators, GL_EXTENSION_COUNT }},
-    { "glMapVertexAttrib2dAPPLE", glMapVertexAttrib2dAPPLE, 0, 0, { GL_APPLE_vertex_program_evaluators, GL_EXTENSION_COUNT }},
-    { "glMapVertexAttrib2fAPPLE", glMapVertexAttrib2fAPPLE, 0, 0, { GL_APPLE_vertex_program_evaluators, GL_EXTENSION_COUNT }},
-    { "glMaterialx", glMaterialx, 0, 0, { GL_NV_ES1_1_compatibility, GL_EXTENSION_COUNT }},
-    { "glMaterialxOES", glMaterialxOES, 0, 0, { GL_OES_fixed_point, GL_EXTENSION_COUNT }},
-    { "glMaterialxv", glMaterialxv, 0, 0, { GL_NV_ES1_1_compatibility, GL_EXTENSION_COUNT }},
-    { "glMaterialxvOES", glMaterialxvOES, 0, 0, { GL_OES_fixed_point, GL_EXTENSION_COUNT }},
-    { "glMatrixFrustumEXT", glMatrixFrustumEXT, 0, 0, { GL_EXT_direct_state_access, GL_NV_path_rendering, GL_EXTENSION_COUNT }},
-    { "glMatrixIndexPointerARB", glMatrixIndexPointerARB, 0, 0, { GL_ARB_matrix_palette, GL_EXTENSION_COUNT }},
-    { "glMatrixIndexubvARB", glMatrixIndexubvARB, 0, 0, { GL_ARB_matrix_palette, GL_EXTENSION_COUNT }},
-    { "glMatrixIndexuivARB", glMatrixIndexuivARB, 0, 0, { GL_ARB_matrix_palette, GL_EXTENSION_COUNT }},
-    { "glMatrixIndexusvARB", glMatrixIndexusvARB, 0, 0, { GL_ARB_matrix_palette, GL_EXTENSION_COUNT }},
-    { "glMatrixLoad3x2fNV", glMatrixLoad3x2fNV, 0, 0, { GL_NV_path_rendering, GL_EXTENSION_COUNT }},
-    { "glMatrixLoad3x3fNV", glMatrixLoad3x3fNV, 0, 0, { GL_NV_path_rendering, GL_EXTENSION_COUNT }},
-    { "glMatrixLoadIdentityEXT", glMatrixLoadIdentityEXT, 0, 0, { GL_EXT_direct_state_access, GL_NV_path_rendering, GL_EXTENSION_COUNT }},
-    { "glMatrixLoadTranspose3x3fNV", glMatrixLoadTranspose3x3fNV, 0, 0, { GL_NV_path_rendering, GL_EXTENSION_COUNT }},
-    { "glMatrixLoadTransposedEXT", glMatrixLoadTransposedEXT, 0, 0, { GL_EXT_direct_state_access, GL_NV_path_rendering, GL_EXTENSION_COUNT }},
-    { "glMatrixLoadTransposefEXT", glMatrixLoadTransposefEXT, 0, 0, { GL_EXT_direct_state_access, GL_NV_path_rendering, GL_EXTENSION_COUNT }},
-    { "glMatrixLoaddEXT", glMatrixLoaddEXT, 0, 0, { GL_EXT_direct_state_access, GL_NV_path_rendering, GL_EXTENSION_COUNT }},
-    { "glMatrixLoadfEXT", glMatrixLoadfEXT, 0, 0, { GL_EXT_direct_state_access, GL_NV_path_rendering, GL_EXTENSION_COUNT }},
-    { "glMatrixMult3x2fNV", glMatrixMult3x2fNV, 0, 0, { GL_NV_path_rendering, GL_EXTENSION_COUNT }},
-    { "glMatrixMult3x3fNV", glMatrixMult3x3fNV, 0, 0, { GL_NV_path_rendering, GL_EXTENSION_COUNT }},
-    { "glMatrixMultTranspose3x3fNV", glMatrixMultTranspose3x3fNV, 0, 0, { GL_NV_path_rendering, GL_EXTENSION_COUNT }},
-    { "glMatrixMultTransposedEXT", glMatrixMultTransposedEXT, 0, 0, { GL_EXT_direct_state_access, GL_NV_path_rendering, GL_EXTENSION_COUNT }},
-    { "glMatrixMultTransposefEXT", glMatrixMultTransposefEXT, 0, 0, { GL_EXT_direct_state_access, GL_NV_path_rendering, GL_EXTENSION_COUNT }},
-    { "glMatrixMultdEXT", glMatrixMultdEXT, 0, 0, { GL_EXT_direct_state_access, GL_NV_path_rendering, GL_EXTENSION_COUNT }},
-    { "glMatrixMultfEXT", glMatrixMultfEXT, 0, 0, { GL_EXT_direct_state_access, GL_NV_path_rendering, GL_EXTENSION_COUNT }},
-    { "glMatrixOrthoEXT", glMatrixOrthoEXT, 0, 0, { GL_EXT_direct_state_access, GL_NV_path_rendering, GL_EXTENSION_COUNT }},
-    { "glMatrixPopEXT", glMatrixPopEXT, 0, 0, { GL_EXT_direct_state_access, GL_NV_path_rendering, GL_EXTENSION_COUNT }},
-    { "glMatrixPushEXT", glMatrixPushEXT, 0, 0, { GL_EXT_direct_state_access, GL_NV_path_rendering, GL_EXTENSION_COUNT }},
-    { "glMatrixRotatedEXT", glMatrixRotatedEXT, 0, 0, { GL_EXT_direct_state_access, GL_NV_path_rendering, GL_EXTENSION_COUNT }},
-    { "glMatrixRotatefEXT", glMatrixRotatefEXT, 0, 0, { GL_EXT_direct_state_access, GL_NV_path_rendering, GL_EXTENSION_COUNT }},
-    { "glMatrixScaledEXT", glMatrixScaledEXT, 0, 0, { GL_EXT_direct_state_access, GL_NV_path_rendering, GL_EXTENSION_COUNT }},
-    { "glMatrixScalefEXT", glMatrixScalefEXT, 0, 0, { GL_EXT_direct_state_access, GL_NV_path_rendering, GL_EXTENSION_COUNT }},
-    { "glMatrixTranslatedEXT", glMatrixTranslatedEXT, 0, 0, { GL_EXT_direct_state_access, GL_NV_path_rendering, GL_EXTENSION_COUNT }},
-    { "glMatrixTranslatefEXT", glMatrixTranslatefEXT, 0, 0, { GL_EXT_direct_state_access, GL_NV_path_rendering, GL_EXTENSION_COUNT }},
-    { "glMaxShaderCompilerThreadsARB", glMaxShaderCompilerThreadsARB, 0, 0, { GL_ARB_parallel_shader_compile, GL_EXTENSION_COUNT }},
-    { "glMaxShaderCompilerThreadsKHR", glMaxShaderCompilerThreadsKHR, 0, 0, { GL_KHR_parallel_shader_compile, GL_EXTENSION_COUNT }},
-    { "glMemoryBarrier", glMemoryBarrier, 4, 2, { GL_ARB_shader_image_load_store, GL_EXTENSION_COUNT }},
-    { "glMemoryBarrierByRegion", glMemoryBarrierByRegion, 4, 5, { GL_ARB_ES3_1_compatibility, GL_NV_ES3_1_compatibility, GL_EXTENSION_COUNT }},
-    { "glMemoryBarrierEXT", glMemoryBarrierEXT, 0, 0, { GL_EXT_shader_image_load_store, GL_EXTENSION_COUNT }},
-    { "glMemoryObjectParameterivEXT", glMemoryObjectParameterivEXT, 0, 0, { GL_EXT_memory_object, GL_EXTENSION_COUNT }},
-    { "glMinSampleShading", glMinSampleShading, 4, 0, { GL_EXTENSION_COUNT }},
-    { "glMinSampleShadingARB", glMinSampleShadingARB, 0, 0, { GL_ARB_sample_shading, GL_EXTENSION_COUNT }},
-    { "glMinmax", glMinmax, 0, 0, { GL_ARB_imaging, GL_EXTENSION_COUNT }},
-    { "glMinmaxEXT", glMinmaxEXT, 0, 0, { GL_EXT_histogram, GL_EXTENSION_COUNT }},
-    { "glMultMatrixx", glMultMatrixx, 0, 0, { GL_NV_ES1_1_compatibility, GL_EXTENSION_COUNT }},
-    { "glMultMatrixxOES", glMultMatrixxOES, 0, 0, { GL_OES_fixed_point, GL_EXTENSION_COUNT }},
-    { "glMultTransposeMatrixd", glMultTransposeMatrixd, 1, 3, { GL_EXTENSION_COUNT }},
-    { "glMultTransposeMatrixdARB", glMultTransposeMatrixdARB, 0, 0, { GL_ARB_transpose_matrix, GL_EXTENSION_COUNT }},
-    { "glMultTransposeMatrixf", glMultTransposeMatrixf, 1, 3, { GL_EXTENSION_COUNT }},
-    { "glMultTransposeMatrixfARB", glMultTransposeMatrixfARB, 0, 0, { GL_ARB_transpose_matrix, GL_EXTENSION_COUNT }},
-    { "glMultTransposeMatrixxOES", glMultTransposeMatrixxOES, 0, 0, { GL_OES_fixed_point, GL_EXTENSION_COUNT }},
-    { "glMultiDrawArrays", glMultiDrawArrays, 1, 4, { GL_EXTENSION_COUNT }},
-    { "glMultiDrawArraysEXT", glMultiDrawArraysEXT, 0, 0, { GL_EXT_multi_draw_arrays, GL_SUN_multi_draw_arrays, GL_EXTENSION_COUNT }},
-    { "glMultiDrawArraysIndirect", glMultiDrawArraysIndirect, 4, 3, { GL_ARB_multi_draw_indirect, GL_EXTENSION_COUNT }},
-    { "glMultiDrawArraysIndirectAMD", glMultiDrawArraysIndirectAMD, 0, 0, { GL_AMD_multi_draw_indirect, GL_EXTENSION_COUNT }},
-    { "glMultiDrawArraysIndirectBindlessCountNV", glMultiDrawArraysIndirectBindlessCountNV, 0, 0, { GL_NV_bindless_multi_draw_indirect_count, GL_EXTENSION_COUNT }},
-    { "glMultiDrawArraysIndirectBindlessNV", glMultiDrawArraysIndirectBindlessNV, 0, 0, { GL_NV_bindless_multi_draw_indirect, GL_EXTENSION_COUNT }},
-    { "glMultiDrawArraysIndirectCount", glMultiDrawArraysIndirectCount, 4, 6, { GL_EXTENSION_COUNT }},
-    { "glMultiDrawArraysIndirectCountARB", glMultiDrawArraysIndirectCountARB, 0, 0, { GL_ARB_indirect_parameters, GL_EXTENSION_COUNT }},
-    { "glMultiDrawElementArrayAPPLE", glMultiDrawElementArrayAPPLE, 0, 0, { GL_APPLE_element_array, GL_EXTENSION_COUNT }},
-    { "glMultiDrawElements", glMultiDrawElements, 1, 4, { GL_EXTENSION_COUNT }},
-    { "glMultiDrawElementsBaseVertex", glMultiDrawElementsBaseVertex, 3, 2, { GL_ARB_draw_elements_base_vertex, GL_EXTENSION_COUNT }},
-    { "glMultiDrawElementsEXT", glMultiDrawElementsEXT, 0, 0, { GL_EXT_multi_draw_arrays, GL_SUN_multi_draw_arrays, GL_EXTENSION_COUNT }},
-    { "glMultiDrawElementsIndirect", glMultiDrawElementsIndirect, 4, 3, { GL_ARB_multi_draw_indirect, GL_EXTENSION_COUNT }},
-    { "glMultiDrawElementsIndirectAMD", glMultiDrawElementsIndirectAMD, 0, 0, { GL_AMD_multi_draw_indirect, GL_EXTENSION_COUNT }},
-    { "glMultiDrawElementsIndirectBindlessCountNV", glMultiDrawElementsIndirectBindlessCountNV, 0, 0, { GL_NV_bindless_multi_draw_indirect_count, GL_EXTENSION_COUNT }},
-    { "glMultiDrawElementsIndirectBindlessNV", glMultiDrawElementsIndirectBindlessNV, 0, 0, { GL_NV_bindless_multi_draw_indirect, GL_EXTENSION_COUNT }},
-    { "glMultiDrawElementsIndirectCount", glMultiDrawElementsIndirectCount, 4, 6, { GL_EXTENSION_COUNT }},
-    { "glMultiDrawElementsIndirectCountARB", glMultiDrawElementsIndirectCountARB, 0, 0, { GL_ARB_indirect_parameters, GL_EXTENSION_COUNT }},
-    { "glMultiDrawMeshTasksIndirectCountEXT", glMultiDrawMeshTasksIndirectCountEXT, 0, 0, { GL_EXT_mesh_shader, GL_EXTENSION_COUNT }},
-    { "glMultiDrawMeshTasksIndirectCountNV", glMultiDrawMeshTasksIndirectCountNV, 0, 0, { GL_NV_mesh_shader, GL_EXTENSION_COUNT }},
-    { "glMultiDrawMeshTasksIndirectEXT", glMultiDrawMeshTasksIndirectEXT, 0, 0, { GL_EXT_mesh_shader, GL_EXTENSION_COUNT }},
-    { "glMultiDrawMeshTasksIndirectNV", glMultiDrawMeshTasksIndirectNV, 0, 0, { GL_NV_mesh_shader, GL_EXTENSION_COUNT }},
-    { "glMultiDrawRangeElementArrayAPPLE", glMultiDrawRangeElementArrayAPPLE, 0, 0, { GL_APPLE_element_array, GL_EXTENSION_COUNT }},
-    { "glMultiModeDrawArraysIBM", glMultiModeDrawArraysIBM, 0, 0, { GL_IBM_multimode_draw_arrays, GL_EXTENSION_COUNT }},
-    { "glMultiModeDrawElementsIBM", glMultiModeDrawElementsIBM, 0, 0, { GL_IBM_multimode_draw_arrays, GL_EXTENSION_COUNT }},
-    { "glMultiTexBufferEXT", glMultiTexBufferEXT, 0, 0, { GL_EXT_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glMultiTexCoord1bOES", glMultiTexCoord1bOES, 0, 0, { GL_OES_byte_coordinates, GL_EXTENSION_COUNT }},
-    { "glMultiTexCoord1bvOES", glMultiTexCoord1bvOES, 0, 0, { GL_OES_byte_coordinates, GL_EXTENSION_COUNT }},
-    { "glMultiTexCoord1d", glMultiTexCoord1d, 1, 3, { GL_EXTENSION_COUNT }},
-    { "glMultiTexCoord1dARB", glMultiTexCoord1dARB, 0, 0, { GL_ARB_multitexture, GL_EXTENSION_COUNT }},
-    { "glMultiTexCoord1dSGIS", glMultiTexCoord1dSGIS, 0, 0, { GL_SGIS_multitexture, GL_EXTENSION_COUNT }},
-    { "glMultiTexCoord1dv", glMultiTexCoord1dv, 1, 3, { GL_EXTENSION_COUNT }},
-    { "glMultiTexCoord1dvARB", glMultiTexCoord1dvARB, 0, 0, { GL_ARB_multitexture, GL_EXTENSION_COUNT }},
-    { "glMultiTexCoord1dvSGIS", glMultiTexCoord1dvSGIS, 0, 0, { GL_SGIS_multitexture, GL_EXTENSION_COUNT }},
-    { "glMultiTexCoord1f", glMultiTexCoord1f, 1, 3, { GL_EXTENSION_COUNT }},
-    { "glMultiTexCoord1fARB", glMultiTexCoord1fARB, 0, 0, { GL_ARB_multitexture, GL_EXTENSION_COUNT }},
-    { "glMultiTexCoord1fSGIS", glMultiTexCoord1fSGIS, 0, 0, { GL_SGIS_multitexture, GL_EXTENSION_COUNT }},
-    { "glMultiTexCoord1fv", glMultiTexCoord1fv, 1, 3, { GL_EXTENSION_COUNT }},
-    { "glMultiTexCoord1fvARB", glMultiTexCoord1fvARB, 0, 0, { GL_ARB_multitexture, GL_EXTENSION_COUNT }},
-    { "glMultiTexCoord1fvSGIS", glMultiTexCoord1fvSGIS, 0, 0, { GL_SGIS_multitexture, GL_EXTENSION_COUNT }},
-    { "glMultiTexCoord1hNV", glMultiTexCoord1hNV, 0, 0, { GL_NV_half_float, GL_EXTENSION_COUNT }},
-    { "glMultiTexCoord1hvNV", glMultiTexCoord1hvNV, 0, 0, { GL_NV_half_float, GL_EXTENSION_COUNT }},
-    { "glMultiTexCoord1i", glMultiTexCoord1i, 1, 3, { GL_EXTENSION_COUNT }},
-    { "glMultiTexCoord1iARB", glMultiTexCoord1iARB, 0, 0, { GL_ARB_multitexture, GL_EXTENSION_COUNT }},
-    { "glMultiTexCoord1iSGIS", glMultiTexCoord1iSGIS, 0, 0, { GL_SGIS_multitexture, GL_EXTENSION_COUNT }},
-    { "glMultiTexCoord1iv", glMultiTexCoord1iv, 1, 3, { GL_EXTENSION_COUNT }},
-    { "glMultiTexCoord1ivARB", glMultiTexCoord1ivARB, 0, 0, { GL_ARB_multitexture, GL_EXTENSION_COUNT }},
-    { "glMultiTexCoord1ivSGIS", glMultiTexCoord1ivSGIS, 0, 0, { GL_SGIS_multitexture, GL_EXTENSION_COUNT }},
-    { "glMultiTexCoord1s", glMultiTexCoord1s, 1, 3, { GL_EXTENSION_COUNT }},
-    { "glMultiTexCoord1sARB", glMultiTexCoord1sARB, 0, 0, { GL_ARB_multitexture, GL_EXTENSION_COUNT }},
-    { "glMultiTexCoord1sSGIS", glMultiTexCoord1sSGIS, 0, 0, { GL_SGIS_multitexture, GL_EXTENSION_COUNT }},
-    { "glMultiTexCoord1sv", glMultiTexCoord1sv, 1, 3, { GL_EXTENSION_COUNT }},
-    { "glMultiTexCoord1svARB", glMultiTexCoord1svARB, 0, 0, { GL_ARB_multitexture, GL_EXTENSION_COUNT }},
-    { "glMultiTexCoord1svSGIS", glMultiTexCoord1svSGIS, 0, 0, { GL_SGIS_multitexture, GL_EXTENSION_COUNT }},
-    { "glMultiTexCoord1xOES", glMultiTexCoord1xOES, 0, 0, { GL_OES_fixed_point, GL_EXTENSION_COUNT }},
-    { "glMultiTexCoord1xvOES", glMultiTexCoord1xvOES, 0, 0, { GL_OES_fixed_point, GL_EXTENSION_COUNT }},
-    { "glMultiTexCoord2bOES", glMultiTexCoord2bOES, 0, 0, { GL_OES_byte_coordinates, GL_EXTENSION_COUNT }},
-    { "glMultiTexCoord2bvOES", glMultiTexCoord2bvOES, 0, 0, { GL_OES_byte_coordinates, GL_EXTENSION_COUNT }},
-    { "glMultiTexCoord2d", glMultiTexCoord2d, 1, 3, { GL_EXTENSION_COUNT }},
-    { "glMultiTexCoord2dARB", glMultiTexCoord2dARB, 0, 0, { GL_ARB_multitexture, GL_EXTENSION_COUNT }},
-    { "glMultiTexCoord2dSGIS", glMultiTexCoord2dSGIS, 0, 0, { GL_SGIS_multitexture, GL_EXTENSION_COUNT }},
-    { "glMultiTexCoord2dv", glMultiTexCoord2dv, 1, 3, { GL_EXTENSION_COUNT }},
-    { "glMultiTexCoord2dvARB", glMultiTexCoord2dvARB, 0, 0, { GL_ARB_multitexture, GL_EXTENSION_COUNT }},
-    { "glMultiTexCoord2dvSGIS", glMultiTexCoord2dvSGIS, 0, 0, { GL_SGIS_multitexture, GL_EXTENSION_COUNT }},
-    { "glMultiTexCoord2f", glMultiTexCoord2f, 1, 3, { GL_EXTENSION_COUNT }},
-    { "glMultiTexCoord2fARB", glMultiTexCoord2fARB, 0, 0, { GL_ARB_multitexture, GL_EXTENSION_COUNT }},
-    { "glMultiTexCoord2fSGIS", glMultiTexCoord2fSGIS, 0, 0, { GL_SGIS_multitexture, GL_EXTENSION_COUNT }},
-    { "glMultiTexCoord2fv", glMultiTexCoord2fv, 1, 3, { GL_EXTENSION_COUNT }},
-    { "glMultiTexCoord2fvARB", glMultiTexCoord2fvARB, 0, 0, { GL_ARB_multitexture, GL_EXTENSION_COUNT }},
-    { "glMultiTexCoord2fvSGIS", glMultiTexCoord2fvSGIS, 0, 0, { GL_SGIS_multitexture, GL_EXTENSION_COUNT }},
-    { "glMultiTexCoord2hNV", glMultiTexCoord2hNV, 0, 0, { GL_NV_half_float, GL_EXTENSION_COUNT }},
-    { "glMultiTexCoord2hvNV", glMultiTexCoord2hvNV, 0, 0, { GL_NV_half_float, GL_EXTENSION_COUNT }},
-    { "glMultiTexCoord2i", glMultiTexCoord2i, 1, 3, { GL_EXTENSION_COUNT }},
-    { "glMultiTexCoord2iARB", glMultiTexCoord2iARB, 0, 0, { GL_ARB_multitexture, GL_EXTENSION_COUNT }},
-    { "glMultiTexCoord2iSGIS", glMultiTexCoord2iSGIS, 0, 0, { GL_SGIS_multitexture, GL_EXTENSION_COUNT }},
-    { "glMultiTexCoord2iv", glMultiTexCoord2iv, 1, 3, { GL_EXTENSION_COUNT }},
-    { "glMultiTexCoord2ivARB", glMultiTexCoord2ivARB, 0, 0, { GL_ARB_multitexture, GL_EXTENSION_COUNT }},
-    { "glMultiTexCoord2ivSGIS", glMultiTexCoord2ivSGIS, 0, 0, { GL_SGIS_multitexture, GL_EXTENSION_COUNT }},
-    { "glMultiTexCoord2s", glMultiTexCoord2s, 1, 3, { GL_EXTENSION_COUNT }},
-    { "glMultiTexCoord2sARB", glMultiTexCoord2sARB, 0, 0, { GL_ARB_multitexture, GL_EXTENSION_COUNT }},
-    { "glMultiTexCoord2sSGIS", glMultiTexCoord2sSGIS, 0, 0, { GL_SGIS_multitexture, GL_EXTENSION_COUNT }},
-    { "glMultiTexCoord2sv", glMultiTexCoord2sv, 1, 3, { GL_EXTENSION_COUNT }},
-    { "glMultiTexCoord2svARB", glMultiTexCoord2svARB, 0, 0, { GL_ARB_multitexture, GL_EXTENSION_COUNT }},
-    { "glMultiTexCoord2svSGIS", glMultiTexCoord2svSGIS, 0, 0, { GL_SGIS_multitexture, GL_EXTENSION_COUNT }},
-    { "glMultiTexCoord2xOES", glMultiTexCoord2xOES, 0, 0, { GL_OES_fixed_point, GL_EXTENSION_COUNT }},
-    { "glMultiTexCoord2xvOES", glMultiTexCoord2xvOES, 0, 0, { GL_OES_fixed_point, GL_EXTENSION_COUNT }},
-    { "glMultiTexCoord3bOES", glMultiTexCoord3bOES, 0, 0, { GL_OES_byte_coordinates, GL_EXTENSION_COUNT }},
-    { "glMultiTexCoord3bvOES", glMultiTexCoord3bvOES, 0, 0, { GL_OES_byte_coordinates, GL_EXTENSION_COUNT }},
-    { "glMultiTexCoord3d", glMultiTexCoord3d, 1, 3, { GL_EXTENSION_COUNT }},
-    { "glMultiTexCoord3dARB", glMultiTexCoord3dARB, 0, 0, { GL_ARB_multitexture, GL_EXTENSION_COUNT }},
-    { "glMultiTexCoord3dSGIS", glMultiTexCoord3dSGIS, 0, 0, { GL_SGIS_multitexture, GL_EXTENSION_COUNT }},
-    { "glMultiTexCoord3dv", glMultiTexCoord3dv, 1, 3, { GL_EXTENSION_COUNT }},
-    { "glMultiTexCoord3dvARB", glMultiTexCoord3dvARB, 0, 0, { GL_ARB_multitexture, GL_EXTENSION_COUNT }},
-    { "glMultiTexCoord3dvSGIS", glMultiTexCoord3dvSGIS, 0, 0, { GL_SGIS_multitexture, GL_EXTENSION_COUNT }},
-    { "glMultiTexCoord3f", glMultiTexCoord3f, 1, 3, { GL_EXTENSION_COUNT }},
-    { "glMultiTexCoord3fARB", glMultiTexCoord3fARB, 0, 0, { GL_ARB_multitexture, GL_EXTENSION_COUNT }},
-    { "glMultiTexCoord3fSGIS", glMultiTexCoord3fSGIS, 0, 0, { GL_SGIS_multitexture, GL_EXTENSION_COUNT }},
-    { "glMultiTexCoord3fv", glMultiTexCoord3fv, 1, 3, { GL_EXTENSION_COUNT }},
-    { "glMultiTexCoord3fvARB", glMultiTexCoord3fvARB, 0, 0, { GL_ARB_multitexture, GL_EXTENSION_COUNT }},
-    { "glMultiTexCoord3fvSGIS", glMultiTexCoord3fvSGIS, 0, 0, { GL_SGIS_multitexture, GL_EXTENSION_COUNT }},
-    { "glMultiTexCoord3hNV", glMultiTexCoord3hNV, 0, 0, { GL_NV_half_float, GL_EXTENSION_COUNT }},
-    { "glMultiTexCoord3hvNV", glMultiTexCoord3hvNV, 0, 0, { GL_NV_half_float, GL_EXTENSION_COUNT }},
-    { "glMultiTexCoord3i", glMultiTexCoord3i, 1, 3, { GL_EXTENSION_COUNT }},
-    { "glMultiTexCoord3iARB", glMultiTexCoord3iARB, 0, 0, { GL_ARB_multitexture, GL_EXTENSION_COUNT }},
-    { "glMultiTexCoord3iSGIS", glMultiTexCoord3iSGIS, 0, 0, { GL_SGIS_multitexture, GL_EXTENSION_COUNT }},
-    { "glMultiTexCoord3iv", glMultiTexCoord3iv, 1, 3, { GL_EXTENSION_COUNT }},
-    { "glMultiTexCoord3ivARB", glMultiTexCoord3ivARB, 0, 0, { GL_ARB_multitexture, GL_EXTENSION_COUNT }},
-    { "glMultiTexCoord3ivSGIS", glMultiTexCoord3ivSGIS, 0, 0, { GL_SGIS_multitexture, GL_EXTENSION_COUNT }},
-    { "glMultiTexCoord3s", glMultiTexCoord3s, 1, 3, { GL_EXTENSION_COUNT }},
-    { "glMultiTexCoord3sARB", glMultiTexCoord3sARB, 0, 0, { GL_ARB_multitexture, GL_EXTENSION_COUNT }},
-    { "glMultiTexCoord3sSGIS", glMultiTexCoord3sSGIS, 0, 0, { GL_SGIS_multitexture, GL_EXTENSION_COUNT }},
-    { "glMultiTexCoord3sv", glMultiTexCoord3sv, 1, 3, { GL_EXTENSION_COUNT }},
-    { "glMultiTexCoord3svARB", glMultiTexCoord3svARB, 0, 0, { GL_ARB_multitexture, GL_EXTENSION_COUNT }},
-    { "glMultiTexCoord3svSGIS", glMultiTexCoord3svSGIS, 0, 0, { GL_SGIS_multitexture, GL_EXTENSION_COUNT }},
-    { "glMultiTexCoord3xOES", glMultiTexCoord3xOES, 0, 0, { GL_OES_fixed_point, GL_EXTENSION_COUNT }},
-    { "glMultiTexCoord3xvOES", glMultiTexCoord3xvOES, 0, 0, { GL_OES_fixed_point, GL_EXTENSION_COUNT }},
-    { "glMultiTexCoord4bOES", glMultiTexCoord4bOES, 0, 0, { GL_OES_byte_coordinates, GL_EXTENSION_COUNT }},
-    { "glMultiTexCoord4bvOES", glMultiTexCoord4bvOES, 0, 0, { GL_OES_byte_coordinates, GL_EXTENSION_COUNT }},
-    { "glMultiTexCoord4d", glMultiTexCoord4d, 1, 3, { GL_EXTENSION_COUNT }},
-    { "glMultiTexCoord4dARB", glMultiTexCoord4dARB, 0, 0, { GL_ARB_multitexture, GL_EXTENSION_COUNT }},
-    { "glMultiTexCoord4dSGIS", glMultiTexCoord4dSGIS, 0, 0, { GL_SGIS_multitexture, GL_EXTENSION_COUNT }},
-    { "glMultiTexCoord4dv", glMultiTexCoord4dv, 1, 3, { GL_EXTENSION_COUNT }},
-    { "glMultiTexCoord4dvARB", glMultiTexCoord4dvARB, 0, 0, { GL_ARB_multitexture, GL_EXTENSION_COUNT }},
-    { "glMultiTexCoord4dvSGIS", glMultiTexCoord4dvSGIS, 0, 0, { GL_SGIS_multitexture, GL_EXTENSION_COUNT }},
-    { "glMultiTexCoord4f", glMultiTexCoord4f, 1, 3, { GL_EXTENSION_COUNT }},
-    { "glMultiTexCoord4fARB", glMultiTexCoord4fARB, 0, 0, { GL_ARB_multitexture, GL_EXTENSION_COUNT }},
-    { "glMultiTexCoord4fSGIS", glMultiTexCoord4fSGIS, 0, 0, { GL_SGIS_multitexture, GL_EXTENSION_COUNT }},
-    { "glMultiTexCoord4fv", glMultiTexCoord4fv, 1, 3, { GL_EXTENSION_COUNT }},
-    { "glMultiTexCoord4fvARB", glMultiTexCoord4fvARB, 0, 0, { GL_ARB_multitexture, GL_EXTENSION_COUNT }},
-    { "glMultiTexCoord4fvSGIS", glMultiTexCoord4fvSGIS, 0, 0, { GL_SGIS_multitexture, GL_EXTENSION_COUNT }},
-    { "glMultiTexCoord4hNV", glMultiTexCoord4hNV, 0, 0, { GL_NV_half_float, GL_EXTENSION_COUNT }},
-    { "glMultiTexCoord4hvNV", glMultiTexCoord4hvNV, 0, 0, { GL_NV_half_float, GL_EXTENSION_COUNT }},
-    { "glMultiTexCoord4i", glMultiTexCoord4i, 1, 3, { GL_EXTENSION_COUNT }},
-    { "glMultiTexCoord4iARB", glMultiTexCoord4iARB, 0, 0, { GL_ARB_multitexture, GL_EXTENSION_COUNT }},
-    { "glMultiTexCoord4iSGIS", glMultiTexCoord4iSGIS, 0, 0, { GL_SGIS_multitexture, GL_EXTENSION_COUNT }},
-    { "glMultiTexCoord4iv", glMultiTexCoord4iv, 1, 3, { GL_EXTENSION_COUNT }},
-    { "glMultiTexCoord4ivARB", glMultiTexCoord4ivARB, 0, 0, { GL_ARB_multitexture, GL_EXTENSION_COUNT }},
-    { "glMultiTexCoord4ivSGIS", glMultiTexCoord4ivSGIS, 0, 0, { GL_SGIS_multitexture, GL_EXTENSION_COUNT }},
-    { "glMultiTexCoord4s", glMultiTexCoord4s, 1, 3, { GL_EXTENSION_COUNT }},
-    { "glMultiTexCoord4sARB", glMultiTexCoord4sARB, 0, 0, { GL_ARB_multitexture, GL_EXTENSION_COUNT }},
-    { "glMultiTexCoord4sSGIS", glMultiTexCoord4sSGIS, 0, 0, { GL_SGIS_multitexture, GL_EXTENSION_COUNT }},
-    { "glMultiTexCoord4sv", glMultiTexCoord4sv, 1, 3, { GL_EXTENSION_COUNT }},
-    { "glMultiTexCoord4svARB", glMultiTexCoord4svARB, 0, 0, { GL_ARB_multitexture, GL_EXTENSION_COUNT }},
-    { "glMultiTexCoord4svSGIS", glMultiTexCoord4svSGIS, 0, 0, { GL_SGIS_multitexture, GL_EXTENSION_COUNT }},
-    { "glMultiTexCoord4x", glMultiTexCoord4x, 0, 0, { GL_NV_ES1_1_compatibility, GL_EXTENSION_COUNT }},
-    { "glMultiTexCoord4xOES", glMultiTexCoord4xOES, 0, 0, { GL_OES_fixed_point, GL_EXTENSION_COUNT }},
-    { "glMultiTexCoord4xvOES", glMultiTexCoord4xvOES, 0, 0, { GL_OES_fixed_point, GL_EXTENSION_COUNT }},
-    { "glMultiTexCoordP1ui", glMultiTexCoordP1ui, 3, 3, { GL_ARB_vertex_type_2_10_10_10_rev, GL_EXTENSION_COUNT }},
-    { "glMultiTexCoordP1uiv", glMultiTexCoordP1uiv, 3, 3, { GL_ARB_vertex_type_2_10_10_10_rev, GL_EXTENSION_COUNT }},
-    { "glMultiTexCoordP2ui", glMultiTexCoordP2ui, 3, 3, { GL_ARB_vertex_type_2_10_10_10_rev, GL_EXTENSION_COUNT }},
-    { "glMultiTexCoordP2uiv", glMultiTexCoordP2uiv, 3, 3, { GL_ARB_vertex_type_2_10_10_10_rev, GL_EXTENSION_COUNT }},
-    { "glMultiTexCoordP3ui", glMultiTexCoordP3ui, 3, 3, { GL_ARB_vertex_type_2_10_10_10_rev, GL_EXTENSION_COUNT }},
-    { "glMultiTexCoordP3uiv", glMultiTexCoordP3uiv, 3, 3, { GL_ARB_vertex_type_2_10_10_10_rev, GL_EXTENSION_COUNT }},
-    { "glMultiTexCoordP4ui", glMultiTexCoordP4ui, 3, 3, { GL_ARB_vertex_type_2_10_10_10_rev, GL_EXTENSION_COUNT }},
-    { "glMultiTexCoordP4uiv", glMultiTexCoordP4uiv, 3, 3, { GL_ARB_vertex_type_2_10_10_10_rev, GL_EXTENSION_COUNT }},
-    { "glMultiTexCoordPointerEXT", glMultiTexCoordPointerEXT, 0, 0, { GL_EXT_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glMultiTexCoordPointerSGIS", glMultiTexCoordPointerSGIS, 0, 0, { GL_SGIS_multitexture, GL_EXTENSION_COUNT }},
-    { "glMultiTexEnvfEXT", glMultiTexEnvfEXT, 0, 0, { GL_EXT_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glMultiTexEnvfvEXT", glMultiTexEnvfvEXT, 0, 0, { GL_EXT_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glMultiTexEnviEXT", glMultiTexEnviEXT, 0, 0, { GL_EXT_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glMultiTexEnvivEXT", glMultiTexEnvivEXT, 0, 0, { GL_EXT_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glMultiTexGendEXT", glMultiTexGendEXT, 0, 0, { GL_EXT_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glMultiTexGendvEXT", glMultiTexGendvEXT, 0, 0, { GL_EXT_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glMultiTexGenfEXT", glMultiTexGenfEXT, 0, 0, { GL_EXT_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glMultiTexGenfvEXT", glMultiTexGenfvEXT, 0, 0, { GL_EXT_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glMultiTexGeniEXT", glMultiTexGeniEXT, 0, 0, { GL_EXT_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glMultiTexGenivEXT", glMultiTexGenivEXT, 0, 0, { GL_EXT_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glMultiTexImage1DEXT", glMultiTexImage1DEXT, 0, 0, { GL_EXT_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glMultiTexImage2DEXT", glMultiTexImage2DEXT, 0, 0, { GL_EXT_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glMultiTexImage3DEXT", glMultiTexImage3DEXT, 0, 0, { GL_EXT_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glMultiTexParameterIivEXT", glMultiTexParameterIivEXT, 0, 0, { GL_EXT_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glMultiTexParameterIuivEXT", glMultiTexParameterIuivEXT, 0, 0, { GL_EXT_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glMultiTexParameterfEXT", glMultiTexParameterfEXT, 0, 0, { GL_EXT_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glMultiTexParameterfvEXT", glMultiTexParameterfvEXT, 0, 0, { GL_EXT_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glMultiTexParameteriEXT", glMultiTexParameteriEXT, 0, 0, { GL_EXT_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glMultiTexParameterivEXT", glMultiTexParameterivEXT, 0, 0, { GL_EXT_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glMultiTexRenderbufferEXT", glMultiTexRenderbufferEXT, 0, 0, { GL_EXT_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glMultiTexSubImage1DEXT", glMultiTexSubImage1DEXT, 0, 0, { GL_EXT_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glMultiTexSubImage2DEXT", glMultiTexSubImage2DEXT, 0, 0, { GL_EXT_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glMultiTexSubImage3DEXT", glMultiTexSubImage3DEXT, 0, 0, { GL_EXT_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glMulticastBarrierNV", glMulticastBarrierNV, 0, 0, { GL_NV_gpu_multicast, GL_EXTENSION_COUNT }},
-    { "glMulticastBlitFramebufferNV", glMulticastBlitFramebufferNV, 0, 0, { GL_NV_gpu_multicast, GL_EXTENSION_COUNT }},
-    { "glMulticastBufferSubDataNV", glMulticastBufferSubDataNV, 0, 0, { GL_NV_gpu_multicast, GL_EXTENSION_COUNT }},
-    { "glMulticastCopyBufferSubDataNV", glMulticastCopyBufferSubDataNV, 0, 0, { GL_NV_gpu_multicast, GL_EXTENSION_COUNT }},
-    { "glMulticastCopyImageSubDataNV", glMulticastCopyImageSubDataNV, 0, 0, { GL_NV_gpu_multicast, GL_EXTENSION_COUNT }},
-    { "glMulticastFramebufferSampleLocationsfvNV", glMulticastFramebufferSampleLocationsfvNV, 0, 0, { GL_NV_gpu_multicast, GL_EXTENSION_COUNT }},
-    { "glMulticastGetQueryObjecti64vNV", glMulticastGetQueryObjecti64vNV, 0, 0, { GL_NV_gpu_multicast, GL_EXTENSION_COUNT }},
-    { "glMulticastGetQueryObjectivNV", glMulticastGetQueryObjectivNV, 0, 0, { GL_NV_gpu_multicast, GL_EXTENSION_COUNT }},
-    { "glMulticastGetQueryObjectui64vNV", glMulticastGetQueryObjectui64vNV, 0, 0, { GL_NV_gpu_multicast, GL_EXTENSION_COUNT }},
-    { "glMulticastGetQueryObjectuivNV", glMulticastGetQueryObjectuivNV, 0, 0, { GL_NV_gpu_multicast, GL_EXTENSION_COUNT }},
-    { "glMulticastScissorArrayvNVX", glMulticastScissorArrayvNVX, 0, 0, { GL_NVX_gpu_multicast2, GL_EXTENSION_COUNT }},
-    { "glMulticastViewportArrayvNVX", glMulticastViewportArrayvNVX, 0, 0, { GL_NVX_gpu_multicast2, GL_EXTENSION_COUNT }},
-    { "glMulticastViewportPositionWScaleNVX", glMulticastViewportPositionWScaleNVX, 0, 0, { GL_NVX_gpu_multicast2, GL_EXTENSION_COUNT }},
-    { "glMulticastWaitSyncNV", glMulticastWaitSyncNV, 0, 0, { GL_NV_gpu_multicast, GL_EXTENSION_COUNT }},
-    { "glNamedBufferAttachMemoryNV", glNamedBufferAttachMemoryNV, 0, 0, { GL_NV_memory_attachment, GL_EXTENSION_COUNT }},
-    { "glNamedBufferData", glNamedBufferData, 4, 5, { GL_ARB_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glNamedBufferDataEXT", glNamedBufferDataEXT, 0, 0, { GL_EXT_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glNamedBufferPageCommitmentARB", glNamedBufferPageCommitmentARB, 0, 0, { GL_ARB_sparse_buffer, GL_EXTENSION_COUNT }},
-    { "glNamedBufferPageCommitmentEXT", glNamedBufferPageCommitmentEXT, 0, 0, { GL_ARB_sparse_buffer, GL_EXTENSION_COUNT }},
-    { "glNamedBufferPageCommitmentMemNV", glNamedBufferPageCommitmentMemNV, 0, 0, { GL_NV_memory_object_sparse, GL_EXTENSION_COUNT }},
-    { "glNamedBufferStorage", glNamedBufferStorage, 4, 5, { GL_ARB_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glNamedBufferStorageEXT", glNamedBufferStorageEXT, 0, 0, { GL_EXT_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glNamedBufferStorageExternalEXT", glNamedBufferStorageExternalEXT, 0, 0, { GL_EXT_external_buffer, GL_EXTENSION_COUNT }},
-    { "glNamedBufferStorageMemEXT", glNamedBufferStorageMemEXT, 0, 0, { GL_EXT_memory_object, GL_EXTENSION_COUNT }},
-    { "glNamedBufferSubData", glNamedBufferSubData, 4, 5, { GL_ARB_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glNamedBufferSubDataEXT", glNamedBufferSubDataEXT, 0, 0, { GL_EXT_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glNamedCopyBufferSubDataEXT", glNamedCopyBufferSubDataEXT, 0, 0, { GL_EXT_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glNamedFramebufferDrawBuffer", glNamedFramebufferDrawBuffer, 4, 5, { GL_ARB_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glNamedFramebufferDrawBuffers", glNamedFramebufferDrawBuffers, 4, 5, { GL_ARB_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glNamedFramebufferParameteri", glNamedFramebufferParameteri, 4, 5, { GL_ARB_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glNamedFramebufferParameteriEXT", glNamedFramebufferParameteriEXT, 0, 0, { GL_EXT_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glNamedFramebufferReadBuffer", glNamedFramebufferReadBuffer, 4, 5, { GL_ARB_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glNamedFramebufferRenderbuffer", glNamedFramebufferRenderbuffer, 4, 5, { GL_ARB_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glNamedFramebufferRenderbufferEXT", glNamedFramebufferRenderbufferEXT, 0, 0, { GL_EXT_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glNamedFramebufferSampleLocationsfvARB", glNamedFramebufferSampleLocationsfvARB, 0, 0, { GL_ARB_sample_locations, GL_EXTENSION_COUNT }},
-    { "glNamedFramebufferSampleLocationsfvNV", glNamedFramebufferSampleLocationsfvNV, 0, 0, { GL_NV_sample_locations, GL_EXTENSION_COUNT }},
-    { "glNamedFramebufferSamplePositionsfvAMD", glNamedFramebufferSamplePositionsfvAMD, 0, 0, { GL_AMD_framebuffer_sample_positions, GL_EXTENSION_COUNT }},
-    { "glNamedFramebufferTexture", glNamedFramebufferTexture, 4, 5, { GL_ARB_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glNamedFramebufferTexture1DEXT", glNamedFramebufferTexture1DEXT, 0, 0, { GL_EXT_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glNamedFramebufferTexture2DEXT", glNamedFramebufferTexture2DEXT, 0, 0, { GL_EXT_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glNamedFramebufferTexture3DEXT", glNamedFramebufferTexture3DEXT, 0, 0, { GL_EXT_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glNamedFramebufferTextureEXT", glNamedFramebufferTextureEXT, 0, 0, { GL_EXT_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glNamedFramebufferTextureFaceEXT", glNamedFramebufferTextureFaceEXT, 0, 0, { GL_EXT_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glNamedFramebufferTextureLayer", glNamedFramebufferTextureLayer, 4, 5, { GL_ARB_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glNamedFramebufferTextureLayerEXT", glNamedFramebufferTextureLayerEXT, 0, 0, { GL_EXT_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glNamedFramebufferTextureMultiviewOVR", glNamedFramebufferTextureMultiviewOVR, 0, 0, { GL_OVR_multiview, GL_EXTENSION_COUNT }},
-    { "glNamedProgramLocalParameter4dEXT", glNamedProgramLocalParameter4dEXT, 0, 0, { GL_EXT_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glNamedProgramLocalParameter4dvEXT", glNamedProgramLocalParameter4dvEXT, 0, 0, { GL_EXT_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glNamedProgramLocalParameter4fEXT", glNamedProgramLocalParameter4fEXT, 0, 0, { GL_EXT_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glNamedProgramLocalParameter4fvEXT", glNamedProgramLocalParameter4fvEXT, 0, 0, { GL_EXT_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glNamedProgramLocalParameterI4iEXT", glNamedProgramLocalParameterI4iEXT, 0, 0, { GL_EXT_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glNamedProgramLocalParameterI4ivEXT", glNamedProgramLocalParameterI4ivEXT, 0, 0, { GL_EXT_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glNamedProgramLocalParameterI4uiEXT", glNamedProgramLocalParameterI4uiEXT, 0, 0, { GL_EXT_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glNamedProgramLocalParameterI4uivEXT", glNamedProgramLocalParameterI4uivEXT, 0, 0, { GL_EXT_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glNamedProgramLocalParameters4fvEXT", glNamedProgramLocalParameters4fvEXT, 0, 0, { GL_EXT_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glNamedProgramLocalParametersI4ivEXT", glNamedProgramLocalParametersI4ivEXT, 0, 0, { GL_EXT_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glNamedProgramLocalParametersI4uivEXT", glNamedProgramLocalParametersI4uivEXT, 0, 0, { GL_EXT_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glNamedProgramStringEXT", glNamedProgramStringEXT, 0, 0, { GL_EXT_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glNamedRenderbufferStorage", glNamedRenderbufferStorage, 4, 5, { GL_ARB_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glNamedRenderbufferStorageEXT", glNamedRenderbufferStorageEXT, 0, 0, { GL_EXT_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glNamedRenderbufferStorageMultisample", glNamedRenderbufferStorageMultisample, 4, 5, { GL_ARB_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glNamedRenderbufferStorageMultisampleAdvancedAMD", glNamedRenderbufferStorageMultisampleAdvancedAMD, 0, 0, { GL_AMD_framebuffer_multisample_advanced, GL_EXTENSION_COUNT }},
-    { "glNamedRenderbufferStorageMultisampleCoverageEXT", glNamedRenderbufferStorageMultisampleCoverageEXT, 0, 0, { GL_EXT_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glNamedRenderbufferStorageMultisampleEXT", glNamedRenderbufferStorageMultisampleEXT, 0, 0, { GL_EXT_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glNamedStringARB", glNamedStringARB, 0, 0, { GL_ARB_shading_language_include, GL_EXTENSION_COUNT }},
-    { "glNewBufferRegion", glNewBufferRegion, 0, 0, { GL_KTX_buffer_region, GL_EXTENSION_COUNT }},
-    { "glNewObjectBufferATI", glNewObjectBufferATI, 0, 0, { GL_ATI_vertex_array_object, GL_EXTENSION_COUNT }},
-    { "glNormal3fVertex3fSUN", glNormal3fVertex3fSUN, 0, 0, { GL_SUN_vertex, GL_EXTENSION_COUNT }},
-    { "glNormal3fVertex3fvSUN", glNormal3fVertex3fvSUN, 0, 0, { GL_SUN_vertex, GL_EXTENSION_COUNT }},
-    { "glNormal3hNV", glNormal3hNV, 0, 0, { GL_NV_half_float, GL_EXTENSION_COUNT }},
-    { "glNormal3hvNV", glNormal3hvNV, 0, 0, { GL_NV_half_float, GL_EXTENSION_COUNT }},
-    { "glNormal3x", glNormal3x, 0, 0, { GL_NV_ES1_1_compatibility, GL_EXTENSION_COUNT }},
-    { "glNormal3xOES", glNormal3xOES, 0, 0, { GL_OES_fixed_point, GL_EXTENSION_COUNT }},
-    { "glNormal3xvOES", glNormal3xvOES, 0, 0, { GL_OES_fixed_point, GL_EXTENSION_COUNT }},
-    { "glNormalFormatNV", glNormalFormatNV, 0, 0, { GL_NV_vertex_buffer_unified_memory, GL_EXTENSION_COUNT }},
-    { "glNormalP3ui", glNormalP3ui, 3, 3, { GL_ARB_vertex_type_2_10_10_10_rev, GL_EXTENSION_COUNT }},
-    { "glNormalP3uiv", glNormalP3uiv, 3, 3, { GL_ARB_vertex_type_2_10_10_10_rev, GL_EXTENSION_COUNT }},
-    { "glNormalPointerEXT", glNormalPointerEXT, 0, 0, { GL_EXT_vertex_array, GL_EXTENSION_COUNT }},
-    { "glNormalPointerListIBM", glNormalPointerListIBM, 0, 0, { GL_IBM_vertex_array_lists, GL_EXTENSION_COUNT }},
-    { "glNormalPointervINTEL", glNormalPointervINTEL, 0, 0, { GL_INTEL_parallel_arrays, GL_EXTENSION_COUNT }},
-    { "glNormalStream3bATI", glNormalStream3bATI, 0, 0, { GL_ATI_vertex_streams, GL_EXTENSION_COUNT }},
-    { "glNormalStream3bvATI", glNormalStream3bvATI, 0, 0, { GL_ATI_vertex_streams, GL_EXTENSION_COUNT }},
-    { "glNormalStream3dATI", glNormalStream3dATI, 0, 0, { GL_ATI_vertex_streams, GL_EXTENSION_COUNT }},
-    { "glNormalStream3dvATI", glNormalStream3dvATI, 0, 0, { GL_ATI_vertex_streams, GL_EXTENSION_COUNT }},
-    { "glNormalStream3fATI", glNormalStream3fATI, 0, 0, { GL_ATI_vertex_streams, GL_EXTENSION_COUNT }},
-    { "glNormalStream3fvATI", glNormalStream3fvATI, 0, 0, { GL_ATI_vertex_streams, GL_EXTENSION_COUNT }},
-    { "glNormalStream3iATI", glNormalStream3iATI, 0, 0, { GL_ATI_vertex_streams, GL_EXTENSION_COUNT }},
-    { "glNormalStream3ivATI", glNormalStream3ivATI, 0, 0, { GL_ATI_vertex_streams, GL_EXTENSION_COUNT }},
-    { "glNormalStream3sATI", glNormalStream3sATI, 0, 0, { GL_ATI_vertex_streams, GL_EXTENSION_COUNT }},
-    { "glNormalStream3svATI", glNormalStream3svATI, 0, 0, { GL_ATI_vertex_streams, GL_EXTENSION_COUNT }},
-    { "glObjectLabel", glObjectLabel, 4, 3, { GL_KHR_debug, GL_EXTENSION_COUNT }},
-    { "glObjectPtrLabel", glObjectPtrLabel, 4, 3, { GL_KHR_debug, GL_EXTENSION_COUNT }},
-    { "glObjectPurgeableAPPLE", glObjectPurgeableAPPLE, 0, 0, { GL_APPLE_object_purgeable, GL_EXTENSION_COUNT }},
-    { "glObjectUnpurgeableAPPLE", glObjectUnpurgeableAPPLE, 0, 0, { GL_APPLE_object_purgeable, GL_EXTENSION_COUNT }},
-    { "glOrthof", glOrthof, 0, 0, { GL_NV_ES1_1_compatibility, GL_EXTENSION_COUNT }},
-    { "glOrthofOES", glOrthofOES, 0, 0, { GL_OES_single_precision, GL_EXTENSION_COUNT }},
-    { "glOrthox", glOrthox, 0, 0, { GL_NV_ES1_1_compatibility, GL_EXTENSION_COUNT }},
-    { "glOrthoxOES", glOrthoxOES, 0, 0, { GL_OES_fixed_point, GL_EXTENSION_COUNT }},
-    { "glPNTrianglesfATI", glPNTrianglesfATI, 0, 0, { GL_ATI_pn_triangles, GL_EXTENSION_COUNT }},
-    { "glPNTrianglesiATI", glPNTrianglesiATI, 0, 0, { GL_ATI_pn_triangles, GL_EXTENSION_COUNT }},
-    { "glPassTexCoordATI", glPassTexCoordATI, 0, 0, { GL_ATI_fragment_shader, GL_EXTENSION_COUNT }},
-    { "glPassThroughxOES", glPassThroughxOES, 0, 0, { GL_OES_fixed_point, GL_EXTENSION_COUNT }},
-    { "glPatchParameterfv", glPatchParameterfv, 4, 0, { GL_ARB_tessellation_shader, GL_EXTENSION_COUNT }},
-    { "glPatchParameteri", glPatchParameteri, 4, 0, { GL_ARB_tessellation_shader, GL_EXTENSION_COUNT }},
-    { "glPathColorGenNV", glPathColorGenNV, 0, 0, { GL_NV_path_rendering, GL_EXTENSION_COUNT }},
-    { "glPathCommandsNV", glPathCommandsNV, 0, 0, { GL_NV_path_rendering, GL_EXTENSION_COUNT }},
-    { "glPathCoordsNV", glPathCoordsNV, 0, 0, { GL_NV_path_rendering, GL_EXTENSION_COUNT }},
-    { "glPathCoverDepthFuncNV", glPathCoverDepthFuncNV, 0, 0, { GL_NV_path_rendering, GL_EXTENSION_COUNT }},
-    { "glPathDashArrayNV", glPathDashArrayNV, 0, 0, { GL_NV_path_rendering, GL_EXTENSION_COUNT }},
-    { "glPathFogGenNV", glPathFogGenNV, 0, 0, { GL_NV_path_rendering, GL_EXTENSION_COUNT }},
-    { "glPathGlyphIndexArrayNV", glPathGlyphIndexArrayNV, 0, 0, { GL_NV_path_rendering, GL_EXTENSION_COUNT }},
-    { "glPathGlyphIndexRangeNV", glPathGlyphIndexRangeNV, 0, 0, { GL_NV_path_rendering, GL_EXTENSION_COUNT }},
-    { "glPathGlyphRangeNV", glPathGlyphRangeNV, 0, 0, { GL_NV_path_rendering, GL_EXTENSION_COUNT }},
-    { "glPathGlyphsNV", glPathGlyphsNV, 0, 0, { GL_NV_path_rendering, GL_EXTENSION_COUNT }},
-    { "glPathMemoryGlyphIndexArrayNV", glPathMemoryGlyphIndexArrayNV, 0, 0, { GL_NV_path_rendering, GL_EXTENSION_COUNT }},
-    { "glPathParameterfNV", glPathParameterfNV, 0, 0, { GL_NV_path_rendering, GL_EXTENSION_COUNT }},
-    { "glPathParameterfvNV", glPathParameterfvNV, 0, 0, { GL_NV_path_rendering, GL_EXTENSION_COUNT }},
-    { "glPathParameteriNV", glPathParameteriNV, 0, 0, { GL_NV_path_rendering, GL_EXTENSION_COUNT }},
-    { "glPathParameterivNV", glPathParameterivNV, 0, 0, { GL_NV_path_rendering, GL_EXTENSION_COUNT }},
-    { "glPathStencilDepthOffsetNV", glPathStencilDepthOffsetNV, 0, 0, { GL_NV_path_rendering, GL_EXTENSION_COUNT }},
-    { "glPathStencilFuncNV", glPathStencilFuncNV, 0, 0, { GL_NV_path_rendering, GL_EXTENSION_COUNT }},
-    { "glPathStringNV", glPathStringNV, 0, 0, { GL_NV_path_rendering, GL_EXTENSION_COUNT }},
-    { "glPathSubCommandsNV", glPathSubCommandsNV, 0, 0, { GL_NV_path_rendering, GL_EXTENSION_COUNT }},
-    { "glPathSubCoordsNV", glPathSubCoordsNV, 0, 0, { GL_NV_path_rendering, GL_EXTENSION_COUNT }},
-    { "glPathTexGenNV", glPathTexGenNV, 0, 0, { GL_NV_path_rendering, GL_EXTENSION_COUNT }},
-    { "glPauseTransformFeedback", glPauseTransformFeedback, 4, 0, { GL_ARB_transform_feedback2, GL_EXTENSION_COUNT }},
-    { "glPauseTransformFeedbackNV", glPauseTransformFeedbackNV, 0, 0, { GL_NV_transform_feedback2, GL_EXTENSION_COUNT }},
-    { "glPixelDataRangeNV", glPixelDataRangeNV, 0, 0, { GL_NV_pixel_data_range, GL_EXTENSION_COUNT }},
-    { "glPixelMapx", glPixelMapx, 0, 0, { GL_OES_fixed_point, GL_EXTENSION_COUNT }},
-    { "glPixelStorex", glPixelStorex, 0, 0, { GL_OES_fixed_point, GL_EXTENSION_COUNT }},
-    { "glPixelTexGenParameterfSGIS", glPixelTexGenParameterfSGIS, 0, 0, { GL_SGIS_pixel_texture, GL_EXTENSION_COUNT }},
-    { "glPixelTexGenParameterfvSGIS", glPixelTexGenParameterfvSGIS, 0, 0, { GL_SGIS_pixel_texture, GL_EXTENSION_COUNT }},
-    { "glPixelTexGenParameteriSGIS", glPixelTexGenParameteriSGIS, 0, 0, { GL_SGIS_pixel_texture, GL_EXTENSION_COUNT }},
-    { "glPixelTexGenParameterivSGIS", glPixelTexGenParameterivSGIS, 0, 0, { GL_SGIS_pixel_texture, GL_EXTENSION_COUNT }},
-    { "glPixelTexGenSGIX", glPixelTexGenSGIX, 0, 0, { GL_SGIX_pixel_texture, GL_EXTENSION_COUNT }},
-    { "glPixelTransferxOES", glPixelTransferxOES, 0, 0, { GL_OES_fixed_point, GL_EXTENSION_COUNT }},
-    { "glPixelTransformParameterfEXT", glPixelTransformParameterfEXT, 0, 0, { GL_EXT_pixel_transform, GL_EXTENSION_COUNT }},
-    { "glPixelTransformParameterfvEXT", glPixelTransformParameterfvEXT, 0, 0, { GL_EXT_pixel_transform, GL_EXTENSION_COUNT }},
-    { "glPixelTransformParameteriEXT", glPixelTransformParameteriEXT, 0, 0, { GL_EXT_pixel_transform, GL_EXTENSION_COUNT }},
-    { "glPixelTransformParameterivEXT", glPixelTransformParameterivEXT, 0, 0, { GL_EXT_pixel_transform, GL_EXTENSION_COUNT }},
-    { "glPixelZoomxOES", glPixelZoomxOES, 0, 0, { GL_OES_fixed_point, GL_EXTENSION_COUNT }},
-    { "glPointAlongPathNV", glPointAlongPathNV, 0, 0, { GL_NV_path_rendering, GL_EXTENSION_COUNT }},
-    { "glPointParameterf", glPointParameterf, 1, 4, { GL_EXTENSION_COUNT }},
-    { "glPointParameterfARB", glPointParameterfARB, 0, 0, { GL_ARB_point_parameters, GL_EXTENSION_COUNT }},
-    { "glPointParameterfEXT", glPointParameterfEXT, 0, 0, { GL_EXT_point_parameters, GL_EXTENSION_COUNT }},
-    { "glPointParameterfSGIS", glPointParameterfSGIS, 0, 0, { GL_SGIS_point_parameters, GL_EXTENSION_COUNT }},
-    { "glPointParameterfv", glPointParameterfv, 1, 4, { GL_EXTENSION_COUNT }},
-    { "glPointParameterfvARB", glPointParameterfvARB, 0, 0, { GL_ARB_point_parameters, GL_EXTENSION_COUNT }},
-    { "glPointParameterfvEXT", glPointParameterfvEXT, 0, 0, { GL_EXT_point_parameters, GL_EXTENSION_COUNT }},
-    { "glPointParameterfvSGIS", glPointParameterfvSGIS, 0, 0, { GL_SGIS_point_parameters, GL_EXTENSION_COUNT }},
-    { "glPointParameteri", glPointParameteri, 1, 4, { GL_EXTENSION_COUNT }},
-    { "glPointParameteriNV", glPointParameteriNV, 0, 0, { GL_NV_point_sprite, GL_EXTENSION_COUNT }},
-    { "glPointParameteriv", glPointParameteriv, 1, 4, { GL_EXTENSION_COUNT }},
-    { "glPointParameterivNV", glPointParameterivNV, 0, 0, { GL_NV_point_sprite, GL_EXTENSION_COUNT }},
-    { "glPointParameterx", glPointParameterx, 0, 0, { GL_NV_ES1_1_compatibility, GL_EXTENSION_COUNT }},
-    { "glPointParameterxv", glPointParameterxv, 0, 0, { GL_NV_ES1_1_compatibility, GL_EXTENSION_COUNT }},
-    { "glPointParameterxvOES", glPointParameterxvOES, 0, 0, { GL_OES_fixed_point, GL_EXTENSION_COUNT }},
-    { "glPointSizex", glPointSizex, 0, 0, { GL_NV_ES1_1_compatibility, GL_EXTENSION_COUNT }},
-    { "glPointSizexOES", glPointSizexOES, 0, 0, { GL_OES_fixed_point, GL_EXTENSION_COUNT }},
-    { "glPollAsyncSGIX", glPollAsyncSGIX, 0, 0, { GL_SGIX_async, GL_EXTENSION_COUNT }},
-    { "glPollInstrumentsSGIX", glPollInstrumentsSGIX, 0, 0, { GL_SGIX_instruments, GL_EXTENSION_COUNT }},
-    { "glPolygonOffsetClamp", glPolygonOffsetClamp, 4, 6, { GL_ARB_polygon_offset_clamp, GL_EXTENSION_COUNT }},
-    { "glPolygonOffsetClampEXT", glPolygonOffsetClampEXT, 0, 0, { GL_EXT_polygon_offset_clamp, GL_EXTENSION_COUNT }},
-    { "glPolygonOffsetEXT", glPolygonOffsetEXT, 0, 0, { GL_EXT_polygon_offset, GL_EXTENSION_COUNT }},
-    { "glPolygonOffsetx", glPolygonOffsetx, 0, 0, { GL_NV_ES1_1_compatibility, GL_EXTENSION_COUNT }},
-    { "glPolygonOffsetxOES", glPolygonOffsetxOES, 0, 0, { GL_OES_fixed_point, GL_EXTENSION_COUNT }},
-    { "glPopDebugGroup", glPopDebugGroup, 4, 3, { GL_KHR_debug, GL_EXTENSION_COUNT }},
-    { "glPopGroupMarkerEXT", glPopGroupMarkerEXT, 0, 0, { GL_EXT_debug_marker, GL_EXTENSION_COUNT }},
-    { "glPresentFrameDualFillNV", glPresentFrameDualFillNV, 0, 0, { GL_NV_present_video, GL_EXTENSION_COUNT }},
-    { "glPresentFrameKeyedNV", glPresentFrameKeyedNV, 0, 0, { GL_NV_present_video, GL_EXTENSION_COUNT }},
-    { "glPrimitiveBoundingBox", glPrimitiveBoundingBox, 0, 0, { GL_ARB_ES3_2_compatibility, GL_EXTENSION_COUNT }},
-    { "glPrimitiveBoundingBoxARB", glPrimitiveBoundingBoxARB, 0, 0, { GL_ARB_ES3_2_compatibility, GL_EXTENSION_COUNT }},
-    { "glPrimitiveRestartIndex", glPrimitiveRestartIndex, 3, 1, { GL_EXTENSION_COUNT }},
-    { "glPrimitiveRestartIndexNV", glPrimitiveRestartIndexNV, 0, 0, { GL_NV_primitive_restart, GL_EXTENSION_COUNT }},
-    { "glPrimitiveRestartNV", glPrimitiveRestartNV, 0, 0, { GL_NV_primitive_restart, GL_EXTENSION_COUNT }},
-    { "glPrioritizeTexturesEXT", glPrioritizeTexturesEXT, 0, 0, { GL_EXT_texture_object, GL_EXTENSION_COUNT }},
-    { "glPrioritizeTexturesxOES", glPrioritizeTexturesxOES, 0, 0, { GL_OES_fixed_point, GL_EXTENSION_COUNT }},
-    { "glProgramBinary", glProgramBinary, 4, 1, { GL_ARB_get_program_binary, GL_EXTENSION_COUNT }},
-    { "glProgramBufferParametersIivNV", glProgramBufferParametersIivNV, 0, 0, { GL_NV_parameter_buffer_object, GL_EXTENSION_COUNT }},
-    { "glProgramBufferParametersIuivNV", glProgramBufferParametersIuivNV, 0, 0, { GL_NV_parameter_buffer_object, GL_EXTENSION_COUNT }},
-    { "glProgramBufferParametersfvNV", glProgramBufferParametersfvNV, 0, 0, { GL_NV_parameter_buffer_object, GL_EXTENSION_COUNT }},
-    { "glProgramEnvParameter4dARB", glProgramEnvParameter4dARB, 0, 0, { GL_ARB_fragment_program, GL_ARB_vertex_program, GL_EXTENSION_COUNT }},
-    { "glProgramEnvParameter4dvARB", glProgramEnvParameter4dvARB, 0, 0, { GL_ARB_fragment_program, GL_ARB_vertex_program, GL_EXTENSION_COUNT }},
-    { "glProgramEnvParameter4fARB", glProgramEnvParameter4fARB, 0, 0, { GL_ARB_fragment_program, GL_ARB_vertex_program, GL_EXTENSION_COUNT }},
-    { "glProgramEnvParameter4fvARB", glProgramEnvParameter4fvARB, 0, 0, { GL_ARB_fragment_program, GL_ARB_vertex_program, GL_EXTENSION_COUNT }},
-    { "glProgramEnvParameterI4iNV", glProgramEnvParameterI4iNV, 0, 0, { GL_NV_gpu_program4, GL_EXTENSION_COUNT }},
-    { "glProgramEnvParameterI4ivNV", glProgramEnvParameterI4ivNV, 0, 0, { GL_NV_gpu_program4, GL_EXTENSION_COUNT }},
-    { "glProgramEnvParameterI4uiNV", glProgramEnvParameterI4uiNV, 0, 0, { GL_NV_gpu_program4, GL_EXTENSION_COUNT }},
-    { "glProgramEnvParameterI4uivNV", glProgramEnvParameterI4uivNV, 0, 0, { GL_NV_gpu_program4, GL_EXTENSION_COUNT }},
-    { "glProgramEnvParameters4fvEXT", glProgramEnvParameters4fvEXT, 0, 0, { GL_EXT_gpu_program_parameters, GL_EXTENSION_COUNT }},
-    { "glProgramEnvParametersI4ivNV", glProgramEnvParametersI4ivNV, 0, 0, { GL_NV_gpu_program4, GL_EXTENSION_COUNT }},
-    { "glProgramEnvParametersI4uivNV", glProgramEnvParametersI4uivNV, 0, 0, { GL_NV_gpu_program4, GL_EXTENSION_COUNT }},
-    { "glProgramLocalParameter4dARB", glProgramLocalParameter4dARB, 0, 0, { GL_ARB_fragment_program, GL_ARB_vertex_program, GL_EXTENSION_COUNT }},
-    { "glProgramLocalParameter4dvARB", glProgramLocalParameter4dvARB, 0, 0, { GL_ARB_fragment_program, GL_ARB_vertex_program, GL_EXTENSION_COUNT }},
-    { "glProgramLocalParameter4fARB", glProgramLocalParameter4fARB, 0, 0, { GL_ARB_fragment_program, GL_ARB_vertex_program, GL_EXTENSION_COUNT }},
-    { "glProgramLocalParameter4fvARB", glProgramLocalParameter4fvARB, 0, 0, { GL_ARB_fragment_program, GL_ARB_vertex_program, GL_EXTENSION_COUNT }},
-    { "glProgramLocalParameterI4iNV", glProgramLocalParameterI4iNV, 0, 0, { GL_NV_gpu_program4, GL_EXTENSION_COUNT }},
-    { "glProgramLocalParameterI4ivNV", glProgramLocalParameterI4ivNV, 0, 0, { GL_NV_gpu_program4, GL_EXTENSION_COUNT }},
-    { "glProgramLocalParameterI4uiNV", glProgramLocalParameterI4uiNV, 0, 0, { GL_NV_gpu_program4, GL_EXTENSION_COUNT }},
-    { "glProgramLocalParameterI4uivNV", glProgramLocalParameterI4uivNV, 0, 0, { GL_NV_gpu_program4, GL_EXTENSION_COUNT }},
-    { "glProgramLocalParameters4fvEXT", glProgramLocalParameters4fvEXT, 0, 0, { GL_EXT_gpu_program_parameters, GL_EXTENSION_COUNT }},
-    { "glProgramLocalParametersI4ivNV", glProgramLocalParametersI4ivNV, 0, 0, { GL_NV_gpu_program4, GL_EXTENSION_COUNT }},
-    { "glProgramLocalParametersI4uivNV", glProgramLocalParametersI4uivNV, 0, 0, { GL_NV_gpu_program4, GL_EXTENSION_COUNT }},
-    { "glProgramNamedParameter4dNV", glProgramNamedParameter4dNV, 0, 0, { GL_NV_fragment_program, GL_EXTENSION_COUNT }},
-    { "glProgramNamedParameter4dvNV", glProgramNamedParameter4dvNV, 0, 0, { GL_NV_fragment_program, GL_EXTENSION_COUNT }},
-    { "glProgramNamedParameter4fNV", glProgramNamedParameter4fNV, 0, 0, { GL_NV_fragment_program, GL_EXTENSION_COUNT }},
-    { "glProgramNamedParameter4fvNV", glProgramNamedParameter4fvNV, 0, 0, { GL_NV_fragment_program, GL_EXTENSION_COUNT }},
-    { "glProgramParameter4dNV", glProgramParameter4dNV, 0, 0, { GL_NV_vertex_program, GL_EXTENSION_COUNT }},
-    { "glProgramParameter4dvNV", glProgramParameter4dvNV, 0, 0, { GL_NV_vertex_program, GL_EXTENSION_COUNT }},
-    { "glProgramParameter4fNV", glProgramParameter4fNV, 0, 0, { GL_NV_vertex_program, GL_EXTENSION_COUNT }},
-    { "glProgramParameter4fvNV", glProgramParameter4fvNV, 0, 0, { GL_NV_vertex_program, GL_EXTENSION_COUNT }},
-    { "glProgramParameteri", glProgramParameteri, 4, 1, { GL_ARB_get_program_binary, GL_ARB_separate_shader_objects, GL_EXTENSION_COUNT }},
-    { "glProgramParameteriARB", glProgramParameteriARB, 0, 0, { GL_ARB_geometry_shader4, GL_EXTENSION_COUNT }},
-    { "glProgramParameteriEXT", glProgramParameteriEXT, 0, 0, { GL_EXT_geometry_shader4, GL_EXTENSION_COUNT }},
-    { "glProgramParameters4dvNV", glProgramParameters4dvNV, 0, 0, { GL_NV_vertex_program, GL_EXTENSION_COUNT }},
-    { "glProgramParameters4fvNV", glProgramParameters4fvNV, 0, 0, { GL_NV_vertex_program, GL_EXTENSION_COUNT }},
-    { "glProgramPathFragmentInputGenNV", glProgramPathFragmentInputGenNV, 0, 0, { GL_NV_path_rendering, GL_EXTENSION_COUNT }},
-    { "glProgramStringARB", glProgramStringARB, 0, 0, { GL_ARB_fragment_program, GL_ARB_vertex_program, GL_EXTENSION_COUNT }},
-    { "glProgramSubroutineParametersuivNV", glProgramSubroutineParametersuivNV, 0, 0, { GL_NV_gpu_program5, GL_NV_gpu_program_fp64, GL_EXTENSION_COUNT }},
-    { "glProgramUniform1d", glProgramUniform1d, 4, 1, { GL_ARB_separate_shader_objects, GL_EXTENSION_COUNT }},
-    { "glProgramUniform1dEXT", glProgramUniform1dEXT, 0, 0, { GL_EXT_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glProgramUniform1dv", glProgramUniform1dv, 4, 1, { GL_ARB_separate_shader_objects, GL_EXTENSION_COUNT }},
-    { "glProgramUniform1dvEXT", glProgramUniform1dvEXT, 0, 0, { GL_EXT_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glProgramUniform1f", glProgramUniform1f, 4, 1, { GL_ARB_separate_shader_objects, GL_EXTENSION_COUNT }},
-    { "glProgramUniform1fEXT", glProgramUniform1fEXT, 0, 0, { GL_EXT_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glProgramUniform1fv", glProgramUniform1fv, 4, 1, { GL_ARB_separate_shader_objects, GL_EXTENSION_COUNT }},
-    { "glProgramUniform1fvEXT", glProgramUniform1fvEXT, 0, 0, { GL_EXT_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glProgramUniform1i", glProgramUniform1i, 4, 1, { GL_ARB_separate_shader_objects, GL_EXTENSION_COUNT }},
-    { "glProgramUniform1i64ARB", glProgramUniform1i64ARB, 0, 0, { GL_ARB_gpu_shader_int64, GL_EXTENSION_COUNT }},
-    { "glProgramUniform1i64NV", glProgramUniform1i64NV, 0, 0, { GL_AMD_gpu_shader_int64, GL_NV_gpu_shader5, GL_EXTENSION_COUNT }},
-    { "glProgramUniform1i64vARB", glProgramUniform1i64vARB, 0, 0, { GL_ARB_gpu_shader_int64, GL_EXTENSION_COUNT }},
-    { "glProgramUniform1i64vNV", glProgramUniform1i64vNV, 0, 0, { GL_AMD_gpu_shader_int64, GL_NV_gpu_shader5, GL_EXTENSION_COUNT }},
-    { "glProgramUniform1iEXT", glProgramUniform1iEXT, 0, 0, { GL_EXT_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glProgramUniform1iv", glProgramUniform1iv, 4, 1, { GL_ARB_separate_shader_objects, GL_EXTENSION_COUNT }},
-    { "glProgramUniform1ivEXT", glProgramUniform1ivEXT, 0, 0, { GL_EXT_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glProgramUniform1ui", glProgramUniform1ui, 4, 1, { GL_ARB_separate_shader_objects, GL_EXTENSION_COUNT }},
-    { "glProgramUniform1ui64ARB", glProgramUniform1ui64ARB, 0, 0, { GL_ARB_gpu_shader_int64, GL_EXTENSION_COUNT }},
-    { "glProgramUniform1ui64NV", glProgramUniform1ui64NV, 0, 0, { GL_AMD_gpu_shader_int64, GL_NV_gpu_shader5, GL_EXTENSION_COUNT }},
-    { "glProgramUniform1ui64vARB", glProgramUniform1ui64vARB, 0, 0, { GL_ARB_gpu_shader_int64, GL_EXTENSION_COUNT }},
-    { "glProgramUniform1ui64vNV", glProgramUniform1ui64vNV, 0, 0, { GL_AMD_gpu_shader_int64, GL_NV_gpu_shader5, GL_EXTENSION_COUNT }},
-    { "glProgramUniform1uiEXT", glProgramUniform1uiEXT, 0, 0, { GL_EXT_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glProgramUniform1uiv", glProgramUniform1uiv, 4, 1, { GL_ARB_separate_shader_objects, GL_EXTENSION_COUNT }},
-    { "glProgramUniform1uivEXT", glProgramUniform1uivEXT, 0, 0, { GL_EXT_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glProgramUniform2d", glProgramUniform2d, 4, 1, { GL_ARB_separate_shader_objects, GL_EXTENSION_COUNT }},
-    { "glProgramUniform2dEXT", glProgramUniform2dEXT, 0, 0, { GL_EXT_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glProgramUniform2dv", glProgramUniform2dv, 4, 1, { GL_ARB_separate_shader_objects, GL_EXTENSION_COUNT }},
-    { "glProgramUniform2dvEXT", glProgramUniform2dvEXT, 0, 0, { GL_EXT_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glProgramUniform2f", glProgramUniform2f, 4, 1, { GL_ARB_separate_shader_objects, GL_EXTENSION_COUNT }},
-    { "glProgramUniform2fEXT", glProgramUniform2fEXT, 0, 0, { GL_EXT_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glProgramUniform2fv", glProgramUniform2fv, 4, 1, { GL_ARB_separate_shader_objects, GL_EXTENSION_COUNT }},
-    { "glProgramUniform2fvEXT", glProgramUniform2fvEXT, 0, 0, { GL_EXT_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glProgramUniform2i", glProgramUniform2i, 4, 1, { GL_ARB_separate_shader_objects, GL_EXTENSION_COUNT }},
-    { "glProgramUniform2i64ARB", glProgramUniform2i64ARB, 0, 0, { GL_ARB_gpu_shader_int64, GL_EXTENSION_COUNT }},
-    { "glProgramUniform2i64NV", glProgramUniform2i64NV, 0, 0, { GL_AMD_gpu_shader_int64, GL_NV_gpu_shader5, GL_EXTENSION_COUNT }},
-    { "glProgramUniform2i64vARB", glProgramUniform2i64vARB, 0, 0, { GL_ARB_gpu_shader_int64, GL_EXTENSION_COUNT }},
-    { "glProgramUniform2i64vNV", glProgramUniform2i64vNV, 0, 0, { GL_AMD_gpu_shader_int64, GL_NV_gpu_shader5, GL_EXTENSION_COUNT }},
-    { "glProgramUniform2iEXT", glProgramUniform2iEXT, 0, 0, { GL_EXT_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glProgramUniform2iv", glProgramUniform2iv, 4, 1, { GL_ARB_separate_shader_objects, GL_EXTENSION_COUNT }},
-    { "glProgramUniform2ivEXT", glProgramUniform2ivEXT, 0, 0, { GL_EXT_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glProgramUniform2ui", glProgramUniform2ui, 4, 1, { GL_ARB_separate_shader_objects, GL_EXTENSION_COUNT }},
-    { "glProgramUniform2ui64ARB", glProgramUniform2ui64ARB, 0, 0, { GL_ARB_gpu_shader_int64, GL_EXTENSION_COUNT }},
-    { "glProgramUniform2ui64NV", glProgramUniform2ui64NV, 0, 0, { GL_AMD_gpu_shader_int64, GL_NV_gpu_shader5, GL_EXTENSION_COUNT }},
-    { "glProgramUniform2ui64vARB", glProgramUniform2ui64vARB, 0, 0, { GL_ARB_gpu_shader_int64, GL_EXTENSION_COUNT }},
-    { "glProgramUniform2ui64vNV", glProgramUniform2ui64vNV, 0, 0, { GL_AMD_gpu_shader_int64, GL_NV_gpu_shader5, GL_EXTENSION_COUNT }},
-    { "glProgramUniform2uiEXT", glProgramUniform2uiEXT, 0, 0, { GL_EXT_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glProgramUniform2uiv", glProgramUniform2uiv, 4, 1, { GL_ARB_separate_shader_objects, GL_EXTENSION_COUNT }},
-    { "glProgramUniform2uivEXT", glProgramUniform2uivEXT, 0, 0, { GL_EXT_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glProgramUniform3d", glProgramUniform3d, 4, 1, { GL_ARB_separate_shader_objects, GL_EXTENSION_COUNT }},
-    { "glProgramUniform3dEXT", glProgramUniform3dEXT, 0, 0, { GL_EXT_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glProgramUniform3dv", glProgramUniform3dv, 4, 1, { GL_ARB_separate_shader_objects, GL_EXTENSION_COUNT }},
-    { "glProgramUniform3dvEXT", glProgramUniform3dvEXT, 0, 0, { GL_EXT_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glProgramUniform3f", glProgramUniform3f, 4, 1, { GL_ARB_separate_shader_objects, GL_EXTENSION_COUNT }},
-    { "glProgramUniform3fEXT", glProgramUniform3fEXT, 0, 0, { GL_EXT_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glProgramUniform3fv", glProgramUniform3fv, 4, 1, { GL_ARB_separate_shader_objects, GL_EXTENSION_COUNT }},
-    { "glProgramUniform3fvEXT", glProgramUniform3fvEXT, 0, 0, { GL_EXT_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glProgramUniform3i", glProgramUniform3i, 4, 1, { GL_ARB_separate_shader_objects, GL_EXTENSION_COUNT }},
-    { "glProgramUniform3i64ARB", glProgramUniform3i64ARB, 0, 0, { GL_ARB_gpu_shader_int64, GL_EXTENSION_COUNT }},
-    { "glProgramUniform3i64NV", glProgramUniform3i64NV, 0, 0, { GL_AMD_gpu_shader_int64, GL_NV_gpu_shader5, GL_EXTENSION_COUNT }},
-    { "glProgramUniform3i64vARB", glProgramUniform3i64vARB, 0, 0, { GL_ARB_gpu_shader_int64, GL_EXTENSION_COUNT }},
-    { "glProgramUniform3i64vNV", glProgramUniform3i64vNV, 0, 0, { GL_AMD_gpu_shader_int64, GL_NV_gpu_shader5, GL_EXTENSION_COUNT }},
-    { "glProgramUniform3iEXT", glProgramUniform3iEXT, 0, 0, { GL_EXT_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glProgramUniform3iv", glProgramUniform3iv, 4, 1, { GL_ARB_separate_shader_objects, GL_EXTENSION_COUNT }},
-    { "glProgramUniform3ivEXT", glProgramUniform3ivEXT, 0, 0, { GL_EXT_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glProgramUniform3ui", glProgramUniform3ui, 4, 1, { GL_ARB_separate_shader_objects, GL_EXTENSION_COUNT }},
-    { "glProgramUniform3ui64ARB", glProgramUniform3ui64ARB, 0, 0, { GL_ARB_gpu_shader_int64, GL_EXTENSION_COUNT }},
-    { "glProgramUniform3ui64NV", glProgramUniform3ui64NV, 0, 0, { GL_AMD_gpu_shader_int64, GL_NV_gpu_shader5, GL_EXTENSION_COUNT }},
-    { "glProgramUniform3ui64vARB", glProgramUniform3ui64vARB, 0, 0, { GL_ARB_gpu_shader_int64, GL_EXTENSION_COUNT }},
-    { "glProgramUniform3ui64vNV", glProgramUniform3ui64vNV, 0, 0, { GL_AMD_gpu_shader_int64, GL_NV_gpu_shader5, GL_EXTENSION_COUNT }},
-    { "glProgramUniform3uiEXT", glProgramUniform3uiEXT, 0, 0, { GL_EXT_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glProgramUniform3uiv", glProgramUniform3uiv, 4, 1, { GL_ARB_separate_shader_objects, GL_EXTENSION_COUNT }},
-    { "glProgramUniform3uivEXT", glProgramUniform3uivEXT, 0, 0, { GL_EXT_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glProgramUniform4d", glProgramUniform4d, 4, 1, { GL_ARB_separate_shader_objects, GL_EXTENSION_COUNT }},
-    { "glProgramUniform4dEXT", glProgramUniform4dEXT, 0, 0, { GL_EXT_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glProgramUniform4dv", glProgramUniform4dv, 4, 1, { GL_ARB_separate_shader_objects, GL_EXTENSION_COUNT }},
-    { "glProgramUniform4dvEXT", glProgramUniform4dvEXT, 0, 0, { GL_EXT_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glProgramUniform4f", glProgramUniform4f, 4, 1, { GL_ARB_separate_shader_objects, GL_EXTENSION_COUNT }},
-    { "glProgramUniform4fEXT", glProgramUniform4fEXT, 0, 0, { GL_EXT_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glProgramUniform4fv", glProgramUniform4fv, 4, 1, { GL_ARB_separate_shader_objects, GL_EXTENSION_COUNT }},
-    { "glProgramUniform4fvEXT", glProgramUniform4fvEXT, 0, 0, { GL_EXT_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glProgramUniform4i", glProgramUniform4i, 4, 1, { GL_ARB_separate_shader_objects, GL_EXTENSION_COUNT }},
-    { "glProgramUniform4i64ARB", glProgramUniform4i64ARB, 0, 0, { GL_ARB_gpu_shader_int64, GL_EXTENSION_COUNT }},
-    { "glProgramUniform4i64NV", glProgramUniform4i64NV, 0, 0, { GL_AMD_gpu_shader_int64, GL_NV_gpu_shader5, GL_EXTENSION_COUNT }},
-    { "glProgramUniform4i64vARB", glProgramUniform4i64vARB, 0, 0, { GL_ARB_gpu_shader_int64, GL_EXTENSION_COUNT }},
-    { "glProgramUniform4i64vNV", glProgramUniform4i64vNV, 0, 0, { GL_AMD_gpu_shader_int64, GL_NV_gpu_shader5, GL_EXTENSION_COUNT }},
-    { "glProgramUniform4iEXT", glProgramUniform4iEXT, 0, 0, { GL_EXT_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glProgramUniform4iv", glProgramUniform4iv, 4, 1, { GL_ARB_separate_shader_objects, GL_EXTENSION_COUNT }},
-    { "glProgramUniform4ivEXT", glProgramUniform4ivEXT, 0, 0, { GL_EXT_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glProgramUniform4ui", glProgramUniform4ui, 4, 1, { GL_ARB_separate_shader_objects, GL_EXTENSION_COUNT }},
-    { "glProgramUniform4ui64ARB", glProgramUniform4ui64ARB, 0, 0, { GL_ARB_gpu_shader_int64, GL_EXTENSION_COUNT }},
-    { "glProgramUniform4ui64NV", glProgramUniform4ui64NV, 0, 0, { GL_AMD_gpu_shader_int64, GL_NV_gpu_shader5, GL_EXTENSION_COUNT }},
-    { "glProgramUniform4ui64vARB", glProgramUniform4ui64vARB, 0, 0, { GL_ARB_gpu_shader_int64, GL_EXTENSION_COUNT }},
-    { "glProgramUniform4ui64vNV", glProgramUniform4ui64vNV, 0, 0, { GL_AMD_gpu_shader_int64, GL_NV_gpu_shader5, GL_EXTENSION_COUNT }},
-    { "glProgramUniform4uiEXT", glProgramUniform4uiEXT, 0, 0, { GL_EXT_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glProgramUniform4uiv", glProgramUniform4uiv, 4, 1, { GL_ARB_separate_shader_objects, GL_EXTENSION_COUNT }},
-    { "glProgramUniform4uivEXT", glProgramUniform4uivEXT, 0, 0, { GL_EXT_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glProgramUniformHandleui64ARB", glProgramUniformHandleui64ARB, 0, 0, { GL_ARB_bindless_texture, GL_EXTENSION_COUNT }},
-    { "glProgramUniformHandleui64NV", glProgramUniformHandleui64NV, 0, 0, { GL_NV_bindless_texture, GL_EXTENSION_COUNT }},
-    { "glProgramUniformHandleui64vARB", glProgramUniformHandleui64vARB, 0, 0, { GL_ARB_bindless_texture, GL_EXTENSION_COUNT }},
-    { "glProgramUniformHandleui64vNV", glProgramUniformHandleui64vNV, 0, 0, { GL_NV_bindless_texture, GL_EXTENSION_COUNT }},
-    { "glProgramUniformMatrix2dv", glProgramUniformMatrix2dv, 4, 1, { GL_ARB_separate_shader_objects, GL_EXTENSION_COUNT }},
-    { "glProgramUniformMatrix2dvEXT", glProgramUniformMatrix2dvEXT, 0, 0, { GL_EXT_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glProgramUniformMatrix2fv", glProgramUniformMatrix2fv, 4, 1, { GL_ARB_separate_shader_objects, GL_EXTENSION_COUNT }},
-    { "glProgramUniformMatrix2fvEXT", glProgramUniformMatrix2fvEXT, 0, 0, { GL_EXT_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glProgramUniformMatrix2x3dv", glProgramUniformMatrix2x3dv, 4, 1, { GL_ARB_separate_shader_objects, GL_EXTENSION_COUNT }},
-    { "glProgramUniformMatrix2x3dvEXT", glProgramUniformMatrix2x3dvEXT, 0, 0, { GL_EXT_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glProgramUniformMatrix2x3fv", glProgramUniformMatrix2x3fv, 4, 1, { GL_ARB_separate_shader_objects, GL_EXTENSION_COUNT }},
-    { "glProgramUniformMatrix2x3fvEXT", glProgramUniformMatrix2x3fvEXT, 0, 0, { GL_EXT_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glProgramUniformMatrix2x4dv", glProgramUniformMatrix2x4dv, 4, 1, { GL_ARB_separate_shader_objects, GL_EXTENSION_COUNT }},
-    { "glProgramUniformMatrix2x4dvEXT", glProgramUniformMatrix2x4dvEXT, 0, 0, { GL_EXT_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glProgramUniformMatrix2x4fv", glProgramUniformMatrix2x4fv, 4, 1, { GL_ARB_separate_shader_objects, GL_EXTENSION_COUNT }},
-    { "glProgramUniformMatrix2x4fvEXT", glProgramUniformMatrix2x4fvEXT, 0, 0, { GL_EXT_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glProgramUniformMatrix3dv", glProgramUniformMatrix3dv, 4, 1, { GL_ARB_separate_shader_objects, GL_EXTENSION_COUNT }},
-    { "glProgramUniformMatrix3dvEXT", glProgramUniformMatrix3dvEXT, 0, 0, { GL_EXT_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glProgramUniformMatrix3fv", glProgramUniformMatrix3fv, 4, 1, { GL_ARB_separate_shader_objects, GL_EXTENSION_COUNT }},
-    { "glProgramUniformMatrix3fvEXT", glProgramUniformMatrix3fvEXT, 0, 0, { GL_EXT_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glProgramUniformMatrix3x2dv", glProgramUniformMatrix3x2dv, 4, 1, { GL_ARB_separate_shader_objects, GL_EXTENSION_COUNT }},
-    { "glProgramUniformMatrix3x2dvEXT", glProgramUniformMatrix3x2dvEXT, 0, 0, { GL_EXT_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glProgramUniformMatrix3x2fv", glProgramUniformMatrix3x2fv, 4, 1, { GL_ARB_separate_shader_objects, GL_EXTENSION_COUNT }},
-    { "glProgramUniformMatrix3x2fvEXT", glProgramUniformMatrix3x2fvEXT, 0, 0, { GL_EXT_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glProgramUniformMatrix3x4dv", glProgramUniformMatrix3x4dv, 4, 1, { GL_ARB_separate_shader_objects, GL_EXTENSION_COUNT }},
-    { "glProgramUniformMatrix3x4dvEXT", glProgramUniformMatrix3x4dvEXT, 0, 0, { GL_EXT_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glProgramUniformMatrix3x4fv", glProgramUniformMatrix3x4fv, 4, 1, { GL_ARB_separate_shader_objects, GL_EXTENSION_COUNT }},
-    { "glProgramUniformMatrix3x4fvEXT", glProgramUniformMatrix3x4fvEXT, 0, 0, { GL_EXT_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glProgramUniformMatrix4dv", glProgramUniformMatrix4dv, 4, 1, { GL_ARB_separate_shader_objects, GL_EXTENSION_COUNT }},
-    { "glProgramUniformMatrix4dvEXT", glProgramUniformMatrix4dvEXT, 0, 0, { GL_EXT_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glProgramUniformMatrix4fv", glProgramUniformMatrix4fv, 4, 1, { GL_ARB_separate_shader_objects, GL_EXTENSION_COUNT }},
-    { "glProgramUniformMatrix4fvEXT", glProgramUniformMatrix4fvEXT, 0, 0, { GL_EXT_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glProgramUniformMatrix4x2dv", glProgramUniformMatrix4x2dv, 4, 1, { GL_ARB_separate_shader_objects, GL_EXTENSION_COUNT }},
-    { "glProgramUniformMatrix4x2dvEXT", glProgramUniformMatrix4x2dvEXT, 0, 0, { GL_EXT_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glProgramUniformMatrix4x2fv", glProgramUniformMatrix4x2fv, 4, 1, { GL_ARB_separate_shader_objects, GL_EXTENSION_COUNT }},
-    { "glProgramUniformMatrix4x2fvEXT", glProgramUniformMatrix4x2fvEXT, 0, 0, { GL_EXT_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glProgramUniformMatrix4x3dv", glProgramUniformMatrix4x3dv, 4, 1, { GL_ARB_separate_shader_objects, GL_EXTENSION_COUNT }},
-    { "glProgramUniformMatrix4x3dvEXT", glProgramUniformMatrix4x3dvEXT, 0, 0, { GL_EXT_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glProgramUniformMatrix4x3fv", glProgramUniformMatrix4x3fv, 4, 1, { GL_ARB_separate_shader_objects, GL_EXTENSION_COUNT }},
-    { "glProgramUniformMatrix4x3fvEXT", glProgramUniformMatrix4x3fvEXT, 0, 0, { GL_EXT_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glProgramUniformui64NV", glProgramUniformui64NV, 0, 0, { GL_NV_shader_buffer_load, GL_EXTENSION_COUNT }},
-    { "glProgramUniformui64vNV", glProgramUniformui64vNV, 0, 0, { GL_NV_shader_buffer_load, GL_EXTENSION_COUNT }},
-    { "glProgramVertexLimitNV", glProgramVertexLimitNV, 0, 0, { GL_NV_geometry_program4, GL_EXTENSION_COUNT }},
-    { "glProvokingVertex", glProvokingVertex, 3, 2, { GL_ARB_provoking_vertex, GL_EXTENSION_COUNT }},
-    { "glProvokingVertexEXT", glProvokingVertexEXT, 0, 0, { GL_EXT_provoking_vertex, GL_EXTENSION_COUNT }},
-    { "glPushClientAttribDefaultEXT", glPushClientAttribDefaultEXT, 0, 0, { GL_EXT_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glPushDebugGroup", glPushDebugGroup, 4, 3, { GL_KHR_debug, GL_EXTENSION_COUNT }},
-    { "glPushGroupMarkerEXT", glPushGroupMarkerEXT, 0, 0, { GL_EXT_debug_marker, GL_EXTENSION_COUNT }},
-    { "glQueryCounter", glQueryCounter, 3, 3, { GL_ARB_timer_query, GL_EXTENSION_COUNT }},
-    { "glQueryMatrixxOES", glQueryMatrixxOES, 0, 0, { GL_OES_query_matrix, GL_EXTENSION_COUNT }},
-    { "glQueryObjectParameteruiAMD", glQueryObjectParameteruiAMD, 0, 0, { GL_AMD_occlusion_query_event, GL_EXTENSION_COUNT }},
-    { "glQueryResourceNV", glQueryResourceNV, 0, 0, { GL_NV_query_resource, GL_EXTENSION_COUNT }},
-    { "glQueryResourceTagNV", glQueryResourceTagNV, 0, 0, { GL_NV_query_resource_tag, GL_EXTENSION_COUNT }},
-    { "glRasterPos2xOES", glRasterPos2xOES, 0, 0, { GL_OES_fixed_point, GL_EXTENSION_COUNT }},
-    { "glRasterPos2xvOES", glRasterPos2xvOES, 0, 0, { GL_OES_fixed_point, GL_EXTENSION_COUNT }},
-    { "glRasterPos3xOES", glRasterPos3xOES, 0, 0, { GL_OES_fixed_point, GL_EXTENSION_COUNT }},
-    { "glRasterPos3xvOES", glRasterPos3xvOES, 0, 0, { GL_OES_fixed_point, GL_EXTENSION_COUNT }},
-    { "glRasterPos4xOES", glRasterPos4xOES, 0, 0, { GL_OES_fixed_point, GL_EXTENSION_COUNT }},
-    { "glRasterPos4xvOES", glRasterPos4xvOES, 0, 0, { GL_OES_fixed_point, GL_EXTENSION_COUNT }},
-    { "glRasterSamplesEXT", glRasterSamplesEXT, 0, 0, { GL_EXT_raster_multisample, GL_NV_framebuffer_mixed_samples, GL_EXTENSION_COUNT }},
-    { "glReadBufferRegion", glReadBufferRegion, 0, 0, { GL_KTX_buffer_region, GL_EXTENSION_COUNT }},
-    { "glReadInstrumentsSGIX", glReadInstrumentsSGIX, 0, 0, { GL_SGIX_instruments, GL_EXTENSION_COUNT }},
-    { "glReadnPixels", glReadnPixels, 4, 5, { GL_KHR_robustness, GL_EXTENSION_COUNT }},
-    { "glReadnPixelsARB", glReadnPixelsARB, 0, 0, { GL_ARB_robustness, GL_EXTENSION_COUNT }},
-    { "glRectxOES", glRectxOES, 0, 0, { GL_OES_fixed_point, GL_EXTENSION_COUNT }},
-    { "glRectxvOES", glRectxvOES, 0, 0, { GL_OES_fixed_point, GL_EXTENSION_COUNT }},
-    { "glReferencePlaneSGIX", glReferencePlaneSGIX, 0, 0, { GL_SGIX_reference_plane, GL_EXTENSION_COUNT }},
-    { "glReleaseKeyedMutexWin32EXT", glReleaseKeyedMutexWin32EXT, 0, 0, { GL_EXT_win32_keyed_mutex, GL_EXTENSION_COUNT }},
-    { "glReleaseShaderCompiler", glReleaseShaderCompiler, 4, 1, { GL_ARB_ES2_compatibility, GL_EXTENSION_COUNT }},
-    { "glRenderGpuMaskNV", glRenderGpuMaskNV, 0, 0, { GL_NV_gpu_multicast, GL_EXTENSION_COUNT }},
-    { "glRenderbufferStorage", glRenderbufferStorage, 3, 0, { GL_ARB_framebuffer_object, GL_EXTENSION_COUNT }},
-    { "glRenderbufferStorageEXT", glRenderbufferStorageEXT, 0, 0, { GL_EXT_framebuffer_object, GL_EXTENSION_COUNT }},
-    { "glRenderbufferStorageMultisample", glRenderbufferStorageMultisample, 3, 0, { GL_ARB_framebuffer_object, GL_EXTENSION_COUNT }},
-    { "glRenderbufferStorageMultisampleAdvancedAMD", glRenderbufferStorageMultisampleAdvancedAMD, 0, 0, { GL_AMD_framebuffer_multisample_advanced, GL_EXTENSION_COUNT }},
-    { "glRenderbufferStorageMultisampleCoverageNV", glRenderbufferStorageMultisampleCoverageNV, 0, 0, { GL_NV_framebuffer_multisample_coverage, GL_EXTENSION_COUNT }},
-    { "glRenderbufferStorageMultisampleEXT", glRenderbufferStorageMultisampleEXT, 0, 0, { GL_EXT_framebuffer_multisample, GL_EXTENSION_COUNT }},
-    { "glReplacementCodePointerSUN", glReplacementCodePointerSUN, 0, 0, { GL_SUN_triangle_list, GL_EXTENSION_COUNT }},
-    { "glReplacementCodeubSUN", glReplacementCodeubSUN, 0, 0, { GL_SUN_triangle_list, GL_EXTENSION_COUNT }},
-    { "glReplacementCodeubvSUN", glReplacementCodeubvSUN, 0, 0, { GL_SUN_triangle_list, GL_EXTENSION_COUNT }},
-    { "glReplacementCodeuiColor3fVertex3fSUN", glReplacementCodeuiColor3fVertex3fSUN, 0, 0, { GL_SUN_vertex, GL_EXTENSION_COUNT }},
-    { "glReplacementCodeuiColor3fVertex3fvSUN", glReplacementCodeuiColor3fVertex3fvSUN, 0, 0, { GL_SUN_vertex, GL_EXTENSION_COUNT }},
-    { "glReplacementCodeuiColor4fNormal3fVertex3fSUN", glReplacementCodeuiColor4fNormal3fVertex3fSUN, 0, 0, { GL_SUN_vertex, GL_EXTENSION_COUNT }},
-    { "glReplacementCodeuiColor4fNormal3fVertex3fvSUN", glReplacementCodeuiColor4fNormal3fVertex3fvSUN, 0, 0, { GL_SUN_vertex, GL_EXTENSION_COUNT }},
-    { "glReplacementCodeuiColor4ubVertex3fSUN", glReplacementCodeuiColor4ubVertex3fSUN, 0, 0, { GL_SUN_vertex, GL_EXTENSION_COUNT }},
-    { "glReplacementCodeuiColor4ubVertex3fvSUN", glReplacementCodeuiColor4ubVertex3fvSUN, 0, 0, { GL_SUN_vertex, GL_EXTENSION_COUNT }},
-    { "glReplacementCodeuiNormal3fVertex3fSUN", glReplacementCodeuiNormal3fVertex3fSUN, 0, 0, { GL_SUN_vertex, GL_EXTENSION_COUNT }},
-    { "glReplacementCodeuiNormal3fVertex3fvSUN", glReplacementCodeuiNormal3fVertex3fvSUN, 0, 0, { GL_SUN_vertex, GL_EXTENSION_COUNT }},
-    { "glReplacementCodeuiSUN", glReplacementCodeuiSUN, 0, 0, { GL_SUN_triangle_list, GL_EXTENSION_COUNT }},
-    { "glReplacementCodeuiTexCoord2fColor4fNormal3fVertex3fSUN", glReplacementCodeuiTexCoord2fColor4fNormal3fVertex3fSUN, 0, 0, { GL_SUN_vertex, GL_EXTENSION_COUNT }},
-    { "glReplacementCodeuiTexCoord2fColor4fNormal3fVertex3fvSUN", glReplacementCodeuiTexCoord2fColor4fNormal3fVertex3fvSUN, 0, 0, { GL_SUN_vertex, GL_EXTENSION_COUNT }},
-    { "glReplacementCodeuiTexCoord2fNormal3fVertex3fSUN", glReplacementCodeuiTexCoord2fNormal3fVertex3fSUN, 0, 0, { GL_SUN_vertex, GL_EXTENSION_COUNT }},
-    { "glReplacementCodeuiTexCoord2fNormal3fVertex3fvSUN", glReplacementCodeuiTexCoord2fNormal3fVertex3fvSUN, 0, 0, { GL_SUN_vertex, GL_EXTENSION_COUNT }},
-    { "glReplacementCodeuiTexCoord2fVertex3fSUN", glReplacementCodeuiTexCoord2fVertex3fSUN, 0, 0, { GL_SUN_vertex, GL_EXTENSION_COUNT }},
-    { "glReplacementCodeuiTexCoord2fVertex3fvSUN", glReplacementCodeuiTexCoord2fVertex3fvSUN, 0, 0, { GL_SUN_vertex, GL_EXTENSION_COUNT }},
-    { "glReplacementCodeuiVertex3fSUN", glReplacementCodeuiVertex3fSUN, 0, 0, { GL_SUN_vertex, GL_EXTENSION_COUNT }},
-    { "glReplacementCodeuiVertex3fvSUN", glReplacementCodeuiVertex3fvSUN, 0, 0, { GL_SUN_vertex, GL_EXTENSION_COUNT }},
-    { "glReplacementCodeuivSUN", glReplacementCodeuivSUN, 0, 0, { GL_SUN_triangle_list, GL_EXTENSION_COUNT }},
-    { "glReplacementCodeusSUN", glReplacementCodeusSUN, 0, 0, { GL_SUN_triangle_list, GL_EXTENSION_COUNT }},
-    { "glReplacementCodeusvSUN", glReplacementCodeusvSUN, 0, 0, { GL_SUN_triangle_list, GL_EXTENSION_COUNT }},
-    { "glRequestResidentProgramsNV", glRequestResidentProgramsNV, 0, 0, { GL_NV_vertex_program, GL_EXTENSION_COUNT }},
-    { "glResetHistogram", glResetHistogram, 0, 0, { GL_ARB_imaging, GL_EXTENSION_COUNT }},
-    { "glResetHistogramEXT", glResetHistogramEXT, 0, 0, { GL_EXT_histogram, GL_EXTENSION_COUNT }},
-    { "glResetMemoryObjectParameterNV", glResetMemoryObjectParameterNV, 0, 0, { GL_NV_memory_attachment, GL_EXTENSION_COUNT }},
-    { "glResetMinmax", glResetMinmax, 0, 0, { GL_ARB_imaging, GL_EXTENSION_COUNT }},
-    { "glResetMinmaxEXT", glResetMinmaxEXT, 0, 0, { GL_EXT_histogram, GL_EXTENSION_COUNT }},
-    { "glResizeBuffersMESA", glResizeBuffersMESA, 0, 0, { GL_MESA_resize_buffers, GL_EXTENSION_COUNT }},
-    { "glResolveDepthValuesNV", glResolveDepthValuesNV, 0, 0, { GL_NV_sample_locations, GL_EXTENSION_COUNT }},
-    { "glResumeTransformFeedback", glResumeTransformFeedback, 4, 0, { GL_ARB_transform_feedback2, GL_EXTENSION_COUNT }},
-    { "glResumeTransformFeedbackNV", glResumeTransformFeedbackNV, 0, 0, { GL_NV_transform_feedback2, GL_EXTENSION_COUNT }},
-    { "glRotatex", glRotatex, 0, 0, { GL_NV_ES1_1_compatibility, GL_EXTENSION_COUNT }},
-    { "glRotatexOES", glRotatexOES, 0, 0, { GL_OES_fixed_point, GL_EXTENSION_COUNT }},
-    { "glSampleCoverage", glSampleCoverage, 1, 3, { GL_EXTENSION_COUNT }},
-    { "glSampleCoverageARB", glSampleCoverageARB, 0, 0, { GL_ARB_multisample, GL_EXTENSION_COUNT }},
-    { "glSampleCoveragex", glSampleCoveragex, 0, 0, { GL_NV_ES1_1_compatibility, GL_EXTENSION_COUNT }},
-    { "glSampleMapATI", glSampleMapATI, 0, 0, { GL_ATI_fragment_shader, GL_EXTENSION_COUNT }},
-    { "glSampleMaskEXT", glSampleMaskEXT, 0, 0, { GL_EXT_multisample, GL_EXTENSION_COUNT }},
-    { "glSampleMaskIndexedNV", glSampleMaskIndexedNV, 0, 0, { GL_NV_explicit_multisample, GL_EXTENSION_COUNT }},
-    { "glSampleMaskSGIS", glSampleMaskSGIS, 0, 0, { GL_SGIS_multisample, GL_EXTENSION_COUNT }},
-    { "glSampleMaski", glSampleMaski, 3, 2, { GL_ARB_texture_multisample, GL_EXTENSION_COUNT }},
-    { "glSamplePatternEXT", glSamplePatternEXT, 0, 0, { GL_EXT_multisample, GL_EXTENSION_COUNT }},
-    { "glSamplePatternSGIS", glSamplePatternSGIS, 0, 0, { GL_SGIS_multisample, GL_EXTENSION_COUNT }},
-    { "glSamplerParameterIiv", glSamplerParameterIiv, 3, 3, { GL_ARB_sampler_objects, GL_EXTENSION_COUNT }},
-    { "glSamplerParameterIuiv", glSamplerParameterIuiv, 3, 3, { GL_ARB_sampler_objects, GL_EXTENSION_COUNT }},
-    { "glSamplerParameterf", glSamplerParameterf, 3, 3, { GL_ARB_sampler_objects, GL_EXTENSION_COUNT }},
-    { "glSamplerParameterfv", glSamplerParameterfv, 3, 3, { GL_ARB_sampler_objects, GL_EXTENSION_COUNT }},
-    { "glSamplerParameteri", glSamplerParameteri, 3, 3, { GL_ARB_sampler_objects, GL_EXTENSION_COUNT }},
-    { "glSamplerParameteriv", glSamplerParameteriv, 3, 3, { GL_ARB_sampler_objects, GL_EXTENSION_COUNT }},
-    { "glScalex", glScalex, 0, 0, { GL_NV_ES1_1_compatibility, GL_EXTENSION_COUNT }},
-    { "glScalexOES", glScalexOES, 0, 0, { GL_OES_fixed_point, GL_EXTENSION_COUNT }},
-    { "glScissorArrayv", glScissorArrayv, 4, 1, { GL_ARB_viewport_array, GL_EXTENSION_COUNT }},
-    { "glScissorExclusiveArrayvNV", glScissorExclusiveArrayvNV, 0, 0, { GL_NV_scissor_exclusive, GL_EXTENSION_COUNT }},
-    { "glScissorExclusiveNV", glScissorExclusiveNV, 0, 0, { GL_NV_scissor_exclusive, GL_EXTENSION_COUNT }},
-    { "glScissorIndexed", glScissorIndexed, 4, 1, { GL_ARB_viewport_array, GL_EXTENSION_COUNT }},
-    { "glScissorIndexedv", glScissorIndexedv, 4, 1, { GL_ARB_viewport_array, GL_EXTENSION_COUNT }},
-    { "glSecondaryColor3b", glSecondaryColor3b, 1, 4, { GL_EXTENSION_COUNT }},
-    { "glSecondaryColor3bEXT", glSecondaryColor3bEXT, 0, 0, { GL_EXT_secondary_color, GL_EXTENSION_COUNT }},
-    { "glSecondaryColor3bv", glSecondaryColor3bv, 1, 4, { GL_EXTENSION_COUNT }},
-    { "glSecondaryColor3bvEXT", glSecondaryColor3bvEXT, 0, 0, { GL_EXT_secondary_color, GL_EXTENSION_COUNT }},
-    { "glSecondaryColor3d", glSecondaryColor3d, 1, 4, { GL_EXTENSION_COUNT }},
-    { "glSecondaryColor3dEXT", glSecondaryColor3dEXT, 0, 0, { GL_EXT_secondary_color, GL_EXTENSION_COUNT }},
-    { "glSecondaryColor3dv", glSecondaryColor3dv, 1, 4, { GL_EXTENSION_COUNT }},
-    { "glSecondaryColor3dvEXT", glSecondaryColor3dvEXT, 0, 0, { GL_EXT_secondary_color, GL_EXTENSION_COUNT }},
-    { "glSecondaryColor3f", glSecondaryColor3f, 1, 4, { GL_EXTENSION_COUNT }},
-    { "glSecondaryColor3fEXT", glSecondaryColor3fEXT, 0, 0, { GL_EXT_secondary_color, GL_EXTENSION_COUNT }},
-    { "glSecondaryColor3fv", glSecondaryColor3fv, 1, 4, { GL_EXTENSION_COUNT }},
-    { "glSecondaryColor3fvEXT", glSecondaryColor3fvEXT, 0, 0, { GL_EXT_secondary_color, GL_EXTENSION_COUNT }},
-    { "glSecondaryColor3hNV", glSecondaryColor3hNV, 0, 0, { GL_NV_half_float, GL_EXTENSION_COUNT }},
-    { "glSecondaryColor3hvNV", glSecondaryColor3hvNV, 0, 0, { GL_NV_half_float, GL_EXTENSION_COUNT }},
-    { "glSecondaryColor3i", glSecondaryColor3i, 1, 4, { GL_EXTENSION_COUNT }},
-    { "glSecondaryColor3iEXT", glSecondaryColor3iEXT, 0, 0, { GL_EXT_secondary_color, GL_EXTENSION_COUNT }},
-    { "glSecondaryColor3iv", glSecondaryColor3iv, 1, 4, { GL_EXTENSION_COUNT }},
-    { "glSecondaryColor3ivEXT", glSecondaryColor3ivEXT, 0, 0, { GL_EXT_secondary_color, GL_EXTENSION_COUNT }},
-    { "glSecondaryColor3s", glSecondaryColor3s, 1, 4, { GL_EXTENSION_COUNT }},
-    { "glSecondaryColor3sEXT", glSecondaryColor3sEXT, 0, 0, { GL_EXT_secondary_color, GL_EXTENSION_COUNT }},
-    { "glSecondaryColor3sv", glSecondaryColor3sv, 1, 4, { GL_EXTENSION_COUNT }},
-    { "glSecondaryColor3svEXT", glSecondaryColor3svEXT, 0, 0, { GL_EXT_secondary_color, GL_EXTENSION_COUNT }},
-    { "glSecondaryColor3ub", glSecondaryColor3ub, 1, 4, { GL_EXTENSION_COUNT }},
-    { "glSecondaryColor3ubEXT", glSecondaryColor3ubEXT, 0, 0, { GL_EXT_secondary_color, GL_EXTENSION_COUNT }},
-    { "glSecondaryColor3ubv", glSecondaryColor3ubv, 1, 4, { GL_EXTENSION_COUNT }},
-    { "glSecondaryColor3ubvEXT", glSecondaryColor3ubvEXT, 0, 0, { GL_EXT_secondary_color, GL_EXTENSION_COUNT }},
-    { "glSecondaryColor3ui", glSecondaryColor3ui, 1, 4, { GL_EXTENSION_COUNT }},
-    { "glSecondaryColor3uiEXT", glSecondaryColor3uiEXT, 0, 0, { GL_EXT_secondary_color, GL_EXTENSION_COUNT }},
-    { "glSecondaryColor3uiv", glSecondaryColor3uiv, 1, 4, { GL_EXTENSION_COUNT }},
-    { "glSecondaryColor3uivEXT", glSecondaryColor3uivEXT, 0, 0, { GL_EXT_secondary_color, GL_EXTENSION_COUNT }},
-    { "glSecondaryColor3us", glSecondaryColor3us, 1, 4, { GL_EXTENSION_COUNT }},
-    { "glSecondaryColor3usEXT", glSecondaryColor3usEXT, 0, 0, { GL_EXT_secondary_color, GL_EXTENSION_COUNT }},
-    { "glSecondaryColor3usv", glSecondaryColor3usv, 1, 4, { GL_EXTENSION_COUNT }},
-    { "glSecondaryColor3usvEXT", glSecondaryColor3usvEXT, 0, 0, { GL_EXT_secondary_color, GL_EXTENSION_COUNT }},
-    { "glSecondaryColorFormatNV", glSecondaryColorFormatNV, 0, 0, { GL_NV_vertex_buffer_unified_memory, GL_EXTENSION_COUNT }},
-    { "glSecondaryColorP3ui", glSecondaryColorP3ui, 3, 3, { GL_ARB_vertex_type_2_10_10_10_rev, GL_EXTENSION_COUNT }},
-    { "glSecondaryColorP3uiv", glSecondaryColorP3uiv, 3, 3, { GL_ARB_vertex_type_2_10_10_10_rev, GL_EXTENSION_COUNT }},
-    { "glSecondaryColorPointer", glSecondaryColorPointer, 1, 4, { GL_EXTENSION_COUNT }},
-    { "glSecondaryColorPointerEXT", glSecondaryColorPointerEXT, 0, 0, { GL_EXT_secondary_color, GL_EXTENSION_COUNT }},
-    { "glSecondaryColorPointerListIBM", glSecondaryColorPointerListIBM, 0, 0, { GL_IBM_vertex_array_lists, GL_EXTENSION_COUNT }},
-    { "glSelectPerfMonitorCountersAMD", glSelectPerfMonitorCountersAMD, 0, 0, { GL_AMD_performance_monitor, GL_EXTENSION_COUNT }},
-    { "glSelectTextureCoordSetSGIS", glSelectTextureCoordSetSGIS, 0, 0, { GL_SGIS_multitexture, GL_EXTENSION_COUNT }},
-    { "glSelectTextureSGIS", glSelectTextureSGIS, 0, 0, { GL_SGIS_multitexture, GL_EXTENSION_COUNT }},
-    { "glSemaphoreParameterivNV", glSemaphoreParameterivNV, 0, 0, { GL_NV_timeline_semaphore, GL_EXTENSION_COUNT }},
-    { "glSemaphoreParameterui64vEXT", glSemaphoreParameterui64vEXT, 0, 0, { GL_EXT_semaphore, GL_EXTENSION_COUNT }},
-    { "glSeparableFilter2D", glSeparableFilter2D, 0, 0, { GL_ARB_imaging, GL_EXTENSION_COUNT }},
-    { "glSeparableFilter2DEXT", glSeparableFilter2DEXT, 0, 0, { GL_EXT_convolution, GL_EXTENSION_COUNT }},
-    { "glSetFenceAPPLE", glSetFenceAPPLE, 0, 0, { GL_APPLE_fence, GL_EXTENSION_COUNT }},
-    { "glSetFenceNV", glSetFenceNV, 0, 0, { GL_NV_fence, GL_EXTENSION_COUNT }},
-    { "glSetFragmentShaderConstantATI", glSetFragmentShaderConstantATI, 0, 0, { GL_ATI_fragment_shader, GL_EXTENSION_COUNT }},
-    { "glSetInvariantEXT", glSetInvariantEXT, 0, 0, { GL_EXT_vertex_shader, GL_EXTENSION_COUNT }},
-    { "glSetLocalConstantEXT", glSetLocalConstantEXT, 0, 0, { GL_EXT_vertex_shader, GL_EXTENSION_COUNT }},
-    { "glSetMultisamplefvAMD", glSetMultisamplefvAMD, 0, 0, { GL_AMD_sample_positions, GL_EXTENSION_COUNT }},
-    { "glShaderBinary", glShaderBinary, 4, 1, { GL_ARB_ES2_compatibility, GL_EXTENSION_COUNT }},
-    { "glShaderOp1EXT", glShaderOp1EXT, 0, 0, { GL_EXT_vertex_shader, GL_EXTENSION_COUNT }},
-    { "glShaderOp2EXT", glShaderOp2EXT, 0, 0, { GL_EXT_vertex_shader, GL_EXTENSION_COUNT }},
-    { "glShaderOp3EXT", glShaderOp3EXT, 0, 0, { GL_EXT_vertex_shader, GL_EXTENSION_COUNT }},
-    { "glShaderSource", glShaderSource, 2, 0, { GL_EXTENSION_COUNT }},
-    { "glShaderSourceARB", glShaderSourceARB, 0, 0, { GL_ARB_shader_objects, GL_EXTENSION_COUNT }},
-    { "glShaderStorageBlockBinding", glShaderStorageBlockBinding, 4, 3, { GL_ARB_shader_storage_buffer_object, GL_EXTENSION_COUNT }},
-    { "glShadingRateCombinerOpsEXT", glShadingRateCombinerOpsEXT, 0, 0, { GL_EXT_fragment_shading_rate, GL_EXT_fragment_shading_rate_primitive, GL_EXT_fragment_shading_rate_attachment, GL_EXTENSION_COUNT }},
-    { "glShadingRateEXT", glShadingRateEXT, 0, 0, { GL_EXT_fragment_shading_rate, GL_EXT_fragment_shading_rate_primitive, GL_EXT_fragment_shading_rate_attachment, GL_EXTENSION_COUNT }},
-    { "glShadingRateImageBarrierNV", glShadingRateImageBarrierNV, 0, 0, { GL_NV_shading_rate_image, GL_EXTENSION_COUNT }},
-    { "glShadingRateImagePaletteNV", glShadingRateImagePaletteNV, 0, 0, { GL_NV_shading_rate_image, GL_EXTENSION_COUNT }},
-    { "glShadingRateSampleOrderCustomNV", glShadingRateSampleOrderCustomNV, 0, 0, { GL_NV_shading_rate_image, GL_EXTENSION_COUNT }},
-    { "glShadingRateSampleOrderNV", glShadingRateSampleOrderNV, 0, 0, { GL_NV_shading_rate_image, GL_EXTENSION_COUNT }},
-    { "glSharpenTexFuncSGIS", glSharpenTexFuncSGIS, 0, 0, { GL_SGIS_sharpen_texture, GL_EXTENSION_COUNT }},
-    { "glSignalSemaphoreEXT", glSignalSemaphoreEXT, 0, 0, { GL_EXT_semaphore, GL_EXTENSION_COUNT }},
-    { "glSignalSemaphoreui64NVX", glSignalSemaphoreui64NVX, 0, 0, { GL_NVX_progress_fence, GL_EXTENSION_COUNT }},
-    { "glSignalVkFenceNV", glSignalVkFenceNV, 0, 0, { GL_NV_draw_vulkan_image, GL_EXTENSION_COUNT }},
-    { "glSignalVkSemaphoreNV", glSignalVkSemaphoreNV, 0, 0, { GL_NV_draw_vulkan_image, GL_EXTENSION_COUNT }},
-    { "glSpecializeShader", glSpecializeShader, 4, 6, { GL_EXTENSION_COUNT }},
-    { "glSpecializeShaderARB", glSpecializeShaderARB, 0, 0, { GL_ARB_gl_spirv, GL_EXTENSION_COUNT }},
-    { "glSpriteParameterfSGIX", glSpriteParameterfSGIX, 0, 0, { GL_SGIX_sprite, GL_EXTENSION_COUNT }},
-    { "glSpriteParameterfvSGIX", glSpriteParameterfvSGIX, 0, 0, { GL_SGIX_sprite, GL_EXTENSION_COUNT }},
-    { "glSpriteParameteriSGIX", glSpriteParameteriSGIX, 0, 0, { GL_SGIX_sprite, GL_EXTENSION_COUNT }},
-    { "glSpriteParameterivSGIX", glSpriteParameterivSGIX, 0, 0, { GL_SGIX_sprite, GL_EXTENSION_COUNT }},
-    { "glStartInstrumentsSGIX", glStartInstrumentsSGIX, 0, 0, { GL_SGIX_instruments, GL_EXTENSION_COUNT }},
-    { "glStateCaptureNV", glStateCaptureNV, 0, 0, { GL_NV_command_list, GL_EXTENSION_COUNT }},
-    { "glStencilClearTagEXT", glStencilClearTagEXT, 0, 0, { GL_EXT_stencil_clear_tag, GL_EXTENSION_COUNT }},
-    { "glStencilFillPathInstancedNV", glStencilFillPathInstancedNV, 0, 0, { GL_NV_path_rendering, GL_EXTENSION_COUNT }},
-    { "glStencilFillPathNV", glStencilFillPathNV, 0, 0, { GL_NV_path_rendering, GL_EXTENSION_COUNT }},
-    { "glStencilFuncSeparate", glStencilFuncSeparate, 2, 0, { GL_EXTENSION_COUNT }},
-    { "glStencilFuncSeparateATI", glStencilFuncSeparateATI, 0, 0, { GL_ATI_separate_stencil, GL_EXTENSION_COUNT }},
-    { "glStencilMaskSeparate", glStencilMaskSeparate, 2, 0, { GL_EXTENSION_COUNT }},
-    { "glStencilOpSeparate", glStencilOpSeparate, 2, 0, { GL_EXTENSION_COUNT }},
-    { "glStencilOpSeparateATI", glStencilOpSeparateATI, 0, 0, { GL_ATI_separate_stencil, GL_EXTENSION_COUNT }},
-    { "glStencilOpValueAMD", glStencilOpValueAMD, 0, 0, { GL_AMD_stencil_operation_extended, GL_EXTENSION_COUNT }},
-    { "glStencilStrokePathInstancedNV", glStencilStrokePathInstancedNV, 0, 0, { GL_NV_path_rendering, GL_EXTENSION_COUNT }},
-    { "glStencilStrokePathNV", glStencilStrokePathNV, 0, 0, { GL_NV_path_rendering, GL_EXTENSION_COUNT }},
-    { "glStencilThenCoverFillPathInstancedNV", glStencilThenCoverFillPathInstancedNV, 0, 0, { GL_NV_path_rendering, GL_EXTENSION_COUNT }},
-    { "glStencilThenCoverFillPathNV", glStencilThenCoverFillPathNV, 0, 0, { GL_NV_path_rendering, GL_EXTENSION_COUNT }},
-    { "glStencilThenCoverStrokePathInstancedNV", glStencilThenCoverStrokePathInstancedNV, 0, 0, { GL_NV_path_rendering, GL_EXTENSION_COUNT }},
-    { "glStencilThenCoverStrokePathNV", glStencilThenCoverStrokePathNV, 0, 0, { GL_NV_path_rendering, GL_EXTENSION_COUNT }},
-    { "glStopInstrumentsSGIX", glStopInstrumentsSGIX, 0, 0, { GL_SGIX_instruments, GL_EXTENSION_COUNT }},
-    { "glStringMarkerGREMEDY", glStringMarkerGREMEDY, 0, 0, { GL_GREMEDY_string_marker, GL_EXTENSION_COUNT }},
-    { "glSubpixelPrecisionBiasNV", glSubpixelPrecisionBiasNV, 0, 0, { GL_NV_conservative_raster, GL_EXTENSION_COUNT }},
-    { "glSwizzleEXT", glSwizzleEXT, 0, 0, { GL_EXT_vertex_shader, GL_EXTENSION_COUNT }},
-    { "glSyncTextureINTEL", glSyncTextureINTEL, 0, 0, { GL_INTEL_map_texture, GL_EXTENSION_COUNT }},
-    { "glTagSampleBufferSGIX", glTagSampleBufferSGIX, 0, 0, { GL_SGIX_tag_sample_buffer, GL_EXTENSION_COUNT }},
-    { "glTangent3bEXT", glTangent3bEXT, 0, 0, { GL_EXT_coordinate_frame, GL_EXTENSION_COUNT }},
-    { "glTangent3bvEXT", glTangent3bvEXT, 0, 0, { GL_EXT_coordinate_frame, GL_EXTENSION_COUNT }},
-    { "glTangent3dEXT", glTangent3dEXT, 0, 0, { GL_EXT_coordinate_frame, GL_EXTENSION_COUNT }},
-    { "glTangent3dvEXT", glTangent3dvEXT, 0, 0, { GL_EXT_coordinate_frame, GL_EXTENSION_COUNT }},
-    { "glTangent3fEXT", glTangent3fEXT, 0, 0, { GL_EXT_coordinate_frame, GL_EXTENSION_COUNT }},
-    { "glTangent3fvEXT", glTangent3fvEXT, 0, 0, { GL_EXT_coordinate_frame, GL_EXTENSION_COUNT }},
-    { "glTangent3iEXT", glTangent3iEXT, 0, 0, { GL_EXT_coordinate_frame, GL_EXTENSION_COUNT }},
-    { "glTangent3ivEXT", glTangent3ivEXT, 0, 0, { GL_EXT_coordinate_frame, GL_EXTENSION_COUNT }},
-    { "glTangent3sEXT", glTangent3sEXT, 0, 0, { GL_EXT_coordinate_frame, GL_EXTENSION_COUNT }},
-    { "glTangent3svEXT", glTangent3svEXT, 0, 0, { GL_EXT_coordinate_frame, GL_EXTENSION_COUNT }},
-    { "glTangentPointerEXT", glTangentPointerEXT, 0, 0, { GL_EXT_coordinate_frame, GL_EXTENSION_COUNT }},
-    { "glTbufferMask3DFX", glTbufferMask3DFX, 0, 0, { GL_3DFX_tbuffer, GL_EXTENSION_COUNT }},
-    { "glTessellationFactorAMD", glTessellationFactorAMD, 0, 0, { GL_AMD_vertex_shader_tessellator, GL_EXTENSION_COUNT }},
-    { "glTessellationModeAMD", glTessellationModeAMD, 0, 0, { GL_AMD_vertex_shader_tessellator, GL_EXTENSION_COUNT }},
-    { "glTestFenceAPPLE", glTestFenceAPPLE, 0, 0, { GL_APPLE_fence, GL_EXTENSION_COUNT }},
-    { "glTestFenceNV", glTestFenceNV, 0, 0, { GL_NV_fence, GL_EXTENSION_COUNT }},
-    { "glTestObjectAPPLE", glTestObjectAPPLE, 0, 0, { GL_APPLE_fence, GL_EXTENSION_COUNT }},
-    { "glTexAttachMemoryNV", glTexAttachMemoryNV, 0, 0, { GL_NV_memory_attachment, GL_EXTENSION_COUNT }},
-    { "glTexBuffer", glTexBuffer, 3, 1, { GL_EXTENSION_COUNT }},
-    { "glTexBufferARB", glTexBufferARB, 0, 0, { GL_ARB_texture_buffer_object, GL_EXTENSION_COUNT }},
-    { "glTexBufferEXT", glTexBufferEXT, 0, 0, { GL_EXT_texture_buffer_object, GL_EXTENSION_COUNT }},
-    { "glTexBufferRange", glTexBufferRange, 4, 3, { GL_ARB_texture_buffer_range, GL_EXTENSION_COUNT }},
-    { "glTexBumpParameterfvATI", glTexBumpParameterfvATI, 0, 0, { GL_ATI_envmap_bumpmap, GL_EXTENSION_COUNT }},
-    { "glTexBumpParameterivATI", glTexBumpParameterivATI, 0, 0, { GL_ATI_envmap_bumpmap, GL_EXTENSION_COUNT }},
-    { "glTexCoord1bOES", glTexCoord1bOES, 0, 0, { GL_OES_byte_coordinates, GL_EXTENSION_COUNT }},
-    { "glTexCoord1bvOES", glTexCoord1bvOES, 0, 0, { GL_OES_byte_coordinates, GL_EXTENSION_COUNT }},
-    { "glTexCoord1hNV", glTexCoord1hNV, 0, 0, { GL_NV_half_float, GL_EXTENSION_COUNT }},
-    { "glTexCoord1hvNV", glTexCoord1hvNV, 0, 0, { GL_NV_half_float, GL_EXTENSION_COUNT }},
-    { "glTexCoord1xOES", glTexCoord1xOES, 0, 0, { GL_OES_fixed_point, GL_EXTENSION_COUNT }},
-    { "glTexCoord1xvOES", glTexCoord1xvOES, 0, 0, { GL_OES_fixed_point, GL_EXTENSION_COUNT }},
-    { "glTexCoord2bOES", glTexCoord2bOES, 0, 0, { GL_OES_byte_coordinates, GL_EXTENSION_COUNT }},
-    { "glTexCoord2bvOES", glTexCoord2bvOES, 0, 0, { GL_OES_byte_coordinates, GL_EXTENSION_COUNT }},
-    { "glTexCoord2fColor3fVertex3fSUN", glTexCoord2fColor3fVertex3fSUN, 0, 0, { GL_SUN_vertex, GL_EXTENSION_COUNT }},
-    { "glTexCoord2fColor3fVertex3fvSUN", glTexCoord2fColor3fVertex3fvSUN, 0, 0, { GL_SUN_vertex, GL_EXTENSION_COUNT }},
-    { "glTexCoord2fColor4fNormal3fVertex3fSUN", glTexCoord2fColor4fNormal3fVertex3fSUN, 0, 0, { GL_SUN_vertex, GL_EXTENSION_COUNT }},
-    { "glTexCoord2fColor4fNormal3fVertex3fvSUN", glTexCoord2fColor4fNormal3fVertex3fvSUN, 0, 0, { GL_SUN_vertex, GL_EXTENSION_COUNT }},
-    { "glTexCoord2fColor4ubVertex3fSUN", glTexCoord2fColor4ubVertex3fSUN, 0, 0, { GL_SUN_vertex, GL_EXTENSION_COUNT }},
-    { "glTexCoord2fColor4ubVertex3fvSUN", glTexCoord2fColor4ubVertex3fvSUN, 0, 0, { GL_SUN_vertex, GL_EXTENSION_COUNT }},
-    { "glTexCoord2fNormal3fVertex3fSUN", glTexCoord2fNormal3fVertex3fSUN, 0, 0, { GL_SUN_vertex, GL_EXTENSION_COUNT }},
-    { "glTexCoord2fNormal3fVertex3fvSUN", glTexCoord2fNormal3fVertex3fvSUN, 0, 0, { GL_SUN_vertex, GL_EXTENSION_COUNT }},
-    { "glTexCoord2fVertex3fSUN", glTexCoord2fVertex3fSUN, 0, 0, { GL_SUN_vertex, GL_EXTENSION_COUNT }},
-    { "glTexCoord2fVertex3fvSUN", glTexCoord2fVertex3fvSUN, 0, 0, { GL_SUN_vertex, GL_EXTENSION_COUNT }},
-    { "glTexCoord2hNV", glTexCoord2hNV, 0, 0, { GL_NV_half_float, GL_EXTENSION_COUNT }},
-    { "glTexCoord2hvNV", glTexCoord2hvNV, 0, 0, { GL_NV_half_float, GL_EXTENSION_COUNT }},
-    { "glTexCoord2xOES", glTexCoord2xOES, 0, 0, { GL_OES_fixed_point, GL_EXTENSION_COUNT }},
-    { "glTexCoord2xvOES", glTexCoord2xvOES, 0, 0, { GL_OES_fixed_point, GL_EXTENSION_COUNT }},
-    { "glTexCoord3bOES", glTexCoord3bOES, 0, 0, { GL_OES_byte_coordinates, GL_EXTENSION_COUNT }},
-    { "glTexCoord3bvOES", glTexCoord3bvOES, 0, 0, { GL_OES_byte_coordinates, GL_EXTENSION_COUNT }},
-    { "glTexCoord3hNV", glTexCoord3hNV, 0, 0, { GL_NV_half_float, GL_EXTENSION_COUNT }},
-    { "glTexCoord3hvNV", glTexCoord3hvNV, 0, 0, { GL_NV_half_float, GL_EXTENSION_COUNT }},
-    { "glTexCoord3xOES", glTexCoord3xOES, 0, 0, { GL_OES_fixed_point, GL_EXTENSION_COUNT }},
-    { "glTexCoord3xvOES", glTexCoord3xvOES, 0, 0, { GL_OES_fixed_point, GL_EXTENSION_COUNT }},
-    { "glTexCoord4bOES", glTexCoord4bOES, 0, 0, { GL_OES_byte_coordinates, GL_EXTENSION_COUNT }},
-    { "glTexCoord4bvOES", glTexCoord4bvOES, 0, 0, { GL_OES_byte_coordinates, GL_EXTENSION_COUNT }},
-    { "glTexCoord4fColor4fNormal3fVertex4fSUN", glTexCoord4fColor4fNormal3fVertex4fSUN, 0, 0, { GL_SUN_vertex, GL_EXTENSION_COUNT }},
-    { "glTexCoord4fColor4fNormal3fVertex4fvSUN", glTexCoord4fColor4fNormal3fVertex4fvSUN, 0, 0, { GL_SUN_vertex, GL_EXTENSION_COUNT }},
-    { "glTexCoord4fVertex4fSUN", glTexCoord4fVertex4fSUN, 0, 0, { GL_SUN_vertex, GL_EXTENSION_COUNT }},
-    { "glTexCoord4fVertex4fvSUN", glTexCoord4fVertex4fvSUN, 0, 0, { GL_SUN_vertex, GL_EXTENSION_COUNT }},
-    { "glTexCoord4hNV", glTexCoord4hNV, 0, 0, { GL_NV_half_float, GL_EXTENSION_COUNT }},
-    { "glTexCoord4hvNV", glTexCoord4hvNV, 0, 0, { GL_NV_half_float, GL_EXTENSION_COUNT }},
-    { "glTexCoord4xOES", glTexCoord4xOES, 0, 0, { GL_OES_fixed_point, GL_EXTENSION_COUNT }},
-    { "glTexCoord4xvOES", glTexCoord4xvOES, 0, 0, { GL_OES_fixed_point, GL_EXTENSION_COUNT }},
-    { "glTexCoordFormatNV", glTexCoordFormatNV, 0, 0, { GL_NV_vertex_buffer_unified_memory, GL_EXTENSION_COUNT }},
-    { "glTexCoordP1ui", glTexCoordP1ui, 3, 3, { GL_ARB_vertex_type_2_10_10_10_rev, GL_EXTENSION_COUNT }},
-    { "glTexCoordP1uiv", glTexCoordP1uiv, 3, 3, { GL_ARB_vertex_type_2_10_10_10_rev, GL_EXTENSION_COUNT }},
-    { "glTexCoordP2ui", glTexCoordP2ui, 3, 3, { GL_ARB_vertex_type_2_10_10_10_rev, GL_EXTENSION_COUNT }},
-    { "glTexCoordP2uiv", glTexCoordP2uiv, 3, 3, { GL_ARB_vertex_type_2_10_10_10_rev, GL_EXTENSION_COUNT }},
-    { "glTexCoordP3ui", glTexCoordP3ui, 3, 3, { GL_ARB_vertex_type_2_10_10_10_rev, GL_EXTENSION_COUNT }},
-    { "glTexCoordP3uiv", glTexCoordP3uiv, 3, 3, { GL_ARB_vertex_type_2_10_10_10_rev, GL_EXTENSION_COUNT }},
-    { "glTexCoordP4ui", glTexCoordP4ui, 3, 3, { GL_ARB_vertex_type_2_10_10_10_rev, GL_EXTENSION_COUNT }},
-    { "glTexCoordP4uiv", glTexCoordP4uiv, 3, 3, { GL_ARB_vertex_type_2_10_10_10_rev, GL_EXTENSION_COUNT }},
-    { "glTexCoordPointerEXT", glTexCoordPointerEXT, 0, 0, { GL_EXT_vertex_array, GL_EXTENSION_COUNT }},
-    { "glTexCoordPointerListIBM", glTexCoordPointerListIBM, 0, 0, { GL_IBM_vertex_array_lists, GL_EXTENSION_COUNT }},
-    { "glTexCoordPointervINTEL", glTexCoordPointervINTEL, 0, 0, { GL_INTEL_parallel_arrays, GL_EXTENSION_COUNT }},
-    { "glTexEnvx", glTexEnvx, 0, 0, { GL_NV_ES1_1_compatibility, GL_EXTENSION_COUNT }},
-    { "glTexEnvxOES", glTexEnvxOES, 0, 0, { GL_OES_fixed_point, GL_EXTENSION_COUNT }},
-    { "glTexEnvxv", glTexEnvxv, 0, 0, { GL_NV_ES1_1_compatibility, GL_EXTENSION_COUNT }},
-    { "glTexEnvxvOES", glTexEnvxvOES, 0, 0, { GL_OES_fixed_point, GL_EXTENSION_COUNT }},
-    { "glTexFilterFuncSGIS", glTexFilterFuncSGIS, 0, 0, { GL_SGIS_texture_filter4, GL_EXTENSION_COUNT }},
-    { "glTexGenxOES", glTexGenxOES, 0, 0, { GL_OES_fixed_point, GL_EXTENSION_COUNT }},
-    { "glTexGenxvOES", glTexGenxvOES, 0, 0, { GL_OES_fixed_point, GL_EXTENSION_COUNT }},
-    { "glTexImage2DMultisample", glTexImage2DMultisample, 3, 2, { GL_ARB_texture_multisample, GL_EXTENSION_COUNT }},
-    { "glTexImage2DMultisampleCoverageNV", glTexImage2DMultisampleCoverageNV, 0, 0, { GL_NV_texture_multisample, GL_EXTENSION_COUNT }},
-    { "glTexImage3D", glTexImage3D, 1, 2, { GL_EXTENSION_COUNT }},
-    { "glTexImage3DEXT", glTexImage3DEXT, 0, 0, { GL_EXT_texture3D, GL_EXTENSION_COUNT }},
-    { "glTexImage3DMultisample", glTexImage3DMultisample, 3, 2, { GL_ARB_texture_multisample, GL_EXTENSION_COUNT }},
-    { "glTexImage3DMultisampleCoverageNV", glTexImage3DMultisampleCoverageNV, 0, 0, { GL_NV_texture_multisample, GL_EXTENSION_COUNT }},
-    { "glTexImage4DSGIS", glTexImage4DSGIS, 0, 0, { GL_SGIS_texture4D, GL_EXTENSION_COUNT }},
-    { "glTexPageCommitmentARB", glTexPageCommitmentARB, 0, 0, { GL_ARB_sparse_texture, GL_EXTENSION_COUNT }},
-    { "glTexPageCommitmentMemNV", glTexPageCommitmentMemNV, 0, 0, { GL_NV_memory_object_sparse, GL_EXTENSION_COUNT }},
-    { "glTexParameterIiv", glTexParameterIiv, 3, 0, { GL_EXTENSION_COUNT }},
-    { "glTexParameterIivEXT", glTexParameterIivEXT, 0, 0, { GL_EXT_texture_integer, GL_EXTENSION_COUNT }},
-    { "glTexParameterIuiv", glTexParameterIuiv, 3, 0, { GL_EXTENSION_COUNT }},
-    { "glTexParameterIuivEXT", glTexParameterIuivEXT, 0, 0, { GL_EXT_texture_integer, GL_EXTENSION_COUNT }},
-    { "glTexParameterx", glTexParameterx, 0, 0, { GL_NV_ES1_1_compatibility, GL_EXTENSION_COUNT }},
-    { "glTexParameterxOES", glTexParameterxOES, 0, 0, { GL_OES_fixed_point, GL_EXTENSION_COUNT }},
-    { "glTexParameterxv", glTexParameterxv, 0, 0, { GL_NV_ES1_1_compatibility, GL_EXTENSION_COUNT }},
-    { "glTexParameterxvOES", glTexParameterxvOES, 0, 0, { GL_OES_fixed_point, GL_EXTENSION_COUNT }},
-    { "glTexRenderbufferNV", glTexRenderbufferNV, 0, 0, { GL_NV_explicit_multisample, GL_EXTENSION_COUNT }},
-    { "glTexStorage1D", glTexStorage1D, 4, 2, { GL_ARB_texture_storage, GL_EXTENSION_COUNT }},
-    { "glTexStorage1DEXT", glTexStorage1DEXT, 0, 0, { GL_EXT_texture_storage, GL_EXTENSION_COUNT }},
-    { "glTexStorage2D", glTexStorage2D, 4, 2, { GL_ARB_texture_storage, GL_EXTENSION_COUNT }},
-    { "glTexStorage2DEXT", glTexStorage2DEXT, 0, 0, { GL_EXT_texture_storage, GL_EXTENSION_COUNT }},
-    { "glTexStorage2DMultisample", glTexStorage2DMultisample, 4, 3, { GL_ARB_texture_storage_multisample, GL_EXTENSION_COUNT }},
-    { "glTexStorage3D", glTexStorage3D, 4, 2, { GL_ARB_texture_storage, GL_EXTENSION_COUNT }},
-    { "glTexStorage3DEXT", glTexStorage3DEXT, 0, 0, { GL_EXT_texture_storage, GL_EXTENSION_COUNT }},
-    { "glTexStorage3DMultisample", glTexStorage3DMultisample, 4, 3, { GL_ARB_texture_storage_multisample, GL_EXTENSION_COUNT }},
-    { "glTexStorageMem1DEXT", glTexStorageMem1DEXT, 0, 0, { GL_EXT_memory_object, GL_EXTENSION_COUNT }},
-    { "glTexStorageMem2DEXT", glTexStorageMem2DEXT, 0, 0, { GL_EXT_memory_object, GL_EXTENSION_COUNT }},
-    { "glTexStorageMem2DMultisampleEXT", glTexStorageMem2DMultisampleEXT, 0, 0, { GL_EXT_memory_object, GL_EXTENSION_COUNT }},
-    { "glTexStorageMem3DEXT", glTexStorageMem3DEXT, 0, 0, { GL_EXT_memory_object, GL_EXTENSION_COUNT }},
-    { "glTexStorageMem3DMultisampleEXT", glTexStorageMem3DMultisampleEXT, 0, 0, { GL_EXT_memory_object, GL_EXTENSION_COUNT }},
-    { "glTexStorageSparseAMD", glTexStorageSparseAMD, 0, 0, { GL_AMD_sparse_texture, GL_EXTENSION_COUNT }},
-    { "glTexSubImage1DEXT", glTexSubImage1DEXT, 0, 0, { GL_EXT_subtexture, GL_EXTENSION_COUNT }},
-    { "glTexSubImage2DEXT", glTexSubImage2DEXT, 0, 0, { GL_EXT_subtexture, GL_EXTENSION_COUNT }},
-    { "glTexSubImage3D", glTexSubImage3D, 1, 2, { GL_EXTENSION_COUNT }},
-    { "glTexSubImage3DEXT", glTexSubImage3DEXT, 0, 0, { GL_EXT_texture3D, GL_EXTENSION_COUNT }},
-    { "glTexSubImage4DSGIS", glTexSubImage4DSGIS, 0, 0, { GL_SGIS_texture4D, GL_EXTENSION_COUNT }},
-    { "glTextureAttachMemoryNV", glTextureAttachMemoryNV, 0, 0, { GL_NV_memory_attachment, GL_EXTENSION_COUNT }},
-    { "glTextureBarrier", glTextureBarrier, 4, 5, { GL_ARB_texture_barrier, GL_EXTENSION_COUNT }},
-    { "glTextureBarrierNV", glTextureBarrierNV, 0, 0, { GL_NV_texture_barrier, GL_EXTENSION_COUNT }},
-    { "glTextureBuffer", glTextureBuffer, 4, 5, { GL_ARB_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glTextureBufferEXT", glTextureBufferEXT, 0, 0, { GL_EXT_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glTextureBufferRange", glTextureBufferRange, 4, 5, { GL_ARB_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glTextureBufferRangeEXT", glTextureBufferRangeEXT, 0, 0, { GL_EXT_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glTextureColorMaskSGIS", glTextureColorMaskSGIS, 0, 0, { GL_SGIS_texture_color_mask, GL_EXTENSION_COUNT }},
-    { "glTextureImage1DEXT", glTextureImage1DEXT, 0, 0, { GL_EXT_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glTextureImage2DEXT", glTextureImage2DEXT, 0, 0, { GL_EXT_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glTextureImage2DMultisampleCoverageNV", glTextureImage2DMultisampleCoverageNV, 0, 0, { GL_NV_texture_multisample, GL_EXTENSION_COUNT }},
-    { "glTextureImage2DMultisampleNV", glTextureImage2DMultisampleNV, 0, 0, { GL_NV_texture_multisample, GL_EXTENSION_COUNT }},
-    { "glTextureImage3DEXT", glTextureImage3DEXT, 0, 0, { GL_EXT_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glTextureImage3DMultisampleCoverageNV", glTextureImage3DMultisampleCoverageNV, 0, 0, { GL_NV_texture_multisample, GL_EXTENSION_COUNT }},
-    { "glTextureImage3DMultisampleNV", glTextureImage3DMultisampleNV, 0, 0, { GL_NV_texture_multisample, GL_EXTENSION_COUNT }},
-    { "glTextureLightEXT", glTextureLightEXT, 0, 0, { GL_EXT_light_texture, GL_EXTENSION_COUNT }},
-    { "glTextureMaterialEXT", glTextureMaterialEXT, 0, 0, { GL_EXT_light_texture, GL_EXTENSION_COUNT }},
-    { "glTextureNormalEXT", glTextureNormalEXT, 0, 0, { GL_EXT_texture_perturb_normal, GL_EXTENSION_COUNT }},
-    { "glTexturePageCommitmentEXT", glTexturePageCommitmentEXT, 0, 0, { GL_EXT_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glTexturePageCommitmentMemNV", glTexturePageCommitmentMemNV, 0, 0, { GL_NV_memory_object_sparse, GL_EXTENSION_COUNT }},
-    { "glTextureParameterIiv", glTextureParameterIiv, 4, 5, { GL_ARB_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glTextureParameterIivEXT", glTextureParameterIivEXT, 0, 0, { GL_EXT_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glTextureParameterIuiv", glTextureParameterIuiv, 4, 5, { GL_ARB_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glTextureParameterIuivEXT", glTextureParameterIuivEXT, 0, 0, { GL_EXT_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glTextureParameterf", glTextureParameterf, 4, 5, { GL_ARB_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glTextureParameterfEXT", glTextureParameterfEXT, 0, 0, { GL_EXT_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glTextureParameterfv", glTextureParameterfv, 4, 5, { GL_ARB_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glTextureParameterfvEXT", glTextureParameterfvEXT, 0, 0, { GL_EXT_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glTextureParameteri", glTextureParameteri, 4, 5, { GL_ARB_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glTextureParameteriEXT", glTextureParameteriEXT, 0, 0, { GL_EXT_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glTextureParameteriv", glTextureParameteriv, 4, 5, { GL_ARB_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glTextureParameterivEXT", glTextureParameterivEXT, 0, 0, { GL_EXT_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glTextureRangeAPPLE", glTextureRangeAPPLE, 0, 0, { GL_APPLE_texture_range, GL_EXTENSION_COUNT }},
-    { "glTextureRenderbufferEXT", glTextureRenderbufferEXT, 0, 0, { GL_EXT_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glTextureStorage1D", glTextureStorage1D, 4, 5, { GL_ARB_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glTextureStorage1DEXT", glTextureStorage1DEXT, 0, 0, { GL_EXT_direct_state_access, GL_EXT_texture_storage, GL_EXTENSION_COUNT }},
-    { "glTextureStorage2D", glTextureStorage2D, 4, 5, { GL_ARB_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glTextureStorage2DEXT", glTextureStorage2DEXT, 0, 0, { GL_EXT_direct_state_access, GL_EXT_texture_storage, GL_EXTENSION_COUNT }},
-    { "glTextureStorage2DMultisample", glTextureStorage2DMultisample, 4, 5, { GL_ARB_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glTextureStorage2DMultisampleEXT", glTextureStorage2DMultisampleEXT, 0, 0, { GL_EXT_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glTextureStorage3D", glTextureStorage3D, 4, 5, { GL_ARB_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glTextureStorage3DEXT", glTextureStorage3DEXT, 0, 0, { GL_EXT_direct_state_access, GL_EXT_texture_storage, GL_EXTENSION_COUNT }},
-    { "glTextureStorage3DMultisample", glTextureStorage3DMultisample, 4, 5, { GL_ARB_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glTextureStorage3DMultisampleEXT", glTextureStorage3DMultisampleEXT, 0, 0, { GL_EXT_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glTextureStorageMem1DEXT", glTextureStorageMem1DEXT, 0, 0, { GL_EXT_memory_object, GL_EXTENSION_COUNT }},
-    { "glTextureStorageMem2DEXT", glTextureStorageMem2DEXT, 0, 0, { GL_EXT_memory_object, GL_EXTENSION_COUNT }},
-    { "glTextureStorageMem2DMultisampleEXT", glTextureStorageMem2DMultisampleEXT, 0, 0, { GL_EXT_memory_object, GL_EXTENSION_COUNT }},
-    { "glTextureStorageMem3DEXT", glTextureStorageMem3DEXT, 0, 0, { GL_EXT_memory_object, GL_EXTENSION_COUNT }},
-    { "glTextureStorageMem3DMultisampleEXT", glTextureStorageMem3DMultisampleEXT, 0, 0, { GL_EXT_memory_object, GL_EXTENSION_COUNT }},
-    { "glTextureStorageSparseAMD", glTextureStorageSparseAMD, 0, 0, { GL_AMD_sparse_texture, GL_EXTENSION_COUNT }},
-    { "glTextureSubImage1D", glTextureSubImage1D, 4, 5, { GL_ARB_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glTextureSubImage1DEXT", glTextureSubImage1DEXT, 0, 0, { GL_EXT_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glTextureSubImage2D", glTextureSubImage2D, 4, 5, { GL_ARB_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glTextureSubImage2DEXT", glTextureSubImage2DEXT, 0, 0, { GL_EXT_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glTextureSubImage3D", glTextureSubImage3D, 4, 5, { GL_ARB_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glTextureSubImage3DEXT", glTextureSubImage3DEXT, 0, 0, { GL_EXT_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glTextureView", glTextureView, 4, 3, { GL_ARB_texture_view, GL_EXTENSION_COUNT }},
-    { "glTrackMatrixNV", glTrackMatrixNV, 0, 0, { GL_NV_vertex_program, GL_EXTENSION_COUNT }},
-    { "glTransformFeedbackAttribsNV", glTransformFeedbackAttribsNV, 0, 0, { GL_NV_transform_feedback, GL_EXTENSION_COUNT }},
-    { "glTransformFeedbackBufferBase", glTransformFeedbackBufferBase, 4, 5, { GL_ARB_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glTransformFeedbackBufferRange", glTransformFeedbackBufferRange, 4, 5, { GL_ARB_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glTransformFeedbackStreamAttribsNV", glTransformFeedbackStreamAttribsNV, 0, 0, { GL_NV_transform_feedback, GL_EXTENSION_COUNT }},
-    { "glTransformFeedbackVaryings", glTransformFeedbackVaryings, 3, 0, { GL_EXTENSION_COUNT }},
-    { "glTransformFeedbackVaryingsEXT", glTransformFeedbackVaryingsEXT, 0, 0, { GL_EXT_transform_feedback, GL_EXTENSION_COUNT }},
-    { "glTransformFeedbackVaryingsNV", glTransformFeedbackVaryingsNV, 0, 0, { GL_NV_transform_feedback, GL_EXTENSION_COUNT }},
-    { "glTransformPathNV", glTransformPathNV, 0, 0, { GL_NV_path_rendering, GL_EXTENSION_COUNT }},
-    { "glTranslatex", glTranslatex, 0, 0, { GL_NV_ES1_1_compatibility, GL_EXTENSION_COUNT }},
-    { "glTranslatexOES", glTranslatexOES, 0, 0, { GL_OES_fixed_point, GL_EXTENSION_COUNT }},
-    { "glUniform1d", glUniform1d, 4, 0, { GL_ARB_gpu_shader_fp64, GL_EXTENSION_COUNT }},
-    { "glUniform1dv", glUniform1dv, 4, 0, { GL_ARB_gpu_shader_fp64, GL_EXTENSION_COUNT }},
-    { "glUniform1f", glUniform1f, 2, 0, { GL_EXTENSION_COUNT }},
-    { "glUniform1fARB", glUniform1fARB, 0, 0, { GL_ARB_shader_objects, GL_EXTENSION_COUNT }},
-    { "glUniform1fv", glUniform1fv, 2, 0, { GL_EXTENSION_COUNT }},
-    { "glUniform1fvARB", glUniform1fvARB, 0, 0, { GL_ARB_shader_objects, GL_EXTENSION_COUNT }},
-    { "glUniform1i", glUniform1i, 2, 0, { GL_EXTENSION_COUNT }},
-    { "glUniform1i64ARB", glUniform1i64ARB, 0, 0, { GL_ARB_gpu_shader_int64, GL_EXTENSION_COUNT }},
-    { "glUniform1i64NV", glUniform1i64NV, 0, 0, { GL_AMD_gpu_shader_int64, GL_NV_gpu_shader5, GL_EXTENSION_COUNT }},
-    { "glUniform1i64vARB", glUniform1i64vARB, 0, 0, { GL_ARB_gpu_shader_int64, GL_EXTENSION_COUNT }},
-    { "glUniform1i64vNV", glUniform1i64vNV, 0, 0, { GL_AMD_gpu_shader_int64, GL_NV_gpu_shader5, GL_EXTENSION_COUNT }},
-    { "glUniform1iARB", glUniform1iARB, 0, 0, { GL_ARB_shader_objects, GL_EXTENSION_COUNT }},
-    { "glUniform1iv", glUniform1iv, 2, 0, { GL_EXTENSION_COUNT }},
-    { "glUniform1ivARB", glUniform1ivARB, 0, 0, { GL_ARB_shader_objects, GL_EXTENSION_COUNT }},
-    { "glUniform1ui", glUniform1ui, 3, 0, { GL_EXTENSION_COUNT }},
-    { "glUniform1ui64ARB", glUniform1ui64ARB, 0, 0, { GL_ARB_gpu_shader_int64, GL_EXTENSION_COUNT }},
-    { "glUniform1ui64NV", glUniform1ui64NV, 0, 0, { GL_AMD_gpu_shader_int64, GL_NV_gpu_shader5, GL_EXTENSION_COUNT }},
-    { "glUniform1ui64vARB", glUniform1ui64vARB, 0, 0, { GL_ARB_gpu_shader_int64, GL_EXTENSION_COUNT }},
-    { "glUniform1ui64vNV", glUniform1ui64vNV, 0, 0, { GL_AMD_gpu_shader_int64, GL_NV_gpu_shader5, GL_EXTENSION_COUNT }},
-    { "glUniform1uiEXT", glUniform1uiEXT, 0, 0, { GL_EXT_gpu_shader4, GL_EXTENSION_COUNT }},
-    { "glUniform1uiv", glUniform1uiv, 3, 0, { GL_EXTENSION_COUNT }},
-    { "glUniform1uivEXT", glUniform1uivEXT, 0, 0, { GL_EXT_gpu_shader4, GL_EXTENSION_COUNT }},
-    { "glUniform2d", glUniform2d, 4, 0, { GL_ARB_gpu_shader_fp64, GL_EXTENSION_COUNT }},
-    { "glUniform2dv", glUniform2dv, 4, 0, { GL_ARB_gpu_shader_fp64, GL_EXTENSION_COUNT }},
-    { "glUniform2f", glUniform2f, 2, 0, { GL_EXTENSION_COUNT }},
-    { "glUniform2fARB", glUniform2fARB, 0, 0, { GL_ARB_shader_objects, GL_EXTENSION_COUNT }},
-    { "glUniform2fv", glUniform2fv, 2, 0, { GL_EXTENSION_COUNT }},
-    { "glUniform2fvARB", glUniform2fvARB, 0, 0, { GL_ARB_shader_objects, GL_EXTENSION_COUNT }},
-    { "glUniform2i", glUniform2i, 2, 0, { GL_EXTENSION_COUNT }},
-    { "glUniform2i64ARB", glUniform2i64ARB, 0, 0, { GL_ARB_gpu_shader_int64, GL_EXTENSION_COUNT }},
-    { "glUniform2i64NV", glUniform2i64NV, 0, 0, { GL_AMD_gpu_shader_int64, GL_NV_gpu_shader5, GL_EXTENSION_COUNT }},
-    { "glUniform2i64vARB", glUniform2i64vARB, 0, 0, { GL_ARB_gpu_shader_int64, GL_EXTENSION_COUNT }},
-    { "glUniform2i64vNV", glUniform2i64vNV, 0, 0, { GL_AMD_gpu_shader_int64, GL_NV_gpu_shader5, GL_EXTENSION_COUNT }},
-    { "glUniform2iARB", glUniform2iARB, 0, 0, { GL_ARB_shader_objects, GL_EXTENSION_COUNT }},
-    { "glUniform2iv", glUniform2iv, 2, 0, { GL_EXTENSION_COUNT }},
-    { "glUniform2ivARB", glUniform2ivARB, 0, 0, { GL_ARB_shader_objects, GL_EXTENSION_COUNT }},
-    { "glUniform2ui", glUniform2ui, 3, 0, { GL_EXTENSION_COUNT }},
-    { "glUniform2ui64ARB", glUniform2ui64ARB, 0, 0, { GL_ARB_gpu_shader_int64, GL_EXTENSION_COUNT }},
-    { "glUniform2ui64NV", glUniform2ui64NV, 0, 0, { GL_AMD_gpu_shader_int64, GL_NV_gpu_shader5, GL_EXTENSION_COUNT }},
-    { "glUniform2ui64vARB", glUniform2ui64vARB, 0, 0, { GL_ARB_gpu_shader_int64, GL_EXTENSION_COUNT }},
-    { "glUniform2ui64vNV", glUniform2ui64vNV, 0, 0, { GL_AMD_gpu_shader_int64, GL_NV_gpu_shader5, GL_EXTENSION_COUNT }},
-    { "glUniform2uiEXT", glUniform2uiEXT, 0, 0, { GL_EXT_gpu_shader4, GL_EXTENSION_COUNT }},
-    { "glUniform2uiv", glUniform2uiv, 3, 0, { GL_EXTENSION_COUNT }},
-    { "glUniform2uivEXT", glUniform2uivEXT, 0, 0, { GL_EXT_gpu_shader4, GL_EXTENSION_COUNT }},
-    { "glUniform3d", glUniform3d, 4, 0, { GL_ARB_gpu_shader_fp64, GL_EXTENSION_COUNT }},
-    { "glUniform3dv", glUniform3dv, 4, 0, { GL_ARB_gpu_shader_fp64, GL_EXTENSION_COUNT }},
-    { "glUniform3f", glUniform3f, 2, 0, { GL_EXTENSION_COUNT }},
-    { "glUniform3fARB", glUniform3fARB, 0, 0, { GL_ARB_shader_objects, GL_EXTENSION_COUNT }},
-    { "glUniform3fv", glUniform3fv, 2, 0, { GL_EXTENSION_COUNT }},
-    { "glUniform3fvARB", glUniform3fvARB, 0, 0, { GL_ARB_shader_objects, GL_EXTENSION_COUNT }},
-    { "glUniform3i", glUniform3i, 2, 0, { GL_EXTENSION_COUNT }},
-    { "glUniform3i64ARB", glUniform3i64ARB, 0, 0, { GL_ARB_gpu_shader_int64, GL_EXTENSION_COUNT }},
-    { "glUniform3i64NV", glUniform3i64NV, 0, 0, { GL_AMD_gpu_shader_int64, GL_NV_gpu_shader5, GL_EXTENSION_COUNT }},
-    { "glUniform3i64vARB", glUniform3i64vARB, 0, 0, { GL_ARB_gpu_shader_int64, GL_EXTENSION_COUNT }},
-    { "glUniform3i64vNV", glUniform3i64vNV, 0, 0, { GL_AMD_gpu_shader_int64, GL_NV_gpu_shader5, GL_EXTENSION_COUNT }},
-    { "glUniform3iARB", glUniform3iARB, 0, 0, { GL_ARB_shader_objects, GL_EXTENSION_COUNT }},
-    { "glUniform3iv", glUniform3iv, 2, 0, { GL_EXTENSION_COUNT }},
-    { "glUniform3ivARB", glUniform3ivARB, 0, 0, { GL_ARB_shader_objects, GL_EXTENSION_COUNT }},
-    { "glUniform3ui", glUniform3ui, 3, 0, { GL_EXTENSION_COUNT }},
-    { "glUniform3ui64ARB", glUniform3ui64ARB, 0, 0, { GL_ARB_gpu_shader_int64, GL_EXTENSION_COUNT }},
-    { "glUniform3ui64NV", glUniform3ui64NV, 0, 0, { GL_AMD_gpu_shader_int64, GL_NV_gpu_shader5, GL_EXTENSION_COUNT }},
-    { "glUniform3ui64vARB", glUniform3ui64vARB, 0, 0, { GL_ARB_gpu_shader_int64, GL_EXTENSION_COUNT }},
-    { "glUniform3ui64vNV", glUniform3ui64vNV, 0, 0, { GL_AMD_gpu_shader_int64, GL_NV_gpu_shader5, GL_EXTENSION_COUNT }},
-    { "glUniform3uiEXT", glUniform3uiEXT, 0, 0, { GL_EXT_gpu_shader4, GL_EXTENSION_COUNT }},
-    { "glUniform3uiv", glUniform3uiv, 3, 0, { GL_EXTENSION_COUNT }},
-    { "glUniform3uivEXT", glUniform3uivEXT, 0, 0, { GL_EXT_gpu_shader4, GL_EXTENSION_COUNT }},
-    { "glUniform4d", glUniform4d, 4, 0, { GL_ARB_gpu_shader_fp64, GL_EXTENSION_COUNT }},
-    { "glUniform4dv", glUniform4dv, 4, 0, { GL_ARB_gpu_shader_fp64, GL_EXTENSION_COUNT }},
-    { "glUniform4f", glUniform4f, 2, 0, { GL_EXTENSION_COUNT }},
-    { "glUniform4fARB", glUniform4fARB, 0, 0, { GL_ARB_shader_objects, GL_EXTENSION_COUNT }},
-    { "glUniform4fv", glUniform4fv, 2, 0, { GL_EXTENSION_COUNT }},
-    { "glUniform4fvARB", glUniform4fvARB, 0, 0, { GL_ARB_shader_objects, GL_EXTENSION_COUNT }},
-    { "glUniform4i", glUniform4i, 2, 0, { GL_EXTENSION_COUNT }},
-    { "glUniform4i64ARB", glUniform4i64ARB, 0, 0, { GL_ARB_gpu_shader_int64, GL_EXTENSION_COUNT }},
-    { "glUniform4i64NV", glUniform4i64NV, 0, 0, { GL_AMD_gpu_shader_int64, GL_NV_gpu_shader5, GL_EXTENSION_COUNT }},
-    { "glUniform4i64vARB", glUniform4i64vARB, 0, 0, { GL_ARB_gpu_shader_int64, GL_EXTENSION_COUNT }},
-    { "glUniform4i64vNV", glUniform4i64vNV, 0, 0, { GL_AMD_gpu_shader_int64, GL_NV_gpu_shader5, GL_EXTENSION_COUNT }},
-    { "glUniform4iARB", glUniform4iARB, 0, 0, { GL_ARB_shader_objects, GL_EXTENSION_COUNT }},
-    { "glUniform4iv", glUniform4iv, 2, 0, { GL_EXTENSION_COUNT }},
-    { "glUniform4ivARB", glUniform4ivARB, 0, 0, { GL_ARB_shader_objects, GL_EXTENSION_COUNT }},
-    { "glUniform4ui", glUniform4ui, 3, 0, { GL_EXTENSION_COUNT }},
-    { "glUniform4ui64ARB", glUniform4ui64ARB, 0, 0, { GL_ARB_gpu_shader_int64, GL_EXTENSION_COUNT }},
-    { "glUniform4ui64NV", glUniform4ui64NV, 0, 0, { GL_AMD_gpu_shader_int64, GL_NV_gpu_shader5, GL_EXTENSION_COUNT }},
-    { "glUniform4ui64vARB", glUniform4ui64vARB, 0, 0, { GL_ARB_gpu_shader_int64, GL_EXTENSION_COUNT }},
-    { "glUniform4ui64vNV", glUniform4ui64vNV, 0, 0, { GL_AMD_gpu_shader_int64, GL_NV_gpu_shader5, GL_EXTENSION_COUNT }},
-    { "glUniform4uiEXT", glUniform4uiEXT, 0, 0, { GL_EXT_gpu_shader4, GL_EXTENSION_COUNT }},
-    { "glUniform4uiv", glUniform4uiv, 3, 0, { GL_EXTENSION_COUNT }},
-    { "glUniform4uivEXT", glUniform4uivEXT, 0, 0, { GL_EXT_gpu_shader4, GL_EXTENSION_COUNT }},
-    { "glUniformBlockBinding", glUniformBlockBinding, 3, 1, { GL_ARB_uniform_buffer_object, GL_EXTENSION_COUNT }},
-    { "glUniformBufferEXT", glUniformBufferEXT, 0, 0, { GL_EXT_bindable_uniform, GL_EXTENSION_COUNT }},
-    { "glUniformHandleui64ARB", glUniformHandleui64ARB, 0, 0, { GL_ARB_bindless_texture, GL_EXTENSION_COUNT }},
-    { "glUniformHandleui64NV", glUniformHandleui64NV, 0, 0, { GL_NV_bindless_texture, GL_EXTENSION_COUNT }},
-    { "glUniformHandleui64vARB", glUniformHandleui64vARB, 0, 0, { GL_ARB_bindless_texture, GL_EXTENSION_COUNT }},
-    { "glUniformHandleui64vNV", glUniformHandleui64vNV, 0, 0, { GL_NV_bindless_texture, GL_EXTENSION_COUNT }},
-    { "glUniformMatrix2dv", glUniformMatrix2dv, 4, 0, { GL_ARB_gpu_shader_fp64, GL_EXTENSION_COUNT }},
-    { "glUniformMatrix2fv", glUniformMatrix2fv, 2, 0, { GL_EXTENSION_COUNT }},
-    { "glUniformMatrix2fvARB", glUniformMatrix2fvARB, 0, 0, { GL_ARB_shader_objects, GL_EXTENSION_COUNT }},
-    { "glUniformMatrix2x3dv", glUniformMatrix2x3dv, 4, 0, { GL_ARB_gpu_shader_fp64, GL_EXTENSION_COUNT }},
-    { "glUniformMatrix2x3fv", glUniformMatrix2x3fv, 2, 1, { GL_EXTENSION_COUNT }},
-    { "glUniformMatrix2x4dv", glUniformMatrix2x4dv, 4, 0, { GL_ARB_gpu_shader_fp64, GL_EXTENSION_COUNT }},
-    { "glUniformMatrix2x4fv", glUniformMatrix2x4fv, 2, 1, { GL_EXTENSION_COUNT }},
-    { "glUniformMatrix3dv", glUniformMatrix3dv, 4, 0, { GL_ARB_gpu_shader_fp64, GL_EXTENSION_COUNT }},
-    { "glUniformMatrix3fv", glUniformMatrix3fv, 2, 0, { GL_EXTENSION_COUNT }},
-    { "glUniformMatrix3fvARB", glUniformMatrix3fvARB, 0, 0, { GL_ARB_shader_objects, GL_EXTENSION_COUNT }},
-    { "glUniformMatrix3x2dv", glUniformMatrix3x2dv, 4, 0, { GL_ARB_gpu_shader_fp64, GL_EXTENSION_COUNT }},
-    { "glUniformMatrix3x2fv", glUniformMatrix3x2fv, 2, 1, { GL_EXTENSION_COUNT }},
-    { "glUniformMatrix3x4dv", glUniformMatrix3x4dv, 4, 0, { GL_ARB_gpu_shader_fp64, GL_EXTENSION_COUNT }},
-    { "glUniformMatrix3x4fv", glUniformMatrix3x4fv, 2, 1, { GL_EXTENSION_COUNT }},
-    { "glUniformMatrix4dv", glUniformMatrix4dv, 4, 0, { GL_ARB_gpu_shader_fp64, GL_EXTENSION_COUNT }},
-    { "glUniformMatrix4fv", glUniformMatrix4fv, 2, 0, { GL_EXTENSION_COUNT }},
-    { "glUniformMatrix4fvARB", glUniformMatrix4fvARB, 0, 0, { GL_ARB_shader_objects, GL_EXTENSION_COUNT }},
-    { "glUniformMatrix4x2dv", glUniformMatrix4x2dv, 4, 0, { GL_ARB_gpu_shader_fp64, GL_EXTENSION_COUNT }},
-    { "glUniformMatrix4x2fv", glUniformMatrix4x2fv, 2, 1, { GL_EXTENSION_COUNT }},
-    { "glUniformMatrix4x3dv", glUniformMatrix4x3dv, 4, 0, { GL_ARB_gpu_shader_fp64, GL_EXTENSION_COUNT }},
-    { "glUniformMatrix4x3fv", glUniformMatrix4x3fv, 2, 1, { GL_EXTENSION_COUNT }},
-    { "glUniformSubroutinesuiv", glUniformSubroutinesuiv, 4, 0, { GL_ARB_shader_subroutine, GL_EXTENSION_COUNT }},
-    { "glUniformui64NV", glUniformui64NV, 0, 0, { GL_NV_shader_buffer_load, GL_EXTENSION_COUNT }},
-    { "glUniformui64vNV", glUniformui64vNV, 0, 0, { GL_NV_shader_buffer_load, GL_EXTENSION_COUNT }},
-    { "glUnlockArraysEXT", glUnlockArraysEXT, 0, 0, { GL_EXT_compiled_vertex_array, GL_EXTENSION_COUNT }},
-    { "glUnmapBuffer", glUnmapBuffer, 1, 5, { GL_EXTENSION_COUNT }},
-    { "glUnmapBufferARB", glUnmapBufferARB, 0, 0, { GL_ARB_vertex_buffer_object, GL_EXTENSION_COUNT }},
-    { "glUnmapNamedBuffer", glUnmapNamedBuffer, 4, 5, { GL_ARB_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glUnmapNamedBufferEXT", glUnmapNamedBufferEXT, 0, 0, { GL_EXT_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glUnmapObjectBufferATI", glUnmapObjectBufferATI, 0, 0, { GL_ATI_map_object_buffer, GL_EXTENSION_COUNT }},
-    { "glUnmapTexture2DINTEL", glUnmapTexture2DINTEL, 0, 0, { GL_INTEL_map_texture, GL_EXTENSION_COUNT }},
-    { "glUpdateObjectBufferATI", glUpdateObjectBufferATI, 0, 0, { GL_ATI_vertex_array_object, GL_EXTENSION_COUNT }},
-    { "glUploadGpuMaskNVX", glUploadGpuMaskNVX, 0, 0, { GL_NVX_gpu_multicast2, GL_EXTENSION_COUNT }},
-    { "glUseProgram", glUseProgram, 2, 0, { GL_EXTENSION_COUNT }},
-    { "glUseProgramObjectARB", glUseProgramObjectARB, 0, 0, { GL_ARB_shader_objects, GL_EXTENSION_COUNT }},
-    { "glUseProgramStages", glUseProgramStages, 4, 1, { GL_ARB_separate_shader_objects, GL_EXTENSION_COUNT }},
-    { "glUseShaderProgramEXT", glUseShaderProgramEXT, 0, 0, { GL_EXT_separate_shader_objects, GL_EXTENSION_COUNT }},
-    { "glVDPAUFiniNV", glVDPAUFiniNV, 0, 0, { GL_NV_vdpau_interop, GL_EXTENSION_COUNT }},
-    { "glVDPAUGetSurfaceivNV", glVDPAUGetSurfaceivNV, 0, 0, { GL_NV_vdpau_interop, GL_EXTENSION_COUNT }},
-    { "glVDPAUInitNV", glVDPAUInitNV, 0, 0, { GL_NV_vdpau_interop, GL_EXTENSION_COUNT }},
-    { "glVDPAUIsSurfaceNV", glVDPAUIsSurfaceNV, 0, 0, { GL_NV_vdpau_interop, GL_EXTENSION_COUNT }},
-    { "glVDPAUMapSurfacesNV", glVDPAUMapSurfacesNV, 0, 0, { GL_NV_vdpau_interop, GL_EXTENSION_COUNT }},
-    { "glVDPAURegisterOutputSurfaceNV", glVDPAURegisterOutputSurfaceNV, 0, 0, { GL_NV_vdpau_interop, GL_EXTENSION_COUNT }},
-    { "glVDPAURegisterVideoSurfaceNV", glVDPAURegisterVideoSurfaceNV, 0, 0, { GL_NV_vdpau_interop, GL_EXTENSION_COUNT }},
-    { "glVDPAURegisterVideoSurfaceWithPictureStructureNV", glVDPAURegisterVideoSurfaceWithPictureStructureNV, 0, 0, { GL_NV_vdpau_interop2, GL_EXTENSION_COUNT }},
-    { "glVDPAUSurfaceAccessNV", glVDPAUSurfaceAccessNV, 0, 0, { GL_NV_vdpau_interop, GL_EXTENSION_COUNT }},
-    { "glVDPAUUnmapSurfacesNV", glVDPAUUnmapSurfacesNV, 0, 0, { GL_NV_vdpau_interop, GL_EXTENSION_COUNT }},
-    { "glVDPAUUnregisterSurfaceNV", glVDPAUUnregisterSurfaceNV, 0, 0, { GL_NV_vdpau_interop, GL_EXTENSION_COUNT }},
-    { "glValidateProgram", glValidateProgram, 2, 0, { GL_EXTENSION_COUNT }},
-    { "glValidateProgramARB", glValidateProgramARB, 0, 0, { GL_ARB_shader_objects, GL_EXTENSION_COUNT }},
-    { "glValidateProgramPipeline", glValidateProgramPipeline, 4, 1, { GL_ARB_separate_shader_objects, GL_EXTENSION_COUNT }},
-    { "glVariantArrayObjectATI", glVariantArrayObjectATI, 0, 0, { GL_ATI_vertex_array_object, GL_EXTENSION_COUNT }},
-    { "glVariantPointerEXT", glVariantPointerEXT, 0, 0, { GL_EXT_vertex_shader, GL_EXTENSION_COUNT }},
-    { "glVariantbvEXT", glVariantbvEXT, 0, 0, { GL_EXT_vertex_shader, GL_EXTENSION_COUNT }},
-    { "glVariantdvEXT", glVariantdvEXT, 0, 0, { GL_EXT_vertex_shader, GL_EXTENSION_COUNT }},
-    { "glVariantfvEXT", glVariantfvEXT, 0, 0, { GL_EXT_vertex_shader, GL_EXTENSION_COUNT }},
-    { "glVariantivEXT", glVariantivEXT, 0, 0, { GL_EXT_vertex_shader, GL_EXTENSION_COUNT }},
-    { "glVariantsvEXT", glVariantsvEXT, 0, 0, { GL_EXT_vertex_shader, GL_EXTENSION_COUNT }},
-    { "glVariantubvEXT", glVariantubvEXT, 0, 0, { GL_EXT_vertex_shader, GL_EXTENSION_COUNT }},
-    { "glVariantuivEXT", glVariantuivEXT, 0, 0, { GL_EXT_vertex_shader, GL_EXTENSION_COUNT }},
-    { "glVariantusvEXT", glVariantusvEXT, 0, 0, { GL_EXT_vertex_shader, GL_EXTENSION_COUNT }},
-    { "glVertex2bOES", glVertex2bOES, 0, 0, { GL_OES_byte_coordinates, GL_EXTENSION_COUNT }},
-    { "glVertex2bvOES", glVertex2bvOES, 0, 0, { GL_OES_byte_coordinates, GL_EXTENSION_COUNT }},
-    { "glVertex2hNV", glVertex2hNV, 0, 0, { GL_NV_half_float, GL_EXTENSION_COUNT }},
-    { "glVertex2hvNV", glVertex2hvNV, 0, 0, { GL_NV_half_float, GL_EXTENSION_COUNT }},
-    { "glVertex2xOES", glVertex2xOES, 0, 0, { GL_OES_fixed_point, GL_EXTENSION_COUNT }},
-    { "glVertex2xvOES", glVertex2xvOES, 0, 0, { GL_OES_fixed_point, GL_EXTENSION_COUNT }},
-    { "glVertex3bOES", glVertex3bOES, 0, 0, { GL_OES_byte_coordinates, GL_EXTENSION_COUNT }},
-    { "glVertex3bvOES", glVertex3bvOES, 0, 0, { GL_OES_byte_coordinates, GL_EXTENSION_COUNT }},
-    { "glVertex3hNV", glVertex3hNV, 0, 0, { GL_NV_half_float, GL_EXTENSION_COUNT }},
-    { "glVertex3hvNV", glVertex3hvNV, 0, 0, { GL_NV_half_float, GL_EXTENSION_COUNT }},
-    { "glVertex3xOES", glVertex3xOES, 0, 0, { GL_OES_fixed_point, GL_EXTENSION_COUNT }},
-    { "glVertex3xvOES", glVertex3xvOES, 0, 0, { GL_OES_fixed_point, GL_EXTENSION_COUNT }},
-    { "glVertex4bOES", glVertex4bOES, 0, 0, { GL_OES_byte_coordinates, GL_EXTENSION_COUNT }},
-    { "glVertex4bvOES", glVertex4bvOES, 0, 0, { GL_OES_byte_coordinates, GL_EXTENSION_COUNT }},
-    { "glVertex4hNV", glVertex4hNV, 0, 0, { GL_NV_half_float, GL_EXTENSION_COUNT }},
-    { "glVertex4hvNV", glVertex4hvNV, 0, 0, { GL_NV_half_float, GL_EXTENSION_COUNT }},
-    { "glVertex4xOES", glVertex4xOES, 0, 0, { GL_OES_fixed_point, GL_EXTENSION_COUNT }},
-    { "glVertex4xvOES", glVertex4xvOES, 0, 0, { GL_OES_fixed_point, GL_EXTENSION_COUNT }},
-    { "glVertexArrayAttribBinding", glVertexArrayAttribBinding, 4, 5, { GL_ARB_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glVertexArrayAttribFormat", glVertexArrayAttribFormat, 4, 5, { GL_ARB_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glVertexArrayAttribIFormat", glVertexArrayAttribIFormat, 4, 5, { GL_ARB_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glVertexArrayAttribLFormat", glVertexArrayAttribLFormat, 4, 5, { GL_ARB_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glVertexArrayBindVertexBufferEXT", glVertexArrayBindVertexBufferEXT, 0, 0, { GL_EXT_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glVertexArrayBindingDivisor", glVertexArrayBindingDivisor, 4, 5, { GL_ARB_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glVertexArrayColorOffsetEXT", glVertexArrayColorOffsetEXT, 0, 0, { GL_EXT_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glVertexArrayEdgeFlagOffsetEXT", glVertexArrayEdgeFlagOffsetEXT, 0, 0, { GL_EXT_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glVertexArrayElementBuffer", glVertexArrayElementBuffer, 4, 5, { GL_ARB_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glVertexArrayFogCoordOffsetEXT", glVertexArrayFogCoordOffsetEXT, 0, 0, { GL_EXT_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glVertexArrayIndexOffsetEXT", glVertexArrayIndexOffsetEXT, 0, 0, { GL_EXT_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glVertexArrayMultiTexCoordOffsetEXT", glVertexArrayMultiTexCoordOffsetEXT, 0, 0, { GL_EXT_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glVertexArrayNormalOffsetEXT", glVertexArrayNormalOffsetEXT, 0, 0, { GL_EXT_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glVertexArrayParameteriAPPLE", glVertexArrayParameteriAPPLE, 0, 0, { GL_APPLE_vertex_array_range, GL_EXTENSION_COUNT }},
-    { "glVertexArrayRangeAPPLE", glVertexArrayRangeAPPLE, 0, 0, { GL_APPLE_vertex_array_range, GL_EXTENSION_COUNT }},
-    { "glVertexArrayRangeNV", glVertexArrayRangeNV, 0, 0, { GL_NV_vertex_array_range, GL_EXTENSION_COUNT }},
-    { "glVertexArraySecondaryColorOffsetEXT", glVertexArraySecondaryColorOffsetEXT, 0, 0, { GL_EXT_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glVertexArrayTexCoordOffsetEXT", glVertexArrayTexCoordOffsetEXT, 0, 0, { GL_EXT_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glVertexArrayVertexAttribBindingEXT", glVertexArrayVertexAttribBindingEXT, 0, 0, { GL_EXT_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glVertexArrayVertexAttribDivisorEXT", glVertexArrayVertexAttribDivisorEXT, 0, 0, { GL_EXT_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glVertexArrayVertexAttribFormatEXT", glVertexArrayVertexAttribFormatEXT, 0, 0, { GL_EXT_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glVertexArrayVertexAttribIFormatEXT", glVertexArrayVertexAttribIFormatEXT, 0, 0, { GL_EXT_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glVertexArrayVertexAttribIOffsetEXT", glVertexArrayVertexAttribIOffsetEXT, 0, 0, { GL_EXT_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glVertexArrayVertexAttribLFormatEXT", glVertexArrayVertexAttribLFormatEXT, 0, 0, { GL_EXT_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glVertexArrayVertexAttribLOffsetEXT", glVertexArrayVertexAttribLOffsetEXT, 0, 0, { GL_EXT_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glVertexArrayVertexAttribOffsetEXT", glVertexArrayVertexAttribOffsetEXT, 0, 0, { GL_EXT_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glVertexArrayVertexBindingDivisorEXT", glVertexArrayVertexBindingDivisorEXT, 0, 0, { GL_EXT_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glVertexArrayVertexBuffer", glVertexArrayVertexBuffer, 4, 5, { GL_ARB_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glVertexArrayVertexBuffers", glVertexArrayVertexBuffers, 4, 5, { GL_ARB_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glVertexArrayVertexOffsetEXT", glVertexArrayVertexOffsetEXT, 0, 0, { GL_EXT_direct_state_access, GL_EXTENSION_COUNT }},
-    { "glVertexAttrib1d", glVertexAttrib1d, 2, 0, { GL_EXTENSION_COUNT }},
-    { "glVertexAttrib1dARB", glVertexAttrib1dARB, 0, 0, { GL_ARB_vertex_program, GL_ARB_vertex_shader, GL_EXTENSION_COUNT }},
-    { "glVertexAttrib1dNV", glVertexAttrib1dNV, 0, 0, { GL_NV_vertex_program, GL_EXTENSION_COUNT }},
-    { "glVertexAttrib1dv", glVertexAttrib1dv, 2, 0, { GL_EXTENSION_COUNT }},
-    { "glVertexAttrib1dvARB", glVertexAttrib1dvARB, 0, 0, { GL_ARB_vertex_program, GL_ARB_vertex_shader, GL_EXTENSION_COUNT }},
-    { "glVertexAttrib1dvNV", glVertexAttrib1dvNV, 0, 0, { GL_NV_vertex_program, GL_EXTENSION_COUNT }},
-    { "glVertexAttrib1f", glVertexAttrib1f, 2, 0, { GL_EXTENSION_COUNT }},
-    { "glVertexAttrib1fARB", glVertexAttrib1fARB, 0, 0, { GL_ARB_vertex_program, GL_ARB_vertex_shader, GL_EXTENSION_COUNT }},
-    { "glVertexAttrib1fNV", glVertexAttrib1fNV, 0, 0, { GL_NV_vertex_program, GL_EXTENSION_COUNT }},
-    { "glVertexAttrib1fv", glVertexAttrib1fv, 2, 0, { GL_EXTENSION_COUNT }},
-    { "glVertexAttrib1fvARB", glVertexAttrib1fvARB, 0, 0, { GL_ARB_vertex_program, GL_ARB_vertex_shader, GL_EXTENSION_COUNT }},
-    { "glVertexAttrib1fvNV", glVertexAttrib1fvNV, 0, 0, { GL_NV_vertex_program, GL_EXTENSION_COUNT }},
-    { "glVertexAttrib1hNV", glVertexAttrib1hNV, 0, 0, { GL_NV_half_float, GL_EXTENSION_COUNT }},
-    { "glVertexAttrib1hvNV", glVertexAttrib1hvNV, 0, 0, { GL_NV_half_float, GL_EXTENSION_COUNT }},
-    { "glVertexAttrib1s", glVertexAttrib1s, 2, 0, { GL_EXTENSION_COUNT }},
-    { "glVertexAttrib1sARB", glVertexAttrib1sARB, 0, 0, { GL_ARB_vertex_program, GL_ARB_vertex_shader, GL_EXTENSION_COUNT }},
-    { "glVertexAttrib1sNV", glVertexAttrib1sNV, 0, 0, { GL_NV_vertex_program, GL_EXTENSION_COUNT }},
-    { "glVertexAttrib1sv", glVertexAttrib1sv, 2, 0, { GL_EXTENSION_COUNT }},
-    { "glVertexAttrib1svARB", glVertexAttrib1svARB, 0, 0, { GL_ARB_vertex_program, GL_ARB_vertex_shader, GL_EXTENSION_COUNT }},
-    { "glVertexAttrib1svNV", glVertexAttrib1svNV, 0, 0, { GL_NV_vertex_program, GL_EXTENSION_COUNT }},
-    { "glVertexAttrib2d", glVertexAttrib2d, 2, 0, { GL_EXTENSION_COUNT }},
-    { "glVertexAttrib2dARB", glVertexAttrib2dARB, 0, 0, { GL_ARB_vertex_program, GL_ARB_vertex_shader, GL_EXTENSION_COUNT }},
-    { "glVertexAttrib2dNV", glVertexAttrib2dNV, 0, 0, { GL_NV_vertex_program, GL_EXTENSION_COUNT }},
-    { "glVertexAttrib2dv", glVertexAttrib2dv, 2, 0, { GL_EXTENSION_COUNT }},
-    { "glVertexAttrib2dvARB", glVertexAttrib2dvARB, 0, 0, { GL_ARB_vertex_program, GL_ARB_vertex_shader, GL_EXTENSION_COUNT }},
-    { "glVertexAttrib2dvNV", glVertexAttrib2dvNV, 0, 0, { GL_NV_vertex_program, GL_EXTENSION_COUNT }},
-    { "glVertexAttrib2f", glVertexAttrib2f, 2, 0, { GL_EXTENSION_COUNT }},
-    { "glVertexAttrib2fARB", glVertexAttrib2fARB, 0, 0, { GL_ARB_vertex_program, GL_ARB_vertex_shader, GL_EXTENSION_COUNT }},
-    { "glVertexAttrib2fNV", glVertexAttrib2fNV, 0, 0, { GL_NV_vertex_program, GL_EXTENSION_COUNT }},
-    { "glVertexAttrib2fv", glVertexAttrib2fv, 2, 0, { GL_EXTENSION_COUNT }},
-    { "glVertexAttrib2fvARB", glVertexAttrib2fvARB, 0, 0, { GL_ARB_vertex_program, GL_ARB_vertex_shader, GL_EXTENSION_COUNT }},
-    { "glVertexAttrib2fvNV", glVertexAttrib2fvNV, 0, 0, { GL_NV_vertex_program, GL_EXTENSION_COUNT }},
-    { "glVertexAttrib2hNV", glVertexAttrib2hNV, 0, 0, { GL_NV_half_float, GL_EXTENSION_COUNT }},
-    { "glVertexAttrib2hvNV", glVertexAttrib2hvNV, 0, 0, { GL_NV_half_float, GL_EXTENSION_COUNT }},
-    { "glVertexAttrib2s", glVertexAttrib2s, 2, 0, { GL_EXTENSION_COUNT }},
-    { "glVertexAttrib2sARB", glVertexAttrib2sARB, 0, 0, { GL_ARB_vertex_program, GL_ARB_vertex_shader, GL_EXTENSION_COUNT }},
-    { "glVertexAttrib2sNV", glVertexAttrib2sNV, 0, 0, { GL_NV_vertex_program, GL_EXTENSION_COUNT }},
-    { "glVertexAttrib2sv", glVertexAttrib2sv, 2, 0, { GL_EXTENSION_COUNT }},
-    { "glVertexAttrib2svARB", glVertexAttrib2svARB, 0, 0, { GL_ARB_vertex_program, GL_ARB_vertex_shader, GL_EXTENSION_COUNT }},
-    { "glVertexAttrib2svNV", glVertexAttrib2svNV, 0, 0, { GL_NV_vertex_program, GL_EXTENSION_COUNT }},
-    { "glVertexAttrib3d", glVertexAttrib3d, 2, 0, { GL_EXTENSION_COUNT }},
-    { "glVertexAttrib3dARB", glVertexAttrib3dARB, 0, 0, { GL_ARB_vertex_program, GL_ARB_vertex_shader, GL_EXTENSION_COUNT }},
-    { "glVertexAttrib3dNV", glVertexAttrib3dNV, 0, 0, { GL_NV_vertex_program, GL_EXTENSION_COUNT }},
-    { "glVertexAttrib3dv", glVertexAttrib3dv, 2, 0, { GL_EXTENSION_COUNT }},
-    { "glVertexAttrib3dvARB", glVertexAttrib3dvARB, 0, 0, { GL_ARB_vertex_program, GL_ARB_vertex_shader, GL_EXTENSION_COUNT }},
-    { "glVertexAttrib3dvNV", glVertexAttrib3dvNV, 0, 0, { GL_NV_vertex_program, GL_EXTENSION_COUNT }},
-    { "glVertexAttrib3f", glVertexAttrib3f, 2, 0, { GL_EXTENSION_COUNT }},
-    { "glVertexAttrib3fARB", glVertexAttrib3fARB, 0, 0, { GL_ARB_vertex_program, GL_ARB_vertex_shader, GL_EXTENSION_COUNT }},
-    { "glVertexAttrib3fNV", glVertexAttrib3fNV, 0, 0, { GL_NV_vertex_program, GL_EXTENSION_COUNT }},
-    { "glVertexAttrib3fv", glVertexAttrib3fv, 2, 0, { GL_EXTENSION_COUNT }},
-    { "glVertexAttrib3fvARB", glVertexAttrib3fvARB, 0, 0, { GL_ARB_vertex_program, GL_ARB_vertex_shader, GL_EXTENSION_COUNT }},
-    { "glVertexAttrib3fvNV", glVertexAttrib3fvNV, 0, 0, { GL_NV_vertex_program, GL_EXTENSION_COUNT }},
-    { "glVertexAttrib3hNV", glVertexAttrib3hNV, 0, 0, { GL_NV_half_float, GL_EXTENSION_COUNT }},
-    { "glVertexAttrib3hvNV", glVertexAttrib3hvNV, 0, 0, { GL_NV_half_float, GL_EXTENSION_COUNT }},
-    { "glVertexAttrib3s", glVertexAttrib3s, 2, 0, { GL_EXTENSION_COUNT }},
-    { "glVertexAttrib3sARB", glVertexAttrib3sARB, 0, 0, { GL_ARB_vertex_program, GL_ARB_vertex_shader, GL_EXTENSION_COUNT }},
-    { "glVertexAttrib3sNV", glVertexAttrib3sNV, 0, 0, { GL_NV_vertex_program, GL_EXTENSION_COUNT }},
-    { "glVertexAttrib3sv", glVertexAttrib3sv, 2, 0, { GL_EXTENSION_COUNT }},
-    { "glVertexAttrib3svARB", glVertexAttrib3svARB, 0, 0, { GL_ARB_vertex_program, GL_ARB_vertex_shader, GL_EXTENSION_COUNT }},
-    { "glVertexAttrib3svNV", glVertexAttrib3svNV, 0, 0, { GL_NV_vertex_program, GL_EXTENSION_COUNT }},
-    { "glVertexAttrib4Nbv", glVertexAttrib4Nbv, 2, 0, { GL_EXTENSION_COUNT }},
-    { "glVertexAttrib4NbvARB", glVertexAttrib4NbvARB, 0, 0, { GL_ARB_vertex_program, GL_ARB_vertex_shader, GL_EXTENSION_COUNT }},
-    { "glVertexAttrib4Niv", glVertexAttrib4Niv, 2, 0, { GL_EXTENSION_COUNT }},
-    { "glVertexAttrib4NivARB", glVertexAttrib4NivARB, 0, 0, { GL_ARB_vertex_program, GL_ARB_vertex_shader, GL_EXTENSION_COUNT }},
-    { "glVertexAttrib4Nsv", glVertexAttrib4Nsv, 2, 0, { GL_EXTENSION_COUNT }},
-    { "glVertexAttrib4NsvARB", glVertexAttrib4NsvARB, 0, 0, { GL_ARB_vertex_program, GL_ARB_vertex_shader, GL_EXTENSION_COUNT }},
-    { "glVertexAttrib4Nub", glVertexAttrib4Nub, 2, 0, { GL_EXTENSION_COUNT }},
-    { "glVertexAttrib4NubARB", glVertexAttrib4NubARB, 0, 0, { GL_ARB_vertex_program, GL_ARB_vertex_shader, GL_EXTENSION_COUNT }},
-    { "glVertexAttrib4Nubv", glVertexAttrib4Nubv, 2, 0, { GL_EXTENSION_COUNT }},
-    { "glVertexAttrib4NubvARB", glVertexAttrib4NubvARB, 0, 0, { GL_ARB_vertex_program, GL_ARB_vertex_shader, GL_EXTENSION_COUNT }},
-    { "glVertexAttrib4Nuiv", glVertexAttrib4Nuiv, 2, 0, { GL_EXTENSION_COUNT }},
-    { "glVertexAttrib4NuivARB", glVertexAttrib4NuivARB, 0, 0, { GL_ARB_vertex_program, GL_ARB_vertex_shader, GL_EXTENSION_COUNT }},
-    { "glVertexAttrib4Nusv", glVertexAttrib4Nusv, 2, 0, { GL_EXTENSION_COUNT }},
-    { "glVertexAttrib4NusvARB", glVertexAttrib4NusvARB, 0, 0, { GL_ARB_vertex_program, GL_ARB_vertex_shader, GL_EXTENSION_COUNT }},
-    { "glVertexAttrib4bv", glVertexAttrib4bv, 2, 0, { GL_EXTENSION_COUNT }},
-    { "glVertexAttrib4bvARB", glVertexAttrib4bvARB, 0, 0, { GL_ARB_vertex_program, GL_ARB_vertex_shader, GL_EXTENSION_COUNT }},
-    { "glVertexAttrib4d", glVertexAttrib4d, 2, 0, { GL_EXTENSION_COUNT }},
-    { "glVertexAttrib4dARB", glVertexAttrib4dARB, 0, 0, { GL_ARB_vertex_program, GL_ARB_vertex_shader, GL_EXTENSION_COUNT }},
-    { "glVertexAttrib4dNV", glVertexAttrib4dNV, 0, 0, { GL_NV_vertex_program, GL_EXTENSION_COUNT }},
-    { "glVertexAttrib4dv", glVertexAttrib4dv, 2, 0, { GL_EXTENSION_COUNT }},
-    { "glVertexAttrib4dvARB", glVertexAttrib4dvARB, 0, 0, { GL_ARB_vertex_program, GL_ARB_vertex_shader, GL_EXTENSION_COUNT }},
-    { "glVertexAttrib4dvNV", glVertexAttrib4dvNV, 0, 0, { GL_NV_vertex_program, GL_EXTENSION_COUNT }},
-    { "glVertexAttrib4f", glVertexAttrib4f, 2, 0, { GL_EXTENSION_COUNT }},
-    { "glVertexAttrib4fARB", glVertexAttrib4fARB, 0, 0, { GL_ARB_vertex_program, GL_ARB_vertex_shader, GL_EXTENSION_COUNT }},
-    { "glVertexAttrib4fNV", glVertexAttrib4fNV, 0, 0, { GL_NV_vertex_program, GL_EXTENSION_COUNT }},
-    { "glVertexAttrib4fv", glVertexAttrib4fv, 2, 0, { GL_EXTENSION_COUNT }},
-    { "glVertexAttrib4fvARB", glVertexAttrib4fvARB, 0, 0, { GL_ARB_vertex_program, GL_ARB_vertex_shader, GL_EXTENSION_COUNT }},
-    { "glVertexAttrib4fvNV", glVertexAttrib4fvNV, 0, 0, { GL_NV_vertex_program, GL_EXTENSION_COUNT }},
-    { "glVertexAttrib4hNV", glVertexAttrib4hNV, 0, 0, { GL_NV_half_float, GL_EXTENSION_COUNT }},
-    { "glVertexAttrib4hvNV", glVertexAttrib4hvNV, 0, 0, { GL_NV_half_float, GL_EXTENSION_COUNT }},
-    { "glVertexAttrib4iv", glVertexAttrib4iv, 2, 0, { GL_EXTENSION_COUNT }},
-    { "glVertexAttrib4ivARB", glVertexAttrib4ivARB, 0, 0, { GL_ARB_vertex_program, GL_ARB_vertex_shader, GL_EXTENSION_COUNT }},
-    { "glVertexAttrib4s", glVertexAttrib4s, 2, 0, { GL_EXTENSION_COUNT }},
-    { "glVertexAttrib4sARB", glVertexAttrib4sARB, 0, 0, { GL_ARB_vertex_program, GL_ARB_vertex_shader, GL_EXTENSION_COUNT }},
-    { "glVertexAttrib4sNV", glVertexAttrib4sNV, 0, 0, { GL_NV_vertex_program, GL_EXTENSION_COUNT }},
-    { "glVertexAttrib4sv", glVertexAttrib4sv, 2, 0, { GL_EXTENSION_COUNT }},
-    { "glVertexAttrib4svARB", glVertexAttrib4svARB, 0, 0, { GL_ARB_vertex_program, GL_ARB_vertex_shader, GL_EXTENSION_COUNT }},
-    { "glVertexAttrib4svNV", glVertexAttrib4svNV, 0, 0, { GL_NV_vertex_program, GL_EXTENSION_COUNT }},
-    { "glVertexAttrib4ubNV", glVertexAttrib4ubNV, 0, 0, { GL_NV_vertex_program, GL_EXTENSION_COUNT }},
-    { "glVertexAttrib4ubv", glVertexAttrib4ubv, 2, 0, { GL_EXTENSION_COUNT }},
-    { "glVertexAttrib4ubvARB", glVertexAttrib4ubvARB, 0, 0, { GL_ARB_vertex_program, GL_ARB_vertex_shader, GL_EXTENSION_COUNT }},
-    { "glVertexAttrib4ubvNV", glVertexAttrib4ubvNV, 0, 0, { GL_NV_vertex_program, GL_EXTENSION_COUNT }},
-    { "glVertexAttrib4uiv", glVertexAttrib4uiv, 2, 0, { GL_EXTENSION_COUNT }},
-    { "glVertexAttrib4uivARB", glVertexAttrib4uivARB, 0, 0, { GL_ARB_vertex_program, GL_ARB_vertex_shader, GL_EXTENSION_COUNT }},
-    { "glVertexAttrib4usv", glVertexAttrib4usv, 2, 0, { GL_EXTENSION_COUNT }},
-    { "glVertexAttrib4usvARB", glVertexAttrib4usvARB, 0, 0, { GL_ARB_vertex_program, GL_ARB_vertex_shader, GL_EXTENSION_COUNT }},
-    { "glVertexAttribArrayObjectATI", glVertexAttribArrayObjectATI, 0, 0, { GL_ATI_vertex_attrib_array_object, GL_EXTENSION_COUNT }},
-    { "glVertexAttribBinding", glVertexAttribBinding, 4, 3, { GL_ARB_vertex_attrib_binding, GL_EXTENSION_COUNT }},
-    { "glVertexAttribDivisor", glVertexAttribDivisor, 3, 3, { GL_EXTENSION_COUNT }},
-    { "glVertexAttribDivisorARB", glVertexAttribDivisorARB, 0, 0, { GL_ARB_instanced_arrays, GL_EXTENSION_COUNT }},
-    { "glVertexAttribFormat", glVertexAttribFormat, 4, 3, { GL_ARB_vertex_attrib_binding, GL_EXTENSION_COUNT }},
-    { "glVertexAttribFormatNV", glVertexAttribFormatNV, 0, 0, { GL_NV_vertex_buffer_unified_memory, GL_EXTENSION_COUNT }},
-    { "glVertexAttribI1i", glVertexAttribI1i, 3, 0, { GL_EXTENSION_COUNT }},
-    { "glVertexAttribI1iEXT", glVertexAttribI1iEXT, 0, 0, { GL_EXT_gpu_shader4, GL_NV_vertex_program4, GL_EXTENSION_COUNT }},
-    { "glVertexAttribI1iv", glVertexAttribI1iv, 3, 0, { GL_EXTENSION_COUNT }},
-    { "glVertexAttribI1ivEXT", glVertexAttribI1ivEXT, 0, 0, { GL_EXT_gpu_shader4, GL_NV_vertex_program4, GL_EXTENSION_COUNT }},
-    { "glVertexAttribI1ui", glVertexAttribI1ui, 3, 0, { GL_EXTENSION_COUNT }},
-    { "glVertexAttribI1uiEXT", glVertexAttribI1uiEXT, 0, 0, { GL_EXT_gpu_shader4, GL_NV_vertex_program4, GL_EXTENSION_COUNT }},
-    { "glVertexAttribI1uiv", glVertexAttribI1uiv, 3, 0, { GL_EXTENSION_COUNT }},
-    { "glVertexAttribI1uivEXT", glVertexAttribI1uivEXT, 0, 0, { GL_EXT_gpu_shader4, GL_NV_vertex_program4, GL_EXTENSION_COUNT }},
-    { "glVertexAttribI2i", glVertexAttribI2i, 3, 0, { GL_EXTENSION_COUNT }},
-    { "glVertexAttribI2iEXT", glVertexAttribI2iEXT, 0, 0, { GL_EXT_gpu_shader4, GL_NV_vertex_program4, GL_EXTENSION_COUNT }},
-    { "glVertexAttribI2iv", glVertexAttribI2iv, 3, 0, { GL_EXTENSION_COUNT }},
-    { "glVertexAttribI2ivEXT", glVertexAttribI2ivEXT, 0, 0, { GL_EXT_gpu_shader4, GL_NV_vertex_program4, GL_EXTENSION_COUNT }},
-    { "glVertexAttribI2ui", glVertexAttribI2ui, 3, 0, { GL_EXTENSION_COUNT }},
-    { "glVertexAttribI2uiEXT", glVertexAttribI2uiEXT, 0, 0, { GL_EXT_gpu_shader4, GL_NV_vertex_program4, GL_EXTENSION_COUNT }},
-    { "glVertexAttribI2uiv", glVertexAttribI2uiv, 3, 0, { GL_EXTENSION_COUNT }},
-    { "glVertexAttribI2uivEXT", glVertexAttribI2uivEXT, 0, 0, { GL_EXT_gpu_shader4, GL_NV_vertex_program4, GL_EXTENSION_COUNT }},
-    { "glVertexAttribI3i", glVertexAttribI3i, 3, 0, { GL_EXTENSION_COUNT }},
-    { "glVertexAttribI3iEXT", glVertexAttribI3iEXT, 0, 0, { GL_EXT_gpu_shader4, GL_NV_vertex_program4, GL_EXTENSION_COUNT }},
-    { "glVertexAttribI3iv", glVertexAttribI3iv, 3, 0, { GL_EXTENSION_COUNT }},
-    { "glVertexAttribI3ivEXT", glVertexAttribI3ivEXT, 0, 0, { GL_EXT_gpu_shader4, GL_NV_vertex_program4, GL_EXTENSION_COUNT }},
-    { "glVertexAttribI3ui", glVertexAttribI3ui, 3, 0, { GL_EXTENSION_COUNT }},
-    { "glVertexAttribI3uiEXT", glVertexAttribI3uiEXT, 0, 0, { GL_EXT_gpu_shader4, GL_NV_vertex_program4, GL_EXTENSION_COUNT }},
-    { "glVertexAttribI3uiv", glVertexAttribI3uiv, 3, 0, { GL_EXTENSION_COUNT }},
-    { "glVertexAttribI3uivEXT", glVertexAttribI3uivEXT, 0, 0, { GL_EXT_gpu_shader4, GL_NV_vertex_program4, GL_EXTENSION_COUNT }},
-    { "glVertexAttribI4bv", glVertexAttribI4bv, 3, 0, { GL_EXTENSION_COUNT }},
-    { "glVertexAttribI4bvEXT", glVertexAttribI4bvEXT, 0, 0, { GL_EXT_gpu_shader4, GL_NV_vertex_program4, GL_EXTENSION_COUNT }},
-    { "glVertexAttribI4i", glVertexAttribI4i, 3, 0, { GL_EXTENSION_COUNT }},
-    { "glVertexAttribI4iEXT", glVertexAttribI4iEXT, 0, 0, { GL_EXT_gpu_shader4, GL_NV_vertex_program4, GL_EXTENSION_COUNT }},
-    { "glVertexAttribI4iv", glVertexAttribI4iv, 3, 0, { GL_EXTENSION_COUNT }},
-    { "glVertexAttribI4ivEXT", glVertexAttribI4ivEXT, 0, 0, { GL_EXT_gpu_shader4, GL_NV_vertex_program4, GL_EXTENSION_COUNT }},
-    { "glVertexAttribI4sv", glVertexAttribI4sv, 3, 0, { GL_EXTENSION_COUNT }},
-    { "glVertexAttribI4svEXT", glVertexAttribI4svEXT, 0, 0, { GL_EXT_gpu_shader4, GL_NV_vertex_program4, GL_EXTENSION_COUNT }},
-    { "glVertexAttribI4ubv", glVertexAttribI4ubv, 3, 0, { GL_EXTENSION_COUNT }},
-    { "glVertexAttribI4ubvEXT", glVertexAttribI4ubvEXT, 0, 0, { GL_EXT_gpu_shader4, GL_NV_vertex_program4, GL_EXTENSION_COUNT }},
-    { "glVertexAttribI4ui", glVertexAttribI4ui, 3, 0, { GL_EXTENSION_COUNT }},
-    { "glVertexAttribI4uiEXT", glVertexAttribI4uiEXT, 0, 0, { GL_EXT_gpu_shader4, GL_NV_vertex_program4, GL_EXTENSION_COUNT }},
-    { "glVertexAttribI4uiv", glVertexAttribI4uiv, 3, 0, { GL_EXTENSION_COUNT }},
-    { "glVertexAttribI4uivEXT", glVertexAttribI4uivEXT, 0, 0, { GL_EXT_gpu_shader4, GL_NV_vertex_program4, GL_EXTENSION_COUNT }},
-    { "glVertexAttribI4usv", glVertexAttribI4usv, 3, 0, { GL_EXTENSION_COUNT }},
-    { "glVertexAttribI4usvEXT", glVertexAttribI4usvEXT, 0, 0, { GL_EXT_gpu_shader4, GL_NV_vertex_program4, GL_EXTENSION_COUNT }},
-    { "glVertexAttribIFormat", glVertexAttribIFormat, 4, 3, { GL_ARB_vertex_attrib_binding, GL_EXTENSION_COUNT }},
-    { "glVertexAttribIFormatNV", glVertexAttribIFormatNV, 0, 0, { GL_NV_vertex_buffer_unified_memory, GL_EXTENSION_COUNT }},
-    { "glVertexAttribIPointer", glVertexAttribIPointer, 3, 0, { GL_EXTENSION_COUNT }},
-    { "glVertexAttribIPointerEXT", glVertexAttribIPointerEXT, 0, 0, { GL_EXT_gpu_shader4, GL_NV_vertex_program4, GL_EXTENSION_COUNT }},
-    { "glVertexAttribL1d", glVertexAttribL1d, 4, 1, { GL_ARB_vertex_attrib_64bit, GL_EXTENSION_COUNT }},
-    { "glVertexAttribL1dEXT", glVertexAttribL1dEXT, 0, 0, { GL_EXT_vertex_attrib_64bit, GL_EXTENSION_COUNT }},
-    { "glVertexAttribL1dv", glVertexAttribL1dv, 4, 1, { GL_ARB_vertex_attrib_64bit, GL_EXTENSION_COUNT }},
-    { "glVertexAttribL1dvEXT", glVertexAttribL1dvEXT, 0, 0, { GL_EXT_vertex_attrib_64bit, GL_EXTENSION_COUNT }},
-    { "glVertexAttribL1i64NV", glVertexAttribL1i64NV, 0, 0, { GL_NV_vertex_attrib_integer_64bit, GL_EXTENSION_COUNT }},
-    { "glVertexAttribL1i64vNV", glVertexAttribL1i64vNV, 0, 0, { GL_NV_vertex_attrib_integer_64bit, GL_EXTENSION_COUNT }},
-    { "glVertexAttribL1ui64ARB", glVertexAttribL1ui64ARB, 0, 0, { GL_ARB_bindless_texture, GL_EXTENSION_COUNT }},
-    { "glVertexAttribL1ui64NV", glVertexAttribL1ui64NV, 0, 0, { GL_NV_vertex_attrib_integer_64bit, GL_EXTENSION_COUNT }},
-    { "glVertexAttribL1ui64vARB", glVertexAttribL1ui64vARB, 0, 0, { GL_ARB_bindless_texture, GL_EXTENSION_COUNT }},
-    { "glVertexAttribL1ui64vNV", glVertexAttribL1ui64vNV, 0, 0, { GL_NV_vertex_attrib_integer_64bit, GL_EXTENSION_COUNT }},
-    { "glVertexAttribL2d", glVertexAttribL2d, 4, 1, { GL_ARB_vertex_attrib_64bit, GL_EXTENSION_COUNT }},
-    { "glVertexAttribL2dEXT", glVertexAttribL2dEXT, 0, 0, { GL_EXT_vertex_attrib_64bit, GL_EXTENSION_COUNT }},
-    { "glVertexAttribL2dv", glVertexAttribL2dv, 4, 1, { GL_ARB_vertex_attrib_64bit, GL_EXTENSION_COUNT }},
-    { "glVertexAttribL2dvEXT", glVertexAttribL2dvEXT, 0, 0, { GL_EXT_vertex_attrib_64bit, GL_EXTENSION_COUNT }},
-    { "glVertexAttribL2i64NV", glVertexAttribL2i64NV, 0, 0, { GL_NV_vertex_attrib_integer_64bit, GL_EXTENSION_COUNT }},
-    { "glVertexAttribL2i64vNV", glVertexAttribL2i64vNV, 0, 0, { GL_NV_vertex_attrib_integer_64bit, GL_EXTENSION_COUNT }},
-    { "glVertexAttribL2ui64NV", glVertexAttribL2ui64NV, 0, 0, { GL_NV_vertex_attrib_integer_64bit, GL_EXTENSION_COUNT }},
-    { "glVertexAttribL2ui64vNV", glVertexAttribL2ui64vNV, 0, 0, { GL_NV_vertex_attrib_integer_64bit, GL_EXTENSION_COUNT }},
-    { "glVertexAttribL3d", glVertexAttribL3d, 4, 1, { GL_ARB_vertex_attrib_64bit, GL_EXTENSION_COUNT }},
-    { "glVertexAttribL3dEXT", glVertexAttribL3dEXT, 0, 0, { GL_EXT_vertex_attrib_64bit, GL_EXTENSION_COUNT }},
-    { "glVertexAttribL3dv", glVertexAttribL3dv, 4, 1, { GL_ARB_vertex_attrib_64bit, GL_EXTENSION_COUNT }},
-    { "glVertexAttribL3dvEXT", glVertexAttribL3dvEXT, 0, 0, { GL_EXT_vertex_attrib_64bit, GL_EXTENSION_COUNT }},
-    { "glVertexAttribL3i64NV", glVertexAttribL3i64NV, 0, 0, { GL_NV_vertex_attrib_integer_64bit, GL_EXTENSION_COUNT }},
-    { "glVertexAttribL3i64vNV", glVertexAttribL3i64vNV, 0, 0, { GL_NV_vertex_attrib_integer_64bit, GL_EXTENSION_COUNT }},
-    { "glVertexAttribL3ui64NV", glVertexAttribL3ui64NV, 0, 0, { GL_NV_vertex_attrib_integer_64bit, GL_EXTENSION_COUNT }},
-    { "glVertexAttribL3ui64vNV", glVertexAttribL3ui64vNV, 0, 0, { GL_NV_vertex_attrib_integer_64bit, GL_EXTENSION_COUNT }},
-    { "glVertexAttribL4d", glVertexAttribL4d, 4, 1, { GL_ARB_vertex_attrib_64bit, GL_EXTENSION_COUNT }},
-    { "glVertexAttribL4dEXT", glVertexAttribL4dEXT, 0, 0, { GL_EXT_vertex_attrib_64bit, GL_EXTENSION_COUNT }},
-    { "glVertexAttribL4dv", glVertexAttribL4dv, 4, 1, { GL_ARB_vertex_attrib_64bit, GL_EXTENSION_COUNT }},
-    { "glVertexAttribL4dvEXT", glVertexAttribL4dvEXT, 0, 0, { GL_EXT_vertex_attrib_64bit, GL_EXTENSION_COUNT }},
-    { "glVertexAttribL4i64NV", glVertexAttribL4i64NV, 0, 0, { GL_NV_vertex_attrib_integer_64bit, GL_EXTENSION_COUNT }},
-    { "glVertexAttribL4i64vNV", glVertexAttribL4i64vNV, 0, 0, { GL_NV_vertex_attrib_integer_64bit, GL_EXTENSION_COUNT }},
-    { "glVertexAttribL4ui64NV", glVertexAttribL4ui64NV, 0, 0, { GL_NV_vertex_attrib_integer_64bit, GL_EXTENSION_COUNT }},
-    { "glVertexAttribL4ui64vNV", glVertexAttribL4ui64vNV, 0, 0, { GL_NV_vertex_attrib_integer_64bit, GL_EXTENSION_COUNT }},
-    { "glVertexAttribLFormat", glVertexAttribLFormat, 4, 3, { GL_ARB_vertex_attrib_binding, GL_EXTENSION_COUNT }},
-    { "glVertexAttribLFormatNV", glVertexAttribLFormatNV, 0, 0, { GL_NV_vertex_attrib_integer_64bit, GL_EXTENSION_COUNT }},
-    { "glVertexAttribLPointer", glVertexAttribLPointer, 4, 1, { GL_ARB_vertex_attrib_64bit, GL_EXTENSION_COUNT }},
-    { "glVertexAttribLPointerEXT", glVertexAttribLPointerEXT, 0, 0, { GL_EXT_vertex_attrib_64bit, GL_EXTENSION_COUNT }},
-    { "glVertexAttribP1ui", glVertexAttribP1ui, 3, 3, { GL_ARB_vertex_type_2_10_10_10_rev, GL_EXTENSION_COUNT }},
-    { "glVertexAttribP1uiv", glVertexAttribP1uiv, 3, 3, { GL_ARB_vertex_type_2_10_10_10_rev, GL_EXTENSION_COUNT }},
-    { "glVertexAttribP2ui", glVertexAttribP2ui, 3, 3, { GL_ARB_vertex_type_2_10_10_10_rev, GL_EXTENSION_COUNT }},
-    { "glVertexAttribP2uiv", glVertexAttribP2uiv, 3, 3, { GL_ARB_vertex_type_2_10_10_10_rev, GL_EXTENSION_COUNT }},
-    { "glVertexAttribP3ui", glVertexAttribP3ui, 3, 3, { GL_ARB_vertex_type_2_10_10_10_rev, GL_EXTENSION_COUNT }},
-    { "glVertexAttribP3uiv", glVertexAttribP3uiv, 3, 3, { GL_ARB_vertex_type_2_10_10_10_rev, GL_EXTENSION_COUNT }},
-    { "glVertexAttribP4ui", glVertexAttribP4ui, 3, 3, { GL_ARB_vertex_type_2_10_10_10_rev, GL_EXTENSION_COUNT }},
-    { "glVertexAttribP4uiv", glVertexAttribP4uiv, 3, 3, { GL_ARB_vertex_type_2_10_10_10_rev, GL_EXTENSION_COUNT }},
-    { "glVertexAttribParameteriAMD", glVertexAttribParameteriAMD, 0, 0, { GL_AMD_interleaved_elements, GL_EXTENSION_COUNT }},
-    { "glVertexAttribPointer", glVertexAttribPointer, 2, 0, { GL_EXTENSION_COUNT }},
-    { "glVertexAttribPointerARB", glVertexAttribPointerARB, 0, 0, { GL_ARB_vertex_program, GL_ARB_vertex_shader, GL_EXTENSION_COUNT }},
-    { "glVertexAttribPointerNV", glVertexAttribPointerNV, 0, 0, { GL_NV_vertex_program, GL_EXTENSION_COUNT }},
-    { "glVertexAttribs1dvNV", glVertexAttribs1dvNV, 0, 0, { GL_NV_vertex_program, GL_EXTENSION_COUNT }},
-    { "glVertexAttribs1fvNV", glVertexAttribs1fvNV, 0, 0, { GL_NV_vertex_program, GL_EXTENSION_COUNT }},
-    { "glVertexAttribs1hvNV", glVertexAttribs1hvNV, 0, 0, { GL_NV_half_float, GL_EXTENSION_COUNT }},
-    { "glVertexAttribs1svNV", glVertexAttribs1svNV, 0, 0, { GL_NV_vertex_program, GL_EXTENSION_COUNT }},
-    { "glVertexAttribs2dvNV", glVertexAttribs2dvNV, 0, 0, { GL_NV_vertex_program, GL_EXTENSION_COUNT }},
-    { "glVertexAttribs2fvNV", glVertexAttribs2fvNV, 0, 0, { GL_NV_vertex_program, GL_EXTENSION_COUNT }},
-    { "glVertexAttribs2hvNV", glVertexAttribs2hvNV, 0, 0, { GL_NV_half_float, GL_EXTENSION_COUNT }},
-    { "glVertexAttribs2svNV", glVertexAttribs2svNV, 0, 0, { GL_NV_vertex_program, GL_EXTENSION_COUNT }},
-    { "glVertexAttribs3dvNV", glVertexAttribs3dvNV, 0, 0, { GL_NV_vertex_program, GL_EXTENSION_COUNT }},
-    { "glVertexAttribs3fvNV", glVertexAttribs3fvNV, 0, 0, { GL_NV_vertex_program, GL_EXTENSION_COUNT }},
-    { "glVertexAttribs3hvNV", glVertexAttribs3hvNV, 0, 0, { GL_NV_half_float, GL_EXTENSION_COUNT }},
-    { "glVertexAttribs3svNV", glVertexAttribs3svNV, 0, 0, { GL_NV_vertex_program, GL_EXTENSION_COUNT }},
-    { "glVertexAttribs4dvNV", glVertexAttribs4dvNV, 0, 0, { GL_NV_vertex_program, GL_EXTENSION_COUNT }},
-    { "glVertexAttribs4fvNV", glVertexAttribs4fvNV, 0, 0, { GL_NV_vertex_program, GL_EXTENSION_COUNT }},
-    { "glVertexAttribs4hvNV", glVertexAttribs4hvNV, 0, 0, { GL_NV_half_float, GL_EXTENSION_COUNT }},
-    { "glVertexAttribs4svNV", glVertexAttribs4svNV, 0, 0, { GL_NV_vertex_program, GL_EXTENSION_COUNT }},
-    { "glVertexAttribs4ubvNV", glVertexAttribs4ubvNV, 0, 0, { GL_NV_vertex_program, GL_EXTENSION_COUNT }},
-    { "glVertexBindingDivisor", glVertexBindingDivisor, 4, 3, { GL_ARB_vertex_attrib_binding, GL_EXTENSION_COUNT }},
-    { "glVertexBlendARB", glVertexBlendARB, 0, 0, { GL_ARB_vertex_blend, GL_EXTENSION_COUNT }},
-    { "glVertexBlendEnvfATI", glVertexBlendEnvfATI, 0, 0, { GL_ATI_vertex_streams, GL_EXTENSION_COUNT }},
-    { "glVertexBlendEnviATI", glVertexBlendEnviATI, 0, 0, { GL_ATI_vertex_streams, GL_EXTENSION_COUNT }},
-    { "glVertexFormatNV", glVertexFormatNV, 0, 0, { GL_NV_vertex_buffer_unified_memory, GL_EXTENSION_COUNT }},
-    { "glVertexP2ui", glVertexP2ui, 3, 3, { GL_ARB_vertex_type_2_10_10_10_rev, GL_EXTENSION_COUNT }},
-    { "glVertexP2uiv", glVertexP2uiv, 3, 3, { GL_ARB_vertex_type_2_10_10_10_rev, GL_EXTENSION_COUNT }},
-    { "glVertexP3ui", glVertexP3ui, 3, 3, { GL_ARB_vertex_type_2_10_10_10_rev, GL_EXTENSION_COUNT }},
-    { "glVertexP3uiv", glVertexP3uiv, 3, 3, { GL_ARB_vertex_type_2_10_10_10_rev, GL_EXTENSION_COUNT }},
-    { "glVertexP4ui", glVertexP4ui, 3, 3, { GL_ARB_vertex_type_2_10_10_10_rev, GL_EXTENSION_COUNT }},
-    { "glVertexP4uiv", glVertexP4uiv, 3, 3, { GL_ARB_vertex_type_2_10_10_10_rev, GL_EXTENSION_COUNT }},
-    { "glVertexPointerEXT", glVertexPointerEXT, 0, 0, { GL_EXT_vertex_array, GL_EXTENSION_COUNT }},
-    { "glVertexPointerListIBM", glVertexPointerListIBM, 0, 0, { GL_IBM_vertex_array_lists, GL_EXTENSION_COUNT }},
-    { "glVertexPointervINTEL", glVertexPointervINTEL, 0, 0, { GL_INTEL_parallel_arrays, GL_EXTENSION_COUNT }},
-    { "glVertexStream1dATI", glVertexStream1dATI, 0, 0, { GL_ATI_vertex_streams, GL_EXTENSION_COUNT }},
-    { "glVertexStream1dvATI", glVertexStream1dvATI, 0, 0, { GL_ATI_vertex_streams, GL_EXTENSION_COUNT }},
-    { "glVertexStream1fATI", glVertexStream1fATI, 0, 0, { GL_ATI_vertex_streams, GL_EXTENSION_COUNT }},
-    { "glVertexStream1fvATI", glVertexStream1fvATI, 0, 0, { GL_ATI_vertex_streams, GL_EXTENSION_COUNT }},
-    { "glVertexStream1iATI", glVertexStream1iATI, 0, 0, { GL_ATI_vertex_streams, GL_EXTENSION_COUNT }},
-    { "glVertexStream1ivATI", glVertexStream1ivATI, 0, 0, { GL_ATI_vertex_streams, GL_EXTENSION_COUNT }},
-    { "glVertexStream1sATI", glVertexStream1sATI, 0, 0, { GL_ATI_vertex_streams, GL_EXTENSION_COUNT }},
-    { "glVertexStream1svATI", glVertexStream1svATI, 0, 0, { GL_ATI_vertex_streams, GL_EXTENSION_COUNT }},
-    { "glVertexStream2dATI", glVertexStream2dATI, 0, 0, { GL_ATI_vertex_streams, GL_EXTENSION_COUNT }},
-    { "glVertexStream2dvATI", glVertexStream2dvATI, 0, 0, { GL_ATI_vertex_streams, GL_EXTENSION_COUNT }},
-    { "glVertexStream2fATI", glVertexStream2fATI, 0, 0, { GL_ATI_vertex_streams, GL_EXTENSION_COUNT }},
-    { "glVertexStream2fvATI", glVertexStream2fvATI, 0, 0, { GL_ATI_vertex_streams, GL_EXTENSION_COUNT }},
-    { "glVertexStream2iATI", glVertexStream2iATI, 0, 0, { GL_ATI_vertex_streams, GL_EXTENSION_COUNT }},
-    { "glVertexStream2ivATI", glVertexStream2ivATI, 0, 0, { GL_ATI_vertex_streams, GL_EXTENSION_COUNT }},
-    { "glVertexStream2sATI", glVertexStream2sATI, 0, 0, { GL_ATI_vertex_streams, GL_EXTENSION_COUNT }},
-    { "glVertexStream2svATI", glVertexStream2svATI, 0, 0, { GL_ATI_vertex_streams, GL_EXTENSION_COUNT }},
-    { "glVertexStream3dATI", glVertexStream3dATI, 0, 0, { GL_ATI_vertex_streams, GL_EXTENSION_COUNT }},
-    { "glVertexStream3dvATI", glVertexStream3dvATI, 0, 0, { GL_ATI_vertex_streams, GL_EXTENSION_COUNT }},
-    { "glVertexStream3fATI", glVertexStream3fATI, 0, 0, { GL_ATI_vertex_streams, GL_EXTENSION_COUNT }},
-    { "glVertexStream3fvATI", glVertexStream3fvATI, 0, 0, { GL_ATI_vertex_streams, GL_EXTENSION_COUNT }},
-    { "glVertexStream3iATI", glVertexStream3iATI, 0, 0, { GL_ATI_vertex_streams, GL_EXTENSION_COUNT }},
-    { "glVertexStream3ivATI", glVertexStream3ivATI, 0, 0, { GL_ATI_vertex_streams, GL_EXTENSION_COUNT }},
-    { "glVertexStream3sATI", glVertexStream3sATI, 0, 0, { GL_ATI_vertex_streams, GL_EXTENSION_COUNT }},
-    { "glVertexStream3svATI", glVertexStream3svATI, 0, 0, { GL_ATI_vertex_streams, GL_EXTENSION_COUNT }},
-    { "glVertexStream4dATI", glVertexStream4dATI, 0, 0, { GL_ATI_vertex_streams, GL_EXTENSION_COUNT }},
-    { "glVertexStream4dvATI", glVertexStream4dvATI, 0, 0, { GL_ATI_vertex_streams, GL_EXTENSION_COUNT }},
-    { "glVertexStream4fATI", glVertexStream4fATI, 0, 0, { GL_ATI_vertex_streams, GL_EXTENSION_COUNT }},
-    { "glVertexStream4fvATI", glVertexStream4fvATI, 0, 0, { GL_ATI_vertex_streams, GL_EXTENSION_COUNT }},
-    { "glVertexStream4iATI", glVertexStream4iATI, 0, 0, { GL_ATI_vertex_streams, GL_EXTENSION_COUNT }},
-    { "glVertexStream4ivATI", glVertexStream4ivATI, 0, 0, { GL_ATI_vertex_streams, GL_EXTENSION_COUNT }},
-    { "glVertexStream4sATI", glVertexStream4sATI, 0, 0, { GL_ATI_vertex_streams, GL_EXTENSION_COUNT }},
-    { "glVertexStream4svATI", glVertexStream4svATI, 0, 0, { GL_ATI_vertex_streams, GL_EXTENSION_COUNT }},
-    { "glVertexWeightPointerEXT", glVertexWeightPointerEXT, 0, 0, { GL_EXT_vertex_weighting, GL_EXTENSION_COUNT }},
-    { "glVertexWeightfEXT", glVertexWeightfEXT, 0, 0, { GL_EXT_vertex_weighting, GL_EXTENSION_COUNT }},
-    { "glVertexWeightfvEXT", glVertexWeightfvEXT, 0, 0, { GL_EXT_vertex_weighting, GL_EXTENSION_COUNT }},
-    { "glVertexWeighthNV", glVertexWeighthNV, 0, 0, { GL_NV_half_float, GL_EXTENSION_COUNT }},
-    { "glVertexWeighthvNV", glVertexWeighthvNV, 0, 0, { GL_NV_half_float, GL_EXTENSION_COUNT }},
-    { "glVideoCaptureNV", glVideoCaptureNV, 0, 0, { GL_NV_video_capture, GL_EXTENSION_COUNT }},
-    { "glVideoCaptureStreamParameterdvNV", glVideoCaptureStreamParameterdvNV, 0, 0, { GL_NV_video_capture, GL_EXTENSION_COUNT }},
-    { "glVideoCaptureStreamParameterfvNV", glVideoCaptureStreamParameterfvNV, 0, 0, { GL_NV_video_capture, GL_EXTENSION_COUNT }},
-    { "glVideoCaptureStreamParameterivNV", glVideoCaptureStreamParameterivNV, 0, 0, { GL_NV_video_capture, GL_EXTENSION_COUNT }},
-    { "glViewportArrayv", glViewportArrayv, 4, 1, { GL_ARB_viewport_array, GL_EXTENSION_COUNT }},
-    { "glViewportIndexedf", glViewportIndexedf, 4, 1, { GL_ARB_viewport_array, GL_EXTENSION_COUNT }},
-    { "glViewportIndexedfv", glViewportIndexedfv, 4, 1, { GL_ARB_viewport_array, GL_EXTENSION_COUNT }},
-    { "glViewportPositionWScaleNV", glViewportPositionWScaleNV, 0, 0, { GL_NV_clip_space_w_scaling, GL_EXTENSION_COUNT }},
-    { "glViewportSwizzleNV", glViewportSwizzleNV, 0, 0, { GL_NV_viewport_swizzle, GL_EXTENSION_COUNT }},
-    { "glWaitSemaphoreEXT", glWaitSemaphoreEXT, 0, 0, { GL_EXT_semaphore, GL_EXTENSION_COUNT }},
-    { "glWaitSemaphoreui64NVX", glWaitSemaphoreui64NVX, 0, 0, { GL_NVX_progress_fence, GL_EXTENSION_COUNT }},
-    { "glWaitSync", glWaitSync, 3, 2, { GL_ARB_sync, GL_EXTENSION_COUNT }},
-    { "glWaitVkSemaphoreNV", glWaitVkSemaphoreNV, 0, 0, { GL_NV_draw_vulkan_image, GL_EXTENSION_COUNT }},
-    { "glWeightPathsNV", glWeightPathsNV, 0, 0, { GL_NV_path_rendering, GL_EXTENSION_COUNT }},
-    { "glWeightPointerARB", glWeightPointerARB, 0, 0, { GL_ARB_vertex_blend, GL_EXTENSION_COUNT }},
-    { "glWeightbvARB", glWeightbvARB, 0, 0, { GL_ARB_vertex_blend, GL_EXTENSION_COUNT }},
-    { "glWeightdvARB", glWeightdvARB, 0, 0, { GL_ARB_vertex_blend, GL_EXTENSION_COUNT }},
-    { "glWeightfvARB", glWeightfvARB, 0, 0, { GL_ARB_vertex_blend, GL_EXTENSION_COUNT }},
-    { "glWeightivARB", glWeightivARB, 0, 0, { GL_ARB_vertex_blend, GL_EXTENSION_COUNT }},
-    { "glWeightsvARB", glWeightsvARB, 0, 0, { GL_ARB_vertex_blend, GL_EXTENSION_COUNT }},
-    { "glWeightubvARB", glWeightubvARB, 0, 0, { GL_ARB_vertex_blend, GL_EXTENSION_COUNT }},
-    { "glWeightuivARB", glWeightuivARB, 0, 0, { GL_ARB_vertex_blend, GL_EXTENSION_COUNT }},
-    { "glWeightusvARB", glWeightusvARB, 0, 0, { GL_ARB_vertex_blend, GL_EXTENSION_COUNT }},
-    { "glWindowPos2d", glWindowPos2d, 1, 4, { GL_EXTENSION_COUNT }},
-    { "glWindowPos2dARB", glWindowPos2dARB, 0, 0, { GL_ARB_window_pos, GL_EXTENSION_COUNT }},
-    { "glWindowPos2dMESA", glWindowPos2dMESA, 0, 0, { GL_MESA_window_pos, GL_EXTENSION_COUNT }},
-    { "glWindowPos2dv", glWindowPos2dv, 1, 4, { GL_EXTENSION_COUNT }},
-    { "glWindowPos2dvARB", glWindowPos2dvARB, 0, 0, { GL_ARB_window_pos, GL_EXTENSION_COUNT }},
-    { "glWindowPos2dvMESA", glWindowPos2dvMESA, 0, 0, { GL_MESA_window_pos, GL_EXTENSION_COUNT }},
-    { "glWindowPos2f", glWindowPos2f, 1, 4, { GL_EXTENSION_COUNT }},
-    { "glWindowPos2fARB", glWindowPos2fARB, 0, 0, { GL_ARB_window_pos, GL_EXTENSION_COUNT }},
-    { "glWindowPos2fMESA", glWindowPos2fMESA, 0, 0, { GL_MESA_window_pos, GL_EXTENSION_COUNT }},
-    { "glWindowPos2fv", glWindowPos2fv, 1, 4, { GL_EXTENSION_COUNT }},
-    { "glWindowPos2fvARB", glWindowPos2fvARB, 0, 0, { GL_ARB_window_pos, GL_EXTENSION_COUNT }},
-    { "glWindowPos2fvMESA", glWindowPos2fvMESA, 0, 0, { GL_MESA_window_pos, GL_EXTENSION_COUNT }},
-    { "glWindowPos2i", glWindowPos2i, 1, 4, { GL_EXTENSION_COUNT }},
-    { "glWindowPos2iARB", glWindowPos2iARB, 0, 0, { GL_ARB_window_pos, GL_EXTENSION_COUNT }},
-    { "glWindowPos2iMESA", glWindowPos2iMESA, 0, 0, { GL_MESA_window_pos, GL_EXTENSION_COUNT }},
-    { "glWindowPos2iv", glWindowPos2iv, 1, 4, { GL_EXTENSION_COUNT }},
-    { "glWindowPos2ivARB", glWindowPos2ivARB, 0, 0, { GL_ARB_window_pos, GL_EXTENSION_COUNT }},
-    { "glWindowPos2ivMESA", glWindowPos2ivMESA, 0, 0, { GL_MESA_window_pos, GL_EXTENSION_COUNT }},
-    { "glWindowPos2s", glWindowPos2s, 1, 4, { GL_EXTENSION_COUNT }},
-    { "glWindowPos2sARB", glWindowPos2sARB, 0, 0, { GL_ARB_window_pos, GL_EXTENSION_COUNT }},
-    { "glWindowPos2sMESA", glWindowPos2sMESA, 0, 0, { GL_MESA_window_pos, GL_EXTENSION_COUNT }},
-    { "glWindowPos2sv", glWindowPos2sv, 1, 4, { GL_EXTENSION_COUNT }},
-    { "glWindowPos2svARB", glWindowPos2svARB, 0, 0, { GL_ARB_window_pos, GL_EXTENSION_COUNT }},
-    { "glWindowPos2svMESA", glWindowPos2svMESA, 0, 0, { GL_MESA_window_pos, GL_EXTENSION_COUNT }},
-    { "glWindowPos3d", glWindowPos3d, 1, 4, { GL_EXTENSION_COUNT }},
-    { "glWindowPos3dARB", glWindowPos3dARB, 0, 0, { GL_ARB_window_pos, GL_EXTENSION_COUNT }},
-    { "glWindowPos3dMESA", glWindowPos3dMESA, 0, 0, { GL_MESA_window_pos, GL_EXTENSION_COUNT }},
-    { "glWindowPos3dv", glWindowPos3dv, 1, 4, { GL_EXTENSION_COUNT }},
-    { "glWindowPos3dvARB", glWindowPos3dvARB, 0, 0, { GL_ARB_window_pos, GL_EXTENSION_COUNT }},
-    { "glWindowPos3dvMESA", glWindowPos3dvMESA, 0, 0, { GL_MESA_window_pos, GL_EXTENSION_COUNT }},
-    { "glWindowPos3f", glWindowPos3f, 1, 4, { GL_EXTENSION_COUNT }},
-    { "glWindowPos3fARB", glWindowPos3fARB, 0, 0, { GL_ARB_window_pos, GL_EXTENSION_COUNT }},
-    { "glWindowPos3fMESA", glWindowPos3fMESA, 0, 0, { GL_MESA_window_pos, GL_EXTENSION_COUNT }},
-    { "glWindowPos3fv", glWindowPos3fv, 1, 4, { GL_EXTENSION_COUNT }},
-    { "glWindowPos3fvARB", glWindowPos3fvARB, 0, 0, { GL_ARB_window_pos, GL_EXTENSION_COUNT }},
-    { "glWindowPos3fvMESA", glWindowPos3fvMESA, 0, 0, { GL_MESA_window_pos, GL_EXTENSION_COUNT }},
-    { "glWindowPos3i", glWindowPos3i, 1, 4, { GL_EXTENSION_COUNT }},
-    { "glWindowPos3iARB", glWindowPos3iARB, 0, 0, { GL_ARB_window_pos, GL_EXTENSION_COUNT }},
-    { "glWindowPos3iMESA", glWindowPos3iMESA, 0, 0, { GL_MESA_window_pos, GL_EXTENSION_COUNT }},
-    { "glWindowPos3iv", glWindowPos3iv, 1, 4, { GL_EXTENSION_COUNT }},
-    { "glWindowPos3ivARB", glWindowPos3ivARB, 0, 0, { GL_ARB_window_pos, GL_EXTENSION_COUNT }},
-    { "glWindowPos3ivMESA", glWindowPos3ivMESA, 0, 0, { GL_MESA_window_pos, GL_EXTENSION_COUNT }},
-    { "glWindowPos3s", glWindowPos3s, 1, 4, { GL_EXTENSION_COUNT }},
-    { "glWindowPos3sARB", glWindowPos3sARB, 0, 0, { GL_ARB_window_pos, GL_EXTENSION_COUNT }},
-    { "glWindowPos3sMESA", glWindowPos3sMESA, 0, 0, { GL_MESA_window_pos, GL_EXTENSION_COUNT }},
-    { "glWindowPos3sv", glWindowPos3sv, 1, 4, { GL_EXTENSION_COUNT }},
-    { "glWindowPos3svARB", glWindowPos3svARB, 0, 0, { GL_ARB_window_pos, GL_EXTENSION_COUNT }},
-    { "glWindowPos3svMESA", glWindowPos3svMESA, 0, 0, { GL_MESA_window_pos, GL_EXTENSION_COUNT }},
-    { "glWindowPos4dMESA", glWindowPos4dMESA, 0, 0, { GL_MESA_window_pos, GL_EXTENSION_COUNT }},
-    { "glWindowPos4dvMESA", glWindowPos4dvMESA, 0, 0, { GL_MESA_window_pos, GL_EXTENSION_COUNT }},
-    { "glWindowPos4fMESA", glWindowPos4fMESA, 0, 0, { GL_MESA_window_pos, GL_EXTENSION_COUNT }},
-    { "glWindowPos4fvMESA", glWindowPos4fvMESA, 0, 0, { GL_MESA_window_pos, GL_EXTENSION_COUNT }},
-    { "glWindowPos4iMESA", glWindowPos4iMESA, 0, 0, { GL_MESA_window_pos, GL_EXTENSION_COUNT }},
-    { "glWindowPos4ivMESA", glWindowPos4ivMESA, 0, 0, { GL_MESA_window_pos, GL_EXTENSION_COUNT }},
-    { "glWindowPos4sMESA", glWindowPos4sMESA, 0, 0, { GL_MESA_window_pos, GL_EXTENSION_COUNT }},
-    { "glWindowPos4svMESA", glWindowPos4svMESA, 0, 0, { GL_MESA_window_pos, GL_EXTENSION_COUNT }},
-    { "glWindowRectanglesEXT", glWindowRectanglesEXT, 0, 0, { GL_EXT_window_rectangles, GL_EXTENSION_COUNT }},
-    { "glWriteMaskEXT", glWriteMaskEXT, 0, 0, { GL_EXT_vertex_shader, GL_EXTENSION_COUNT }},
-    { "wglAllocateMemoryNV", wglAllocateMemoryNV, 0, 0, { WGL_NV_vertex_array_range, GL_EXTENSION_COUNT }},
-    { "wglBindTexImageARB", wglBindTexImageARB, 0, 0, { WGL_ARB_render_texture, GL_EXTENSION_COUNT }},
-    { "wglChoosePixelFormatARB", wglChoosePixelFormatARB, 0, 0, { WGL_ARB_pixel_format, GL_EXTENSION_COUNT }},
-    { "wglCreateContextAttribsARB", wglCreateContextAttribsARB, 0, 0, { WGL_ARB_create_context, GL_EXTENSION_COUNT }},
-    { "wglCreatePbufferARB", wglCreatePbufferARB, 0, 0, { WGL_ARB_pbuffer, GL_EXTENSION_COUNT }},
-    { "wglDestroyPbufferARB", wglDestroyPbufferARB, 0, 0, { WGL_ARB_pbuffer, GL_EXTENSION_COUNT }},
-    { "wglFreeMemoryNV", wglFreeMemoryNV, 0, 0, { WGL_NV_vertex_array_range, GL_EXTENSION_COUNT }},
-    { "wglGetCurrentReadDCARB", wglGetCurrentReadDCARB, 0, 0, { WGL_ARB_make_current_read, GL_EXTENSION_COUNT }},
-    { "wglGetExtensionsStringARB", wglGetExtensionsStringARB, 0, 0, { WGL_ARB_extensions_string, GL_EXTENSION_COUNT }},
-    { "wglGetExtensionsStringEXT", wglGetExtensionsStringEXT, 0, 0, { WGL_EXT_extensions_string, GL_EXTENSION_COUNT }},
-    { "wglGetPbufferDCARB", wglGetPbufferDCARB, 0, 0, { WGL_ARB_pbuffer, GL_EXTENSION_COUNT }},
-    { "wglGetPixelFormatAttribfvARB", wglGetPixelFormatAttribfvARB, 0, 0, { WGL_ARB_pixel_format, GL_EXTENSION_COUNT }},
-    { "wglGetPixelFormatAttribivARB", wglGetPixelFormatAttribivARB, 0, 0, { WGL_ARB_pixel_format, GL_EXTENSION_COUNT }},
-    { "wglGetSwapIntervalEXT", wglGetSwapIntervalEXT, 0, 0, { WGL_EXT_swap_control, GL_EXTENSION_COUNT }},
-    { "wglMakeContextCurrentARB", wglMakeContextCurrentARB, 0, 0, { WGL_ARB_make_current_read, GL_EXTENSION_COUNT }},
-    { "wglQueryCurrentRendererIntegerWINE", wglQueryCurrentRendererIntegerWINE, 0, 0, { WGL_WINE_query_renderer, GL_EXTENSION_COUNT }},
-    { "wglQueryCurrentRendererStringWINE", wglQueryCurrentRendererStringWINE, 0, 0, { WGL_WINE_query_renderer, GL_EXTENSION_COUNT }},
-    { "wglQueryPbufferARB", wglQueryPbufferARB, 0, 0, { WGL_ARB_pbuffer, GL_EXTENSION_COUNT }},
-    { "wglQueryRendererIntegerWINE", wglQueryRendererIntegerWINE, 0, 0, { WGL_WINE_query_renderer, GL_EXTENSION_COUNT }},
-    { "wglQueryRendererStringWINE", wglQueryRendererStringWINE, 0, 0, { WGL_WINE_query_renderer, GL_EXTENSION_COUNT }},
-    { "wglReleasePbufferDCARB", wglReleasePbufferDCARB, 0, 0, { WGL_ARB_pbuffer, GL_EXTENSION_COUNT }},
-    { "wglReleaseTexImageARB", wglReleaseTexImageARB, 0, 0, { WGL_ARB_render_texture, GL_EXTENSION_COUNT }},
-    { "wglSetPbufferAttribARB", wglSetPbufferAttribARB, 0, 0, { WGL_ARB_render_texture, GL_EXTENSION_COUNT }},
-    { "wglSetPixelFormatWINE", wglSetPixelFormatWINE, 0, 0, { WGL_WINE_pixel_format_passthrough, GL_EXTENSION_COUNT }},
-    { "wglSwapIntervalEXT", wglSwapIntervalEXT, 0, 0, { WGL_EXT_swap_control, GL_EXTENSION_COUNT }},
-};
-
-static int registry_entry_cmp( const void *a, const void *b )
-{
-    const struct registry_entry *entry = b;
-    return strcmp( a, entry->name );
-}
-
-struct registry_entry *get_function_entry( const char *name )
-{
-    return bsearch( name, extension_registry, ARRAYSIZE(extension_registry), sizeof(extension_registry[0]), registry_entry_cmp );
-}

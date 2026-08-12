@@ -28,3 +28,5 @@ NTSTATUS oss_wow64_midi_out_message(void *args);
 NTSTATUS oss_wow64_midi_in_message(void *args);
 NTSTATUS oss_wow64_midi_notify_wait(void *args);
 #endif
+
+#define OSS_CALL(func, params) WINE_UNIX_CALL(func, params)

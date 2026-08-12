@@ -513,8 +513,8 @@ static HRESULT STDMETHODCALLTYPE d2d_factory_CreateDCRenderTarget(ID2D1Factory7 
     return S_OK;
 }
 
-HRESULT d2d_factory_create_device(ID2D1Factory1 *factory, IDXGIDevice *dxgi_device,
-        bool allow_get_dxgi_device, REFIID iid, void **device)
+static HRESULT d2d_factory_create_device(struct d2d_factory *factory, IDXGIDevice *dxgi_device,
+        REFIID iid, void **device)
 {
     struct d2d_device *object;
     HRESULT hr;
@@ -522,11 +522,7 @@ HRESULT d2d_factory_create_device(ID2D1Factory1 *factory, IDXGIDevice *dxgi_devi
     if (!(object = calloc(1, sizeof(*object))))
         return E_OUTOFMEMORY;
 
-    if (FAILED(hr = d2d_device_init(object, factory, dxgi_device, allow_get_dxgi_device)))
-    {
-        ID2D1Device6_Release(&object->ID2D1Device6_iface);
-        return hr;
-    }
+    d2d_device_init(object, factory, dxgi_device);
 
     TRACE("Create device %p.\n", object);
 
@@ -539,9 +535,11 @@ HRESULT d2d_factory_create_device(ID2D1Factory1 *factory, IDXGIDevice *dxgi_devi
 static HRESULT STDMETHODCALLTYPE d2d_factory_CreateDevice(ID2D1Factory7 *iface,
         IDXGIDevice *dxgi_device, ID2D1Device **device)
 {
+    struct d2d_factory *factory = impl_from_ID2D1Factory7(iface);
+
     TRACE("iface %p, dxgi_device %p, device %p.\n", iface, dxgi_device, device);
 
-    return d2d_factory_create_device((ID2D1Factory1 *)iface, dxgi_device, true, &IID_ID2D1Device, (void **)device);
+    return d2d_factory_create_device(factory, dxgi_device, &IID_ID2D1Device, (void **)device);
 }
 
 static HRESULT STDMETHODCALLTYPE d2d_factory_CreateStrokeStyle1(ID2D1Factory7 *iface,
@@ -1072,7 +1070,7 @@ static HRESULT d2d_factory_register_effect_from_string(struct d2d_factory *facto
 
     size = sizeof(*property_xml) * (wcslen(property_xml) + 1);
     if (SUCCEEDED(hr = IStream_Write(stream, property_xml, size, NULL)))
-        hr = IStream_Seek(stream, zero, STREAM_SEEK_SET, NULL);
+        hr = IStream_Seek(stream, zero, SEEK_SET, NULL);
 
     if (SUCCEEDED(hr))
         hr = d2d_factory_register_effect_from_stream(factory, effect_id, stream, bindings,
@@ -1191,49 +1189,61 @@ static HRESULT STDMETHODCALLTYPE d2d_factory_GetEffectProperties(ID2D1Factory7 *
 static HRESULT STDMETHODCALLTYPE d2d_factory_ID2D1Factory2_CreateDevice(ID2D1Factory7 *iface,
         IDXGIDevice *dxgi_device, ID2D1Device1 **device)
 {
+    struct d2d_factory *factory = impl_from_ID2D1Factory7(iface);
+
     TRACE("iface %p, dxgi_device %p, device %p.\n", iface, dxgi_device, device);
 
-    return d2d_factory_create_device((ID2D1Factory1 *)iface, dxgi_device, true, &IID_ID2D1Device1, (void **)device);
+    return d2d_factory_create_device(factory, dxgi_device, &IID_ID2D1Device1, (void **)device);
 }
 
 static HRESULT STDMETHODCALLTYPE d2d_factory_ID2D1Factory3_CreateDevice(ID2D1Factory7 *iface,
         IDXGIDevice *dxgi_device, ID2D1Device2 **device)
 {
+    struct d2d_factory *factory = impl_from_ID2D1Factory7(iface);
+
     TRACE("iface %p, dxgi_device %p, device %p.\n", iface, dxgi_device, device);
 
-    return d2d_factory_create_device((ID2D1Factory1 *)iface, dxgi_device, true, &IID_ID2D1Device2, (void **)device);
+    return d2d_factory_create_device(factory, dxgi_device, &IID_ID2D1Device2, (void **)device);
 }
 
 static HRESULT STDMETHODCALLTYPE d2d_factory_ID2D1Factory4_CreateDevice(ID2D1Factory7 *iface,
         IDXGIDevice *dxgi_device, ID2D1Device3 **device)
 {
+    struct d2d_factory *factory = impl_from_ID2D1Factory7(iface);
+
     TRACE("iface %p, dxgi_device %p, device %p.\n", iface, dxgi_device, device);
 
-    return d2d_factory_create_device((ID2D1Factory1 *)iface, dxgi_device, true, &IID_ID2D1Device3, (void **)device);
+    return d2d_factory_create_device(factory, dxgi_device, &IID_ID2D1Device3, (void **)device);
 }
 
 static HRESULT STDMETHODCALLTYPE d2d_factory_ID2D1Factory5_CreateDevice(ID2D1Factory7 *iface,
         IDXGIDevice *dxgi_device, ID2D1Device4 **device)
 {
+    struct d2d_factory *factory = impl_from_ID2D1Factory7(iface);
+
     TRACE("iface %p, dxgi_device %p, device %p.\n", iface, dxgi_device, device);
 
-    return d2d_factory_create_device((ID2D1Factory1 *)iface, dxgi_device, true, &IID_ID2D1Device4, (void **)device);
+    return d2d_factory_create_device(factory, dxgi_device, &IID_ID2D1Device4, (void **)device);
 }
 
 static HRESULT STDMETHODCALLTYPE d2d_factory_ID2D1Factory6_CreateDevice(ID2D1Factory7 *iface,
         IDXGIDevice *dxgi_device, ID2D1Device5 **device)
 {
+    struct d2d_factory *factory = impl_from_ID2D1Factory7(iface);
+
     TRACE("iface %p, dxgi_device %p, device %p.\n", iface, dxgi_device, device);
 
-    return d2d_factory_create_device((ID2D1Factory1 *)iface, dxgi_device, true, &IID_ID2D1Device5, (void **)device);
+    return d2d_factory_create_device(factory, dxgi_device, &IID_ID2D1Device5, (void **)device);
 }
 
 static HRESULT STDMETHODCALLTYPE d2d_factory_ID2D1Factory7_CreateDevice(ID2D1Factory7 *iface,
         IDXGIDevice *dxgi_device, ID2D1Device6 **device)
 {
+    struct d2d_factory *factory = impl_from_ID2D1Factory7(iface);
+
     TRACE("iface %p, dxgi_device %p, device %p.\n", iface, dxgi_device, device);
 
-    return d2d_factory_create_device((ID2D1Factory1 *)iface, dxgi_device, true, &IID_ID2D1Device6, (void **)device);
+    return d2d_factory_create_device(factory, dxgi_device, &IID_ID2D1Device6, (void **)device);
 }
 
 static const struct ID2D1Factory7Vtbl d2d_factory_vtbl =
@@ -1445,27 +1455,6 @@ BOOL WINAPI D2D1InvertMatrix(D2D1_MATRIX_3X2_F *matrix)
     return d2d_matrix_invert(matrix, &m);
 }
 
-float WINAPI D2D1ComputeMaximumScaleFactor(const D2D1_MATRIX_3X2_F *matrix)
-{
-    const float (*m)[2] = matrix->m;
-    float a1, a2, c;
-
-    TRACE("matrix %p.\n", matrix);
-
-    /* 2x2 matrix, _31 and _32 are ignored. */
-    a1 = m[0][0] * m[0][0] + m[1][0] * m[1][0];
-    a2 = m[0][1] * m[0][1] + m[1][1] * m[1][1];
-    c = m[0][0] * m[0][1] + m[1][0] * m[1][1];
-
-    /* Maximum scale factor of matrix M refers to maximum value of |Mv|/|v| over all vectors v, where |.| is
-     * vector length. That is defined as matrix spectral norm. Spectral norm equals to the maximum of the
-     * singular values s1, s2 for 2x2 matrix M.
-     * s_i^2 = e_i where e_i (e1, e2) are eigenvalues of (transpose(M) * M)
-     * e1 + e2 = trace(transpose(M) * M) = a1 + a2
-     * e1 * e2 = det(transpose(M) * M) = a1 * a2 - c ^ 2. */
-    return sqrtf(0.5f * (a1 + a2 + sqrtf((a1 - a2) * (a1 - a2) + 4 * c * c)));
-}
-
 HRESULT WINAPI D2D1CreateDevice(IDXGIDevice *dxgi_device,
         const D2D1_CREATION_PROPERTIES *properties, ID2D1Device **device)
 {
@@ -1507,28 +1496,6 @@ HRESULT WINAPI D2D1CreateDevice(IDXGIDevice *dxgi_device,
 
     hr = ID2D1Factory1_CreateDevice(factory, dxgi_device, device);
     ID2D1Factory1_Release(factory);
-    return hr;
-}
-
-HRESULT WINAPI D2D1CreateDeviceContext(IDXGISurface *dxgi_surface,
-        const D2D1_CREATION_PROPERTIES *properties, ID2D1DeviceContext **context)
-{
-    IDXGIDevice *dxgi_device;
-    ID2D1Device *device;
-    HRESULT hr;
-
-    TRACE("dxgi_surface %p, properties %p, context %p.\n", dxgi_surface, properties, context);
-
-    if (FAILED(hr = IDXGISurface_GetDevice(dxgi_surface, &IID_IDXGIDevice, (void **)&dxgi_device)))
-        return hr;
-
-    if (SUCCEEDED(hr = D2D1CreateDevice(dxgi_device, properties, &device)))
-    {
-        hr = ID2D1Device_CreateDeviceContext(device, properties ? properties->options : D2D1_DEVICE_CONTEXT_OPTIONS_NONE, context);
-        ID2D1Device_Release(device);
-    }
-
-    IDXGIDevice_Release(dxgi_device);
     return hr;
 }
 

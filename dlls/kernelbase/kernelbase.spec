@@ -192,7 +192,6 @@
 @ stdcall CreateFiberEx(long long long ptr ptr)
 @ stdcall CreateFile2(wstr long long long ptr)
 @ stdcall CreateFileA(str long long ptr long long long)
-@ stdcall CreateFileMapping2(long ptr long long long int64 wstr ptr long)
 @ stdcall CreateFileMappingFromApp(long ptr long int64 wstr)
 @ stdcall CreateFileMappingNumaW(long ptr long long long wstr long)
 @ stdcall CreateFileMappingW(long ptr long long long wstr)
@@ -244,7 +243,6 @@
 @ stdcall CtrlRoutine(ptr)
 # @ stub CveEventWrite
 @ stdcall DeactivateActCtx(long long)
-@ stdcall DeriveCapabilitySidsFromName(ptr ptr ptr ptr ptr)
 @ stdcall DebugActiveProcess(long)
 @ stdcall DebugActiveProcessStop(long)
 @ stdcall DebugBreak()
@@ -476,13 +474,14 @@
 @ stdcall GetConsoleProcessList(ptr long)
 @ stdcall GetConsoleScreenBufferInfo(long ptr)
 @ stdcall GetConsoleScreenBufferInfoEx(long ptr)
+@ stdcall GetConsoleSelectionInfo(ptr)
 @ stdcall GetConsoleTitleA(ptr long)
 @ stdcall GetConsoleTitleW(ptr long)
 @ stdcall GetConsoleWindow()
 @ stdcall GetCurrencyFormatEx(wstr long wstr ptr ptr long)
 @ stdcall GetCurrencyFormatW(long long wstr ptr ptr long)
 @ stdcall GetCurrentActCtx(ptr)
-@ stdcall GetCurrentApplicationUserModelId(ptr ptr)
+# @ stub GetCurrentApplicationUserModelId
 @ stdcall GetCurrentConsoleFont(long long ptr)
 @ stdcall GetCurrentConsoleFontEx(long long ptr)
 @ stdcall GetCurrentDirectoryA(long ptr)
@@ -569,7 +568,7 @@
 @ stdcall GetGeoInfoEx(ptr long ptr long)
 @ stdcall GetHandleInformation(long ptr)
 # @ stub GetHivePath
-# @ stub GetIntegratedDisplaySize
+@ stdcall GetIntegratedDisplaySize(ptr)
 # @ stub GetIsEdpEnabled
 @ stdcall GetKernelObjectSecurity(long long ptr long ptr)
 @ stdcall GetLargePageMinimum()
@@ -587,7 +586,6 @@
 @ stdcall GetLogicalProcessorInformationEx(long ptr ptr)
 @ stdcall GetLongPathNameA(str ptr long)
 @ stdcall GetLongPathNameW(wstr ptr long)
-@ stdcall GetMachineTypeAttributes(long ptr)
 @ stdcall GetMappedFileNameA(long ptr ptr long)
 @ stdcall GetMappedFileNameW(long ptr ptr long)
 # @ stub GetMemoryErrorHandlingCapabilities
@@ -637,7 +635,7 @@
 # @ stub GetPackageInfo
 # @ stub GetPackageInstallTime
 # @ stub GetPackageOSMaxVersionTested
-# @ stub GetPackagePath
+@ stdcall GetPackagePath(ptr long ptr ptr)
 @ stdcall GetPackagePathByFullName(wstr ptr wstr)
 # @ stub GetPackagePathOnVolume
 # @ stub GetPackageProperty
@@ -822,7 +820,7 @@
 @ stdcall HeapReAlloc(long long ptr long) ntdll.RtlReAllocateHeap
 @ stdcall HeapSetInformation(ptr long ptr long)
 @ stdcall HeapSize(long long ptr) ntdll.RtlSizeHeap
-@ stdcall HeapSummary(long long ptr)
+@ stub HeapSummary
 @ stdcall HeapUnlock(long)
 @ stdcall HeapValidate(long long ptr)
 @ stdcall HeapWalk(long ptr)
@@ -1052,7 +1050,7 @@
 # @ stub PackageFamilyNameFromFullName
 # @ stub PackageFamilyNameFromId
 # @ stub PackageFamilyNameFromProductId
-# @ stub PackageFullNameFromId
+@ stdcall PackageFullNameFromId(ptr ptr ptr)
 # @ stub PackageFullNameFromProductId
 @ stdcall PackageIdFromFullName(wstr long ptr ptr)
 # @ stub PackageIdFromProductId
@@ -1197,8 +1195,8 @@
 # @ stub PerfQueryInstance
 @ stdcall PerfSetCounterRefValue(long ptr long ptr)
 @ stdcall PerfSetCounterSetInfo(long ptr long)
-@ stdcall PerfSetULongCounterValue(long ptr long long)
-@ stdcall PerfSetULongLongCounterValue(long ptr long int64)
+# @ stub PerfSetULongCounterValue
+# @ stub PerfSetULongLongCounterValue
 @ stdcall PerfStartProvider(ptr ptr ptr)
 @ stdcall PerfStartProviderEx(ptr ptr ptr)
 @ stdcall PerfStopProvider(long)
@@ -1265,7 +1263,6 @@
 @ stdcall QueryWorkingSet(long ptr long)
 @ stdcall QueryWorkingSetEx(long ptr long)
 @ stdcall QueueUserAPC(ptr long long)
-@ stdcall QueueUserAPC2(ptr long long long)
 @ stdcall QueueUserWorkItem(ptr ptr long)
 # @ stub QuirkGetData
 # @ stub QuirkGetData2
@@ -1731,7 +1728,7 @@
 @ stdcall VirtualLock(ptr long)
 @ stdcall VirtualProtect(ptr long long ptr)
 @ stdcall VirtualProtectEx(long ptr long long ptr)
-@ stdcall VirtualProtectFromApp(ptr long long ptr)
+# @ stub VirtualProtectFromApp
 @ stdcall VirtualQuery(ptr ptr long)
 @ stdcall VirtualQueryEx(long ptr ptr long)
 @ stdcall VirtualUnlock(ptr long)

@@ -49,7 +49,7 @@
 static BOOL old_shell32 = FALSE;
 
 static CHAR CURR_DIR[MAX_PATH];
-static const WCHAR UNICODE_PATH[] = L"c:\\\x00ae\0";
+static const WCHAR UNICODE_PATH[] = {'c',':','\\',0x00ae,'\0','\0'};
     /* "c:\®" can be used in all codepages */
     /* Double-null termination needed for pFrom field of SHFILEOPSTRUCT */
 
@@ -730,13 +730,6 @@ static void test_delete(void)
     ok(!dir_exists("testdir2\\nested"), "Expected testdir2\\nested to not exist\n");
 }
 
-static BOOL is_below_windows8(void)
-{
-    INT_PTR rc;
-    rc = (INT_PTR)ShellExecuteA(NULL, "averb", "shlproto://foo/bar", NULL, NULL, SW_HIDE);
-    return rc == SE_ERR_ACCESSDENIED;
-}
-
 /* tests the FO_RENAME action */
 static void test_rename(void)
 {
@@ -838,26 +831,21 @@ static void test_rename(void)
     check_file_operation(FO_RENAME, FOF_NO_UI,
             "test1.txt\0", "test2.txt\0",
             ERROR_SUCCESS, FALSE, FALSE, FALSE);
-    if (!is_below_windows8()) /* Hangs with Windows 7 */
-    {
-        check_file_operation(FO_RENAME, FOF_NO_UI,
-                "testdir2\0", "testdir4\0",
-                ERROR_SUCCESS, FALSE, TRUE, FALSE);
-    }
-    else
-        win_skip("Skip FO_RENAME with already existing target directory.\n");
+    check_file_operation(FO_RENAME, FOF_NO_UI,
+            "testdir2\0", "testdir4\0",
+            ERROR_SUCCESS, FALSE, TRUE, FALSE);
 
     /* Empty source or target. */
     clean_after_shfo_tests();
     init_shfo_tests();
     check_file_operation(FO_RENAME, FOF_NO_UI,
-            "\0", "test1.txt\0",
+            "\0", "test1.txt",
             DE_MANYSRC1DEST, FALSE, FALSE, FALSE);
     check_file_operation(FO_RENAME, FOF_NO_UI,
-            "\0", "testdir2\0",
+            "\0", "testdir2",
             DE_MANYSRC1DEST, FALSE, FALSE, FALSE);
     check_file_operation(FO_RENAME, FOF_NO_UI,
-            "\0", "nonexistence\0",
+            "\0", "nonexistence",
             DE_MANYSRC1DEST, FALSE, FALSE, FALSE);
     ok(!file_exists("nonexistence"), "Expected nonexistence to not exist\n");
     check_file_operation(FO_RENAME, FOF_NO_UI,
@@ -1360,8 +1348,7 @@ static void test_copy(void)
     ok(!DeleteFileA("threedir\\two.txt"), "Expected file to not exist\n");
     ok(DeleteFileA("one.txt"), "Expected file to exist\n");
     ok(DeleteFileA("two.txt"), "Expected file to exist\n");
-    todo_wine
-    ok(!DeleteFileA("threedir"), "Expected file to not exist\n");
+    ok(!RemoveDirectoryA("threedir"), "Expected dir to not exist\n");
 
     /* pTo contains bogus 2nd name longer than MAX_PATH,
      * multiple source files, target dir exists, with FOF_MULTIDESTFILES. */
@@ -1375,13 +1362,16 @@ static void test_copy(void)
     lstrcpyA(ptr, "fourdir");
     check_file_operation(FO_COPY, FOF_NO_UI | FOF_MULTIDESTFILES,
             "one.txt\0two.txt\0", to,
-            ERROR_SUCCESS, FALSE, FALSE, FALSE);
+            ERROR_SUCCESS, FALSE, TRUE, FALSE);
     ok(DeleteFileA("one.txt"), "Expected file to exist\n");
     ok(DeleteFileA("two.txt"), "Expected file to exist\n");
+    todo_wine
     ok(DeleteFileA("threedir\\one.txt"), "Expected file to exist\n");
     ok(!DeleteFileA("threedir\\two.txt"), "Expected file to not exist\n");
+    todo_wine
     ok(DeleteFileA("fourdir\\two.txt"), "Expected file to exist\n");
     RemoveDirectoryA("fourdir");
+    todo_wine
     ok(RemoveDirectoryA("threedir"), "Expected dir to exist\n");
 
     /* Same number sources and targets, first target dir exists, with FOF_MULTIDESTFILES. */
@@ -1390,12 +1380,14 @@ static void test_copy(void)
     CreateDirectoryA("threedir", NULL);
     check_file_operation(FO_COPY, FOF_NO_UI | FOF_MULTIDESTFILES,
             "one.txt\0two.txt\0", "threedir\0fourdir\0",
-            DE_FILEDESTISFLD, FALSE, FALSE, FALSE);
+            DE_FILEDESTISFLD, FALSE, TRUE, FALSE);
     ok(!DeleteFileA("threedir\\one.txt"), "Expected file to not exist\n");
     ok(!DeleteFileA("threedir\\two.txt"), "Expected file to not exist\n");
     ok(DeleteFileA("one.txt"), "Expected file to exist\n");
     ok(DeleteFileA("two.txt"), "Expected file to exist\n");
+    todo_wine
     ok(RemoveDirectoryA("threedir"), "Expected dir to exist\n");
+    todo_wine
     ok(!DeleteFileA("fourdir"), "Expected file to not exist\n");
     ok(!RemoveDirectoryA("fourdir"), "Expected dir to not exist\n");
 
@@ -1405,13 +1397,16 @@ static void test_copy(void)
     CreateDirectoryA("threedir", NULL);
     check_file_operation(FO_COPY, FOF_NO_UI | FOF_MULTIDESTFILES,
             "one.txt\0two.txt\0", "threedir\0fourdir\0five\0",
-            ERROR_SUCCESS, FALSE, FALSE, FALSE);
+            ERROR_SUCCESS, FALSE, TRUE, FALSE);
     ok(DeleteFileA("one.txt"), "Expected file to exist\n");
     ok(DeleteFileA("two.txt"), "Expected file to exist\n");
+    todo_wine
     ok(DeleteFileA("threedir\\one.txt"), "Expected file to exist\n");
     ok(!DeleteFileA("threedir\\two.txt"), "Expected file to not exist\n");
+    todo_wine
     ok(DeleteFileA("fourdir\\two.txt"), "Expected file to exist\n");
     RemoveDirectoryA("fourdir");
+    todo_wine
     ok(RemoveDirectoryA("threedir"), "Expected dir to exist\n");
     ok(!DeleteFileA("five"), "Expected file to not exist\n");
     ok(!RemoveDirectoryA("five"), "Expected dir to not exist\n");
@@ -1509,7 +1504,7 @@ static void test_copy(void)
             "\0", "testfile.txt\0",
             ERROR_SUCCESS, FALSE, FALSE, FALSE);
     check_file_operation(FO_COPY, FOF_NO_UI,
-            "\0", "nonexistence\0",
+            "\0", "nonexistence",
             ERROR_SUCCESS, FALSE, FALSE, FALSE);
     check_file_operation(FO_COPY, FOF_NO_UI,
             "\0", "\0",
@@ -1858,13 +1853,13 @@ static void test_move(void)
             ERROR_SUCCESS, FALSE, FALSE, FALSE);
     ok(!file_exists("nonexistence"), "Expected nonexistence to not exist.\n");
     check_file_operation(FO_MOVE, FOF_NO_UI,
-            "test1.txt\0", "\0",
-            DE_SAMEFILE, FALSE, FALSE, FALSE);
+            "test1.txt", "\0",
+            ERROR_FILE_NOT_FOUND, FALSE, FALSE, FALSE);
     check_file_operation(FO_MOVE, FOF_NO_UI,
-            "testdir2\0", "\0",
-            DE_DESTSAMETREE, FALSE, FALSE, FALSE);
+            "testdir2", "\0",
+            DE_DESTSAMETREE, FALSE, TRUE, FALSE);
     check_file_operation(FO_MOVE, FOF_NO_UI,
-            "nonexistence\0", "\0",
+            "nonexistence", "\0",
             ERROR_FILE_NOT_FOUND, FALSE, FALSE, FALSE);
     check_file_operation(FO_MOVE, FOF_NO_UI,
             "\0", "\0",
@@ -1907,11 +1902,11 @@ static void test_move(void)
     set_curr_dir_path(from, "test1.txt\0test2.txt\0test4.txt\0");
     set_curr_dir_path(to, "test6.txt\0test7.txt\0test8.txt\0");
     check_file_operation(FO_MOVE, FOF_NO_UI, from, to,
-            ERROR_SUCCESS, FALSE, FALSE, FALSE);
-    ok(DeleteFileA("test6.txt\\test1.txt"), "The file is not moved. Many files are specified\n");
-    ok(DeleteFileA("test6.txt\\test2.txt"), "The file is not moved. Many files are specified\n");
-    ok(DeleteFileA("test6.txt\\test4.txt\\test1.txt"), "The file is not moved. Many files are specified\n");
-    ok(RemoveDirectoryA("test6.txt\\test4.txt"), "The directory is not moved. Many files are specified\n");
+            ERROR_SUCCESS, FALSE, TRUE, TRUE);
+    todo_wine ok(DeleteFileA("test6.txt\\test1.txt"), "The file is not moved. Many files are specified\n");
+    todo_wine ok(DeleteFileA("test6.txt\\test2.txt"), "The file is not moved. Many files are specified\n");
+    todo_wine ok(DeleteFileA("test6.txt\\test4.txt\\test1.txt"), "The file is not moved. Many files are specified\n");
+    todo_wine ok(RemoveDirectoryA("test6.txt\\test4.txt"), "The directory is not moved. Many files are specified\n");
     RemoveDirectoryA("test6.txt");
     init_shfo_tests();
 
@@ -1949,9 +1944,9 @@ static void test_move(void)
     /* move two files to one other */
     check_file_operation(FO_MOVE, FOF_NO_UI,
             "test2.txt\0test3.txt\0", "test1.txt\0",
-            ERROR_SUCCESS, FALSE, FALSE, FALSE);
-    ok(DeleteFileA("test1.txt\\test2.txt"), "Expected test1.txt\\test2.txt to exist\n");
-    ok(DeleteFileA("test1.txt\\test3.txt"), "Expected test1.txt\\test3.txt to exist\n");
+            ERROR_SUCCESS, FALSE, TRUE, TRUE);
+    todo_wine ok(DeleteFileA("test1.txt\\test2.txt"), "Expected test1.txt\\test2.txt to exist\n");
+    todo_wine ok(DeleteFileA("test1.txt\\test3.txt"), "Expected test1.txt\\test3.txt to exist\n");
     RemoveDirectoryA("test1.txt");
     createTestFile("test2.txt");
     createTestFile("test3.txt");
@@ -1959,16 +1954,16 @@ static void test_move(void)
     /* move a directory into itself */
     check_file_operation(FO_MOVE, FOF_NO_UI,
             "test4.txt\0", "test4.txt\\b.txt\0",
-            DE_DESTSUBTREE, FALSE, FALSE, FALSE);
+            DE_DESTSUBTREE, FALSE, TRUE, FALSE);
     ok(!RemoveDirectoryA("test4.txt\\b.txt"), "Expected test4.txt\\b.txt to not exist\n");
     ok(dir_exists("test4.txt"), "Expected test4.txt to exist\n");
 
     /* move many files without FOF_MULTIDESTFILES */
     check_file_operation(FO_MOVE, FOF_NO_UI,
             "test2.txt\0test3.txt\0", "d.txt\0e.txt\0",
-            ERROR_SUCCESS, FALSE, FALSE, FALSE);
-    ok(DeleteFileA("d.txt\\test2.txt"), "Expected d.txt\\test2.txt to exist\n");
-    ok(DeleteFileA("d.txt\\test3.txt"), "Expected d.txt\\test3.txt to exist\n");
+            ERROR_SUCCESS, FALSE, TRUE, TRUE);
+    todo_wine ok(DeleteFileA("d.txt\\test2.txt"), "Expected d.txt\\test2.txt to exist\n");
+    todo_wine ok(DeleteFileA("d.txt\\test3.txt"), "Expected d.txt\\test3.txt to exist\n");
     RemoveDirectoryA("d.txt");
     createTestFile("test2.txt");
     createTestFile("test3.txt");
@@ -2200,7 +2195,7 @@ static void test_unicode(void)
     SHFILEOPSTRUCTW shfoW;
     int ret;
     HANDLE file;
-    static const WCHAR UNICODE_PATH_TO[] = L"c:\\\x00ae\x00ae\0";
+    static const WCHAR UNICODE_PATH_TO[] = {'c',':','\\',0x00ae,0x00ae,'\0'};
     HWND hwnd;
 
     shfoW.hwnd = NULL;

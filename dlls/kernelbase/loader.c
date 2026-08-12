@@ -23,6 +23,7 @@
 #include <stdarg.h>
 
 #include "ntstatus.h"
+#define WIN32_NO_STATUS
 #include "windef.h"
 #include "winbase.h"
 #include "winnls.h"
@@ -159,7 +160,13 @@ static HMODULE load_library( const UNICODE_STRING *libname, DWORD flags )
     WCHAR *load_path, *dummy;
     DWORD load_flags = 0, search_flags;
 
+    TRACE("%s %#lx.\n", libname ? debugstr_w(libname->Buffer) : "<null>", flags);
+
     if (flags & unsupported_flags) FIXME( "unsupported flag(s) used %#08lx\n", flags );
+
+    search_flags = flags & load_library_search_flags;
+    if (flags & DONT_RESOLVE_DLL_REFERENCES)
+        load_flags |= LDR_DONT_RESOLVE_REFS;
 
     if (flags & (LOAD_LIBRARY_AS_DATAFILE | LOAD_LIBRARY_AS_DATAFILE_EXCLUSIVE |
                  LOAD_LIBRARY_AS_IMAGE_RESOURCE))
@@ -171,8 +178,6 @@ static HMODULE load_library( const UNICODE_STRING *libname, DWORD flags )
     }
     else
     {
-        search_flags = flags & load_library_search_flags;
-        if (flags & DONT_RESOLVE_DLL_REFERENCES) load_flags |= LDR_DONT_RESOLVE_REFS;
         status = LdrLoadDll( (void *)((ULONG_PTR)search_flags | 1), &load_flags, libname, &module );
         if (!set_ntstatus( status ))
         {
@@ -304,7 +309,7 @@ DWORD WINAPI DECLSPEC_HOTPATCH GetModuleFileNameW( HMODULE module, LPWSTR filena
     UNICODE_STRING name;
     NTSTATUS status;
 
-    if (!module && ((win16_tib = NtCurrentTeb()->Tib.SubSystemTib)) && win16_tib->exe_name)
+    if (!module && (0 && (win16_tib = NtCurrentTeb()->Tib.SubSystemTib)) && win16_tib->exe_name)
     {
         len = min( size, win16_tib->exe_name->Length / sizeof(WCHAR) );
         memcpy( filename, win16_tib->exe_name->Buffer, len * sizeof(WCHAR) );
@@ -315,14 +320,7 @@ DWORD WINAPI DECLSPEC_HOTPATCH GetModuleFileNameW( HMODULE module, LPWSTR filena
     name.Buffer = filename;
     name.MaximumLength = min( size, UNICODE_STRING_MAX_CHARS ) * sizeof(WCHAR);
     status = LdrGetDllFullName( module, &name );
-    if (!status || status == STATUS_BUFFER_TOO_SMALL)
-    {
-        len = name.Length / sizeof(WCHAR);
-        /* LdrGetDllFullName calls RtlCopyUnicodeString which should terminate
-           if there's space, otherwise: */
-        if (status == STATUS_BUFFER_TOO_SMALL && size > 0)
-            filename[size - 1] = 0;
-    }
+    if (!status || status == STATUS_BUFFER_TOO_SMALL) len = name.Length / sizeof(WCHAR);
     SetLastError( RtlNtStatusToDosError( status ));
 done:
     TRACE( "%s\n", debugstr_wn(filename, len) );
@@ -569,6 +567,14 @@ HMODULE WINAPI DECLSPEC_HOTPATCH LoadLibraryExW( LPCWSTR name, HANDLE file, DWOR
         SetLastError( ERROR_INVALID_PARAMETER );
         return 0;
     }
+
+    /* HACK: allow webservices.dll to be shipped together with remote debugger tools. */
+    if (flags == LOAD_LIBRARY_SEARCH_SYSTEM32 && !file && !wcscmp( name, L"webservices.dll" ))
+    {
+        FIXME( "HACK: ignoring LOAD_LIBRARY_SEARCH_SYSTEM32 for webservices.dll\n" );
+        flags = 0;
+    }
+
     RtlInitUnicodeString( &str, name );
     if (str.Length && str.Buffer[str.Length/sizeof(WCHAR) - 1] != ' ') return load_library( &str, flags );
 
@@ -1183,7 +1189,7 @@ void WINAPI DECLSPEC_HOTPATCH AddRefActCtx( HANDLE context )
  */
 HANDLE WINAPI DECLSPEC_HOTPATCH CreateActCtxW( PCACTCTXW ctx )
 {
-    struct _ACTIVATION_CONTEXT *context;
+    HANDLE context;
 
     TRACE( "%p %08lx\n", ctx, ctx ? ctx->dwFlags : 0 );
 
@@ -1235,7 +1241,7 @@ BOOL WINAPI DECLSPEC_HOTPATCH FindActCtxSectionStringW( DWORD flags, const GUID 
  */
 BOOL WINAPI DECLSPEC_HOTPATCH GetCurrentActCtx( HANDLE *pcontext )
 {
-    return set_ntstatus( RtlGetActiveActivationContext( (struct _ACTIVATION_CONTEXT **)pcontext ));
+    return set_ntstatus( RtlGetActiveActivationContext( pcontext ));
 }
 
 

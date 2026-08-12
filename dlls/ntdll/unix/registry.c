@@ -27,8 +27,13 @@
 
 #include <stdarg.h>
 #include <string.h>
+#include <unistd.h>
+#include <errno.h>
+#include <fcntl.h>
+#include <sys/stat.h>
 
 #include "ntstatus.h"
+#define WIN32_NO_STATUS
 #include "winternl.h"
 #include "unix_private.h"
 #include "wine/debug.h"
@@ -55,16 +60,259 @@ NTSTATUS open_hkcu_key( const char *path, HANDLE *key )
 
     sid = ((TOKEN_USER *)sid_data)->User.Sid;
     len = snprintf( buffer, sizeof(buffer), "\\Registry\\User\\S-%u-%u", sid->Revision,
-                   MAKELONG( MAKEWORD( sid->IdentifierAuthority.Value[5], sid->IdentifierAuthority.Value[4] ),
-                             MAKEWORD( sid->IdentifierAuthority.Value[3], sid->IdentifierAuthority.Value[2] )));
+                   (int)MAKELONG( MAKEWORD( sid->IdentifierAuthority.Value[5], sid->IdentifierAuthority.Value[4] ),
+                                  MAKEWORD( sid->IdentifierAuthority.Value[3], sid->IdentifierAuthority.Value[2] )));
     for (i = 0; i < sid->SubAuthorityCount; i++)
-        len += snprintf( buffer + len, sizeof(buffer) - len, "-%u", sid->SubAuthority[i] );
+        len += snprintf( buffer + len, sizeof(buffer) - len, "-%u", (int)sid->SubAuthority[i] );
     len += snprintf( buffer + len, sizeof(buffer) - len, "\\%s", path );
 
     ascii_to_unicode( bufferW, buffer, len + 1 );
     init_unicode_string( &name, bufferW );
     InitializeObjectAttributes( &attr, &name, OBJ_CASE_INSENSITIVE, 0, NULL );
     return NtCreateKey( key, KEY_ALL_ACCESS, &attr, 0, NULL, 0, NULL );
+}
+
+/* dump a Unicode string with proper escaping */
+int dump_strW( const WCHAR *str, data_size_t len, FILE *f, const char escape[2] )
+{
+    static const char escapes[32] = ".......abtnvfr.............e....";
+    char buffer[256];
+    char *pos = buffer;
+    int count = 0;
+
+    for (len /= sizeof(WCHAR); len; str++, len--)
+    {
+        if (pos > buffer + sizeof(buffer) - 8)
+        {
+            fwrite( buffer, pos - buffer, 1, f );
+            count += pos - buffer;
+            pos = buffer;
+        }
+        if (*str > 127)  /* hex escape */
+        {
+            if (len > 1 && str[1] < 128 && isxdigit( (char)str[1] ))
+                pos += sprintf( pos, "\\x%04x", *str );
+            else
+                pos += sprintf( pos, "\\x%x", *str );
+            continue;
+        }
+        if (*str < 32)  /* octal or C escape */
+        {
+            if (!*str && len == 1) continue;  /* do not output terminating NULL */
+            if (escapes[*str] != '.')
+                pos += sprintf( pos, "\\%c", escapes[*str] );
+            else if (len > 1 && str[1] >= '0' && str[1] <= '7')
+                pos += sprintf( pos, "\\%03o", *str );
+            else
+                pos += sprintf( pos, "\\%o", *str );
+            continue;
+        }
+        if (*str == '\\' || *str == escape[0] || *str == escape[1]) *pos++ = '\\';
+        *pos++ = *str;
+    }
+    fwrite( buffer, pos - buffer, 1, f );
+    count += pos - buffer;
+    return count;
+}
+
+struct saved_key
+{
+    data_size_t namelen;
+    WCHAR *name;
+    data_size_t classlen;
+    WCHAR *class;
+    int value_count;
+    int subkey_count;
+    unsigned int is_symlink;
+    timeout_t modif;
+    struct saved_key *parent;
+};
+
+/* read serialized key data */
+static char *fill_saved_key( struct saved_key *key, struct saved_key *parent, char *data )
+{
+    key->parent = parent;
+    key->namelen = *(data_size_t *)data;
+    data += sizeof(data_size_t);
+    key->name = (WCHAR *)data;
+    data += key->namelen;
+    key->classlen = *(data_size_t *)data;
+    data += sizeof(data_size_t);
+    key->class = (WCHAR *)data;
+    data += key->classlen;
+    key->value_count = *(int *)data;
+    data += sizeof(int);
+    key->subkey_count = *(int *)data;
+    data += sizeof(int);
+    key->is_symlink = *(unsigned int *)data;
+    data += sizeof(unsigned int);
+    key->modif = *(timeout_t *)data;
+    data += sizeof(timeout_t);
+
+    return data;
+}
+
+/* dump serialized key full path */
+static char *dump_parents( char *data, FILE *f, int count )
+{
+    data_size_t len;
+    WCHAR *name;
+
+    len = *(data_size_t *)data;
+    data += sizeof(data_size_t);
+    name = (WCHAR *)data;
+    data += len;
+
+    if (count > 1)
+    {
+        data = dump_parents( data, f, count - 1);
+        fprintf( f, "\\\\" );
+    }
+    dump_strW( name, len, f, "[]" );
+    return data;
+}
+
+/* dump the full path of a key */
+static void dump_path( const struct saved_key *key, const struct saved_key *base, FILE *f )
+{
+    if (key->parent && key->parent != base)
+    {
+        dump_path( key->parent, base, f );
+        fprintf( f, "\\\\" );
+    }
+    dump_strW( key->name, key->namelen, f, "[]" );
+}
+
+/* dump a value to a text file */
+static char *dump_value( char *data, FILE *f )
+{
+    unsigned int i, dw;
+    int count;
+    data_size_t namelen, valuelen;
+    char *valuedata;
+    WCHAR *name;
+    unsigned int type;
+
+    namelen = *(data_size_t *)data;
+    data += sizeof(data_size_t);
+    name = (WCHAR *)data;
+    data += namelen;
+    type = *(unsigned int *)data;
+    data += sizeof(unsigned int);
+    valuelen = *(data_size_t *)data;
+    data += sizeof(data_size_t);
+    valuedata = data;
+    data += valuelen;
+
+    if (namelen)
+    {
+        fputc( '\"', f );
+        count = 1 + dump_strW( name, namelen, f, "\"\"" );
+        count += fprintf( f, "\"=" );
+    }
+    else count = fprintf( f, "@=" );
+
+    switch(type)
+    {
+    case REG_SZ:
+    case REG_EXPAND_SZ:
+    case REG_MULTI_SZ:
+        /* only output properly terminated strings in string format */
+        if (valuelen < sizeof(WCHAR)) break;
+        if (valuelen % sizeof(WCHAR)) break;
+        if (((WCHAR *)valuedata)[valuelen / sizeof(WCHAR) - 1]) break;
+        if (type != REG_SZ) fprintf( f, "str(%x):", type );
+        fputc( '\"', f );
+        dump_strW( (WCHAR *)valuedata, valuelen, f, "\"\"" );
+        fprintf( f, "\"\n" );
+        return data;
+
+    case REG_DWORD:
+        if (valuelen != sizeof(dw)) break;
+        memcpy( &dw, valuedata, sizeof(dw) );
+        fprintf( f, "dword:%08x\n", dw );
+        return data;
+    }
+
+    if (type == REG_BINARY) count += fprintf( f, "hex:" );
+    else count += fprintf( f, "hex(%x):", type );
+    for (i = 0; i < valuelen; i++)
+    {
+        count += fprintf( f, "%02x", *((unsigned char *)valuedata + i) );
+        if (i < valuelen-1)
+        {
+            fputc( ',', f );
+            if (++count > 76)
+            {
+                fprintf( f, "\\\n  " );
+                count = 2;
+            }
+        }
+    }
+    fputc( '\n', f );
+    return data;
+}
+
+/* save a registry key and all its subkeys to a text file */
+static char *save_subkeys( char *data, struct saved_key *parent, struct saved_key *base, FILE *f )
+{
+    struct saved_key key;
+    int i;
+
+    if (!base) base = &key;
+    data = fill_saved_key( &key, parent, data );
+
+    /* save key if it has either some values or no subkeys, or needs special options */
+    /* keys with no values but subkeys are saved implicitly by saving the subkeys */
+    if ((key.value_count > 0) || !key.subkey_count || key.classlen || key.is_symlink)
+    {
+        fprintf( f, "\n[" );
+        if (parent) dump_path( &key, base, f );
+        fprintf( f, "] %u\n", (unsigned int)((key.modif - SECS_1601_TO_1970 * TICKSPERSEC) / TICKSPERSEC) );
+        fprintf( f, "#time=%x%08x\n", (unsigned int)(key.modif >> 32), (unsigned int)key.modif );
+        if (key.classlen)
+        {
+            fprintf( f, "#class=\"" );
+            dump_strW( key.class, key.classlen, f, "\"\"" );
+            fprintf( f, "\"\n" );
+        }
+        if (key.is_symlink) fputs( "#link\n", f );
+        for (i = 0; i < key.value_count; i++) data = dump_value( data, f );
+    }
+    for (i = 0; i < key.subkey_count; i++) data = save_subkeys( data, &key, base, f );
+    return data;
+}
+
+/* save a registry branch to a file */
+static char *save_all_subkeys( char *data, FILE *f )
+{
+    /* Output registry format should match server/registry.c:save_all_subkeys(). */
+    enum prefix_type prefix_type;
+    int parent_count;
+
+    prefix_type = *(int *)data;
+    data += sizeof(int);
+
+    parent_count = *(int *)data;
+    data += sizeof(int);
+
+    fprintf( f, "WINE REGISTRY Version 2\n" );
+    fprintf( f, ";; All keys relative to " );
+    data = dump_parents( data, f, parent_count );
+    fprintf( f, "\n" );
+
+    switch (prefix_type)
+    {
+    case PREFIX_32BIT:
+        fprintf( f, "\n#arch=win32\n" );
+        break;
+    case PREFIX_64BIT:
+        fprintf( f, "\n#arch=win64\n" );
+        break;
+    default:
+        break;
+    }
+    return save_subkeys( data, NULL, NULL, f );
 }
 
 
@@ -85,7 +333,7 @@ NTSTATUS WINAPI NtCreateKey( HANDLE *key, ACCESS_MASK access, const OBJECT_ATTRI
     objattr->attributes |= OBJ_OPENIF | OBJ_CASE_INSENSITIVE;
 
     TRACE( "(%p,%s,%s,%x,%x,%p)\n", attr->RootDirectory, debugstr_us(attr->ObjectName),
-           debugstr_us(class), options, access, key );
+           debugstr_us(class), (int)options, (int)access, key );
 
     SERVER_START_REQ( create_key )
     {
@@ -122,7 +370,7 @@ NTSTATUS WINAPI NtCreateKeyTransacted( HANDLE *key, ACCESS_MASK access, const OB
                                        HANDLE transacted, ULONG *dispos )
 {
     FIXME( "(%p,%s,%s,%x,%x,%p,%p)\n", attr->RootDirectory, debugstr_us(attr->ObjectName),
-           debugstr_us(class), options, access, transacted, key );
+           debugstr_us(class), (int)options, (int)access, transacted, key );
     return STATUS_NOT_IMPLEMENTED;
 }
 
@@ -139,9 +387,9 @@ NTSTATUS WINAPI NtOpenKeyEx( HANDLE *key, ACCESS_MASK access, const OBJECT_ATTRI
     if (attr->Length != sizeof(*attr)) return STATUS_INVALID_PARAMETER;
     if (attr->ObjectName->Length & 1) return STATUS_OBJECT_NAME_INVALID;
 
-    TRACE( "(%p,%s,%x,%p)\n", attr->RootDirectory, debugstr_us(attr->ObjectName), access, key );
+    TRACE( "(%p,%s,%x,%p)\n", attr->RootDirectory, debugstr_us(attr->ObjectName), (int)access, key );
 
-    if (options & ~REG_OPTION_OPEN_LINK) FIXME( "options %x not implemented\n", options );
+    if (options & ~REG_OPTION_OPEN_LINK) FIXME( "options %x not implemented\n", (int)options );
 
     attributes = attr->Attributes | OBJ_CASE_INSENSITIVE;
 
@@ -175,7 +423,7 @@ NTSTATUS WINAPI NtOpenKey( HANDLE *key, ACCESS_MASK access, const OBJECT_ATTRIBU
 NTSTATUS WINAPI NtOpenKeyTransactedEx( HANDLE *key, ACCESS_MASK access, const OBJECT_ATTRIBUTES *attr,
                                        ULONG options, HANDLE transaction )
 {
-    FIXME( "(%p %x %p %x %p) semi-stub\n", key, access, attr, options, transaction );
+    FIXME( "(%p %x %p %x %p) semi-stub\n", key, (int)access, attr, (int)options, transaction );
     return NtOpenKeyEx( key, access, attr, options );
 }
 
@@ -378,7 +626,7 @@ NTSTATUS WINAPI NtQueryKey( HANDLE handle, KEY_INFORMATION_CLASS info_class,
  */
 NTSTATUS WINAPI NtSetInformationKey( HANDLE key, int class, void *info, ULONG length )
 {
-    FIXME( "(%p,0x%08x,%p,0x%08x) stub\n", key, class, info, length );
+    FIXME( "(%p,0x%08x,%p,0x%08x) stub\n", key, class, info, (int)length );
     return STATUS_SUCCESS;
 }
 
@@ -450,7 +698,7 @@ NTSTATUS WINAPI NtEnumerateValueKey( HANDLE handle, ULONG index, KEY_VALUE_INFOR
     void *ptr;
     size_t fixed_size;
 
-    TRACE( "(%p,%u,%d,%p,%d)\n", handle, index, info_class, info, length );
+    TRACE( "(%p,%u,%d,%p,%d)\n", handle, (int)index, info_class, info, (int)length );
 
     /* compute the length we want to retrieve */
     switch (info_class)
@@ -494,7 +742,7 @@ NTSTATUS WINAPI NtQueryValueKey( HANDLE handle, const UNICODE_STRING *name,
     UCHAR *data_ptr;
     unsigned int fixed_size, min_size;
 
-    TRACE( "(%p,%s,%d,%p,%d)\n", handle, debugstr_us(name), info_class, info, length );
+    TRACE( "(%p,%s,%d,%p,%d)\n", handle, debugstr_us(name), info_class, info, (int)length );
 
     if (name->Length > MAX_VALUE_LENGTH) return STATUS_OBJECT_NAME_NOT_FOUND;
 
@@ -563,7 +811,7 @@ NTSTATUS WINAPI NtQueryValueKey( HANDLE handle, const UNICODE_STRING *name,
 NTSTATUS WINAPI NtQueryMultipleValueKey( HANDLE key, KEY_MULTIPLE_VALUE_INFORMATION *info,
                                          ULONG count, void *buffer, ULONG length, ULONG *retlen )
 {
-    FIXME( "(%p,%p,0x%08x,%p,0x%08x,%p) stub!\n", key, info, count, buffer, length, retlen );
+    FIXME( "(%p,%p,0x%08x,%p,0x%08x,%p) stub!\n", key, info, (int)count, buffer, (int)length, retlen );
     return STATUS_SUCCESS;
 }
 
@@ -576,7 +824,7 @@ NTSTATUS WINAPI NtSetValueKey( HANDLE key, const UNICODE_STRING *name, ULONG ind
 {
     unsigned int ret;
 
-    TRACE( "(%p,%s,%d,%p,%d)\n", key, debugstr_us(name), type, data, count );
+    TRACE( "(%p,%s,%d,%p,%d)\n", key, debugstr_us(name), (int)type, data, (int)count );
 
     if (name->Length > MAX_VALUE_LENGTH) return STATUS_INVALID_PARAMETER;
 
@@ -627,8 +875,8 @@ NTSTATUS WINAPI NtNotifyChangeMultipleKeys( HANDLE key, ULONG count, OBJECT_ATTR
     unsigned int ret;
 
     TRACE( "(%p,%u,%p,%p,%p,%p,%p,0x%08x, 0x%08x,%p,0x%08x,0x%08x)\n",
-           key, count, attr, event, apc, apc_context, io,
-           filter, async, buffer, length, subtree );
+           key, (int)count, attr, event, apc, apc_context, io,
+           (int)filter, async, buffer, (int)length, subtree );
 
     if (count || attr || apc || apc_context || buffer || length)
         FIXME( "Unimplemented optional parameter\n" );
@@ -671,22 +919,162 @@ NTSTATUS WINAPI NtNotifyChangeKey( HANDLE key, HANDLE event, PIO_APC_ROUTINE apc
                                        io, filter, subtree, buffer, length, async );
 }
 
+/* acquire mutex for registry flush operation */
+static HANDLE get_key_flush_mutex(void)
+{
+    WCHAR bufferW[256];
+    UNICODE_STRING name = {.Buffer = bufferW};
+    OBJECT_ATTRIBUTES attr;
+    char buffer[256];
+    HANDLE mutex;
+
+    snprintf( buffer, ARRAY_SIZE(buffer), "\\Sessions\\%u\\BaseNamedObjects\\__wine_regkey_flush",
+              (int)NtCurrentTeb()->Peb->SessionId );
+    name.Length = name.MaximumLength = (strlen(buffer) + 1) * sizeof(WCHAR);
+    ascii_to_unicode( bufferW, buffer, name.Length / sizeof(WCHAR) );
+
+    InitializeObjectAttributes( &attr, &name, OBJ_OPENIF, NULL, NULL );
+    if (NtCreateMutant( &mutex, MUTEX_ALL_ACCESS, &attr, FALSE ) < 0) return NULL;
+    NtWaitForSingleObject( mutex, FALSE, NULL );
+    return mutex;
+}
+
+/* release registry flush mutex */
+static void release_key_flush_mutex( HANDLE mutex )
+{
+    NtReleaseMutant( mutex, NULL );
+    NtClose( mutex );
+}
+
+/* save registry branch to Wine regsitry storage file */
+static NTSTATUS save_registry_branch( char **data )
+{
+    static const char temp_fn[] = "savereg.tmp";
+    char *file_name, *path = NULL, *tmp = NULL;
+    int file_name_len, path_len, fd;
+    struct stat st;
+    NTSTATUS ret;
+    FILE *f;
+
+    file_name_len = *(int *)*data;
+    *data += sizeof(int);
+    file_name = *data;
+    *data += file_name_len;
+
+    path_len = strlen( config_dir ) + 1 + file_name_len + 1;
+    if (!(path = malloc( path_len ))) return STATUS_NO_MEMORY;
+    sprintf( path, "%s/%s", config_dir, file_name );
+
+    if ((fd = open( path, O_WRONLY )) != -1)
+    {
+        /* if file is not a regular file or has multiple links or is accessed
+         * via symbolic links, write directly into it; otherwise use a temp file */
+        if (!lstat( path, &st ) && (!S_ISREG(st.st_mode) || st.st_nlink > 1))
+        {
+            ftruncate( fd, 0 );
+            goto save;
+        }
+        close( fd );
+    }
+
+    /* create a temp file in the same directory */
+    if (!(tmp = malloc( strlen( config_dir ) + 1 + strlen( temp_fn ) + 1 )))
+    {
+        ret = STATUS_NO_MEMORY;
+        goto done;
+    }
+    sprintf( tmp, "%s/%s", config_dir, temp_fn );
+
+    if ((fd = open( tmp, O_CREAT | O_EXCL | O_WRONLY, 0666 )) == -1)
+    {
+        ret = errno_to_status( errno );
+        goto done;
+    }
+
+save:
+    if (!(f = fdopen( fd, "w" )))
+    {
+        ret = errno_to_status( errno );
+        if (tmp) unlink( tmp );
+        close( fd );
+        goto done;
+    }
+
+    *data = save_all_subkeys( *data, f );
+
+    ret = fclose( f ) ? errno_to_status( errno ) : STATUS_SUCCESS;
+    if (tmp)
+    {
+        if (!ret && rename( tmp, path )) ret = errno_to_status( errno );
+        if (ret) unlink( tmp );
+    }
+
+done:
+    free( tmp );
+    free( path );
+    return ret;
+}
 
 /******************************************************************************
  *              NtFlushKey  (NTDLL.@)
  */
 NTSTATUS WINAPI NtFlushKey( HANDLE key )
 {
+    abstime_t timestamp_counter;
+    data_size_t size = 0;
     unsigned int ret;
+    char *data = NULL, *curr_data;
+    HANDLE mutex;
+    int i, branch_count, branch;
 
     TRACE( "key=%p\n", key );
 
-    SERVER_START_REQ( flush_key )
+    mutex = get_key_flush_mutex();
+
+    while (1)
     {
-	req->hkey = wine_server_obj_handle( key );
-	ret = wine_server_call( req );
+        SERVER_START_REQ( flush_key )
+        {
+            req->hkey = wine_server_obj_handle( key );
+            if (size) wine_server_set_reply( req, data, size );
+            ret = wine_server_call( req );
+            size = reply->total;
+            branch_count = reply->branch_count;
+            timestamp_counter = reply->timestamp_counter;
+        }
+        SERVER_END_REQ;
+
+        if (ret != STATUS_BUFFER_TOO_SMALL) break;
+        free( data );
+        if (!(data = malloc( size )))
+        {
+            ERR( "No memory.\n" );
+            ret = STATUS_NO_MEMORY;
+            goto done;
+        }
     }
-    SERVER_END_REQ;
+    if (ret) goto done;
+
+    curr_data = data;
+    for (i = 0; i < branch_count; ++i)
+    {
+        branch = *(int *)curr_data;
+        curr_data += sizeof(int);
+        if ((ret = save_registry_branch( &curr_data ))) goto done;
+
+        SERVER_START_REQ( flush_key_done )
+        {
+            req->branch = branch;
+            req->timestamp_counter = timestamp_counter;
+            ret = wine_server_call( req );
+        }
+        SERVER_END_REQ;
+        if (ret) break;
+    }
+
+done:
+    release_key_flush_mutex( mutex );
+    free( data );
     return ret;
 }
 
@@ -723,21 +1111,22 @@ NTSTATUS WINAPI NtLoadKeyEx( const OBJECT_ATTRIBUTES *attr, OBJECT_ATTRIBUTES *f
     OBJECT_ATTRIBUTES new_attr = *file;
 
     TRACE( "(%p,%p,0x%x,%p,%p,0x%x,%p,%p)\n",
-           attr, file, flags, trustkey, event, access, roothandle, iostatus );
+           attr, file, (int)flags, trustkey, event, (int)access, roothandle, iostatus );
 
-    if (flags) FIXME( "flags %x not handled\n", flags );
+    if (flags) FIXME( "flags %x not handled\n", (int)flags );
     if (trustkey) FIXME("trustkey parameter not supported\n");
     if (event) FIXME("event parameter not supported\n");
     if (access) FIXME("access parameter not supported\n");
     if (roothandle) FIXME("roothandle is not filled\n");
     if (iostatus) FIXME("iostatus is not filled\n");
 
-    if (!(ret = get_nt_and_unix_names( &new_attr, &nt_name, &unix_name, FILE_OPEN, FALSE )))
+    get_redirect( &new_attr, &nt_name );
+    if (!(ret = nt_to_unix_file_name( &new_attr, &unix_name, FILE_OPEN )))
     {
         ret = open_unix_file( &key, unix_name, GENERIC_READ | SYNCHRONIZE,
                               &new_attr, 0, 0, FILE_OPEN, 0, NULL, 0 );
+        free( unix_name );
     }
-    free( unix_name );
     free( nt_name.Buffer );
 
     if (ret) return ret;
@@ -789,17 +1178,53 @@ NTSTATUS WINAPI NtUnloadKey( OBJECT_ATTRIBUTES *attr )
  */
 NTSTATUS WINAPI NtSaveKey( HANDLE key, HANDLE file )
 {
+    data_size_t size = 0;
     unsigned int ret;
+    char *data = NULL;
+    int fd, fd2, needs_close = 0;
+    FILE *f;
 
     TRACE( "(%p,%p)\n", key, file );
 
-    SERVER_START_REQ( save_registry )
+    while (1)
     {
-        req->hkey = wine_server_obj_handle( key );
-        req->file = wine_server_obj_handle( file );
-        ret = wine_server_call( req );
+        SERVER_START_REQ( save_registry )
+        {
+            req->hkey = wine_server_obj_handle( key );
+            if (size) wine_server_set_reply( req, data, size );
+            ret = wine_server_call( req );
+            size = reply->total;
+        }
+        SERVER_END_REQ;
+
+        if (!ret) break;
+        free( data );
+        if (ret != STATUS_BUFFER_TOO_SMALL) return ret;
+        if (!(data = malloc( size )))
+        {
+            ERR( "No memory.\n" );
+            return STATUS_NO_MEMORY;
+        }
     }
-    SERVER_END_REQ;
+
+    if ((ret = server_get_unix_fd( file, FILE_WRITE_DATA, &fd, &needs_close, NULL, NULL ))) goto done;
+    if ((fd2 = dup( fd )) == -1)
+    {
+        ret = errno_to_status( errno );
+        goto done;
+    }
+    if (!(f = fdopen( fd2, "w" )))
+    {
+        close( fd2 );
+        ret = errno_to_status( errno );
+        goto done;
+    }
+    save_all_subkeys( data, f );
+    if (fclose(f)) ret = errno_to_status( errno );
+
+done:
+    if (needs_close) close( fd );
+    free( data );
     return ret;
 }
 
@@ -809,7 +1234,7 @@ NTSTATUS WINAPI NtSaveKey( HANDLE key, HANDLE file )
  */
 NTSTATUS WINAPI NtRestoreKey( HANDLE key, HANDLE file, ULONG flags )
 {
-    FIXME( "(%p,%p,0x%08x) stub\n", key, file, flags );
+    FIXME( "(%p,%p,0x%08x) stub\n", key, file, (int)flags );
     return STATUS_SUCCESS;
 }
 

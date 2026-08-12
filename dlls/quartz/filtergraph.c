@@ -36,6 +36,7 @@
 #include "strmif.h"
 #include "vfwmsgs.h"
 #include "evcode.h"
+#include "wine/heap.h"
 #include "wine/list.h"
 
 
@@ -73,6 +74,7 @@ struct filter
     struct list entry;
     IBaseFilter *filter;
     IMediaSeeking *seeking;
+    IMediaPosition *position;
     WCHAR *name;
     BOOL sorting;
 };
@@ -205,7 +207,7 @@ static ULONG WINAPI EnumFilters_Release(IEnumFilters *iface)
     if (!ref)
     {
         IUnknown_Release(enum_filters->graph->outer_unk);
-        free(enum_filters);
+        heap_free(enum_filters);
     }
 
     return ref;
@@ -299,7 +301,7 @@ static HRESULT create_enum_filters(struct filter_graph *graph, struct list *curs
 {
     struct enum_filters *enum_filters;
 
-    if (!(enum_filters = malloc(sizeof(*enum_filters))))
+    if (!(enum_filters = heap_alloc(sizeof(*enum_filters))))
         return E_OUTOFMEMORY;
 
     enum_filters->IEnumFilters_iface.lpVtbl = &EnumFilters_vtbl;
@@ -473,7 +475,6 @@ static ULONG WINAPI FilterGraphInner_Release(IUnknown *iface)
 
         flush_media_events(This);
         CloseHandle(This->media_event_handle);
-        CloseHandle(This->hEventCompletion);
 
         EnterCriticalSection(&message_cs);
         if (This->threaded && !--message_thread_refcount)
@@ -521,6 +522,13 @@ static IBaseFilter *find_filter_by_name(struct filter_graph *graph, const WCHAR 
 {
     struct filter *filter;
 
+    /* King of Fighters XIII requests the WMV decoder filter by name to
+     * connect it to a Sample Grabber filter, return our custom decoder
+     * filter instance instead.
+     */
+    if (!wcscmp(name, L"WMVideo Decoder DMO"))
+        name = L"Reader";
+
     LIST_FOR_EACH_ENTRY(filter, &graph->filters, struct filter, entry)
     {
         if (!wcscmp(filter->name, name))
@@ -556,6 +564,7 @@ static BOOL has_output_pins(IBaseFilter *filter)
 
 static void update_seeking(struct filter *filter)
 {
+    IMediaPosition *position;
     IMediaSeeking *seeking;
 
     if (!filter->seeking)
@@ -574,11 +583,19 @@ static void update_seeking(struct filter *filter)
                 IMediaSeeking_Release(seeking);
         }
     }
+
+    if (!filter->position)
+    {
+        /* Tokyo Xanadu eX+, same as above, same developer, destroys its filter when
+         * its IMediaPosition interface is released, so cache the interface instead
+         * of querying for it every time. */
+        if (SUCCEEDED(IBaseFilter_QueryInterface(filter->filter, &IID_IMediaPosition, (void **)&position)))
+            filter->position = position;
+    }
 }
 
 static BOOL is_renderer(struct filter *filter)
 {
-    IMediaPosition *media_position;
     IAMFilterMiscFlags *flags;
     BOOL ret = FALSE;
 
@@ -588,16 +605,11 @@ static BOOL is_renderer(struct filter *filter)
             ret = TRUE;
         IAMFilterMiscFlags_Release(flags);
     }
-    else if (SUCCEEDED(IBaseFilter_QueryInterface(filter->filter, &IID_IMediaPosition, (void **)&media_position)))
-    {
-        if (!has_output_pins(filter->filter))
-            ret = TRUE;
-        IMediaPosition_Release(media_position);
-    }
     else
     {
         update_seeking(filter);
-        if (filter->seeking && !has_output_pins(filter->filter))
+        if ((filter->seeking || filter->position) &&
+            !has_output_pins(filter->filter))
             ret = TRUE;
     }
     return ret;
@@ -618,12 +630,12 @@ static HRESULT WINAPI FilterGraph2_AddFilter(IFilterGraph2 *iface,
     if (!filter)
         return E_POINTER;
 
-    if (!(entry = malloc(sizeof(*entry))))
+    if (!(entry = heap_alloc(sizeof(*entry))))
         return E_OUTOFMEMORY;
 
     if (!(entry->name = CoTaskMemAlloc((name ? wcslen(name) + 6 : 5) * sizeof(WCHAR))))
     {
-        free(entry);
+        heap_free(entry);
         return E_OUTOFMEMORY;
     }
 
@@ -648,7 +660,7 @@ static HRESULT WINAPI FilterGraph2_AddFilter(IFilterGraph2 *iface,
         if (i == 10000)
         {
             CoTaskMemFree(entry->name);
-            free(entry);
+            heap_free(entry);
             return VFW_E_DUPLICATE_NAME;
         }
     }
@@ -659,7 +671,7 @@ static HRESULT WINAPI FilterGraph2_AddFilter(IFilterGraph2 *iface,
             (IFilterGraph *)&graph->IFilterGraph2_iface, entry->name)))
     {
         CoTaskMemFree(entry->name);
-        free(entry);
+        heap_free(entry);
         return hr;
     }
 
@@ -670,6 +682,7 @@ static HRESULT WINAPI FilterGraph2_AddFilter(IFilterGraph2 *iface,
     list_add_head(&graph->filters, &entry->entry);
     entry->sorting = FALSE;
     entry->seeking = NULL;
+    entry->position = NULL;
     ++graph->version;
 
     return duplicate_name ? VFW_S_DUPLICATE_NAME : hr;
@@ -737,11 +750,13 @@ static HRESULT WINAPI FilterGraph2_RemoveFilter(IFilterGraph2 *iface, IBaseFilte
             {
                 IBaseFilter_SetSyncSource(pFilter, NULL);
                 IBaseFilter_Release(pFilter);
+                if (entry->position)
+                    IMediaPosition_Release(entry->position);
                 if (entry->seeking)
                     IMediaSeeking_Release(entry->seeking);
                 list_remove(&entry->entry);
                 CoTaskMemFree(entry->name);
-                free(entry);
+                heap_free(entry);
                 This->version++;
                 /* Invalidate interfaces in the cache */
                 for (i = 0; i < This->nItfCacheEntries; i++)
@@ -1792,7 +1807,6 @@ static HRESULT graph_start(struct filter_graph *graph, REFERENCE_TIME stream_sta
     }
     if (list_empty(&graph->media_events))
         ResetEvent(graph->media_event_handle);
-    ResetEvent(graph->hEventCompletion);
 
     if (graph->defaultclock && !graph->refClock)
         IFilterGraph2_SetDefaultSyncSource(&graph->IFilterGraph2_iface);
@@ -2320,7 +2334,8 @@ static HRESULT WINAPI MediaSeeking_GetDuration(IMediaSeeking *iface, LONGLONG *d
 
     LeaveCriticalSection(&graph->cs);
 
-    TRACE("Returning hr %#lx, duration %I64d (%s seconds).\n", hr, *duration, debugstr_time(*duration));
+    TRACE("Returning hr %#lx, duration %s (%s seconds).\n", hr,
+            wine_dbgstr_longlong(*duration), debugstr_time(*duration));
     return hr;
 }
 
@@ -2361,7 +2376,7 @@ static HRESULT WINAPI MediaSeeking_GetStopPosition(IMediaSeeking *iface, LONGLON
 
     LeaveCriticalSection(&graph->cs);
 
-    TRACE("Returning %I64d (%s seconds).\n", *stop, debugstr_time(*stop));
+    TRACE("Returning %s (%s seconds).\n", wine_dbgstr_longlong(*stop), debugstr_time(*stop));
     return hr;
 }
 
@@ -2391,7 +2406,7 @@ static HRESULT WINAPI MediaSeeking_GetCurrentPosition(IMediaSeeking *iface, LONG
 
     LeaveCriticalSection(&graph->cs);
 
-    TRACE("Returning %I64d (%s seconds).\n", ret, debugstr_time(ret));
+    TRACE("Returning %s (%s seconds).\n", wine_dbgstr_longlong(ret), debugstr_time(ret));
     *current = ret;
 
     return S_OK;
@@ -2402,8 +2417,8 @@ static HRESULT WINAPI MediaSeeking_ConvertTimeFormat(IMediaSeeking *iface, LONGL
 {
     struct filter_graph *This = impl_from_IMediaSeeking(iface);
 
-    TRACE("graph %p, target %p, target_format %s, source %I64d, source_format %s.\n",
-            This, pTarget, debugstr_guid(pTargetFormat), Source, debugstr_guid(pSourceFormat));
+    TRACE("(%p/%p)->(%p, %s, 0x%s, %s)\n", This, iface, pTarget,
+        debugstr_guid(pTargetFormat), wine_dbgstr_longlong(Source), debugstr_guid(pSourceFormat));
 
     if (!pSourceFormat)
         pSourceFormat = &This->timeformatseek;
@@ -2427,12 +2442,15 @@ static HRESULT WINAPI MediaSeeking_SetPositions(IMediaSeeking *iface, LONGLONG *
     struct filter *filter;
     FILTER_STATE state;
 
-    TRACE("graph %p, current %p, current_flags %#lx, stop %p, stop_flags %#lx.\n",
-            graph, current_ptr, current_flags, stop_ptr, stop_flags);
+    TRACE("graph %p, current %s, current_flags %#lx, stop %s, stop_flags %#lx.\n", graph,
+            current_ptr ? wine_dbgstr_longlong(*current_ptr) : "<null>", current_flags,
+            stop_ptr ? wine_dbgstr_longlong(*stop_ptr): "<null>", stop_flags);
     if (current_ptr)
-        TRACE("Setting current position to %I64d (%s seconds).\n", *current_ptr, debugstr_time(*current_ptr));
+        TRACE("Setting current position to %s (%s seconds).\n",
+                wine_dbgstr_longlong(*current_ptr), debugstr_time(*current_ptr));
     if (stop_ptr)
-        TRACE("Setting stop position to %I64d (%s seconds).\n", *stop_ptr, debugstr_time(*stop_ptr));
+        TRACE("Setting stop position to %s (%s seconds).\n",
+                wine_dbgstr_longlong(*stop_ptr), debugstr_time(*stop_ptr));
 
     if ((current_flags & 0x7) != AM_SEEKING_AbsolutePositioning
             && (current_flags & 0x7) != AM_SEEKING_NoPositioning)
@@ -5385,27 +5403,16 @@ static HRESULT WINAPI MediaEventSink_Notify(IMediaEventSink *iface, LONG code,
 
     EnterCriticalSection(&graph->event_cs);
 
-    if (code == EC_COMPLETE)
+    if (code == EC_COMPLETE && graph->HandleEcComplete)
     {
-        if (!graph->HandleEcComplete ||
-            ++graph->EcCompleteCount == graph->nRenderers)
+        if (++graph->EcCompleteCount == graph->nRenderers)
         {
-            if (graph->HandleEcComplete)
-            {
-                param1 = S_OK;
-                param2 = 0;
-                graph->current_pos = graph->stream_stop;
-            }
             if (graph->media_events_disabled)
-            {
                 SetEvent(graph->media_event_handle);
-                graph->CompletionStatus = 0;
-            }
             else
-            {
-                queue_media_event(graph, EC_COMPLETE, param1, param2);
-                graph->CompletionStatus = EC_COMPLETE;
-            }
+                queue_media_event(graph, EC_COMPLETE, S_OK, 0);
+            graph->CompletionStatus = EC_COMPLETE;
+            graph->current_pos = graph->stream_stop;
             SetEvent(graph->hEventCompletion);
         }
     }

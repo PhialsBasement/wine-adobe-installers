@@ -19,9 +19,7 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-#define COBJMACROS
-#include "wine/strmbase.h"
-#include "wine/debug.h"
+#include "strmbase_private.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(quartz);
 
@@ -48,7 +46,7 @@ static HRESULT enum_media_types_create(struct strmbase_pin *pin, IEnumMediaTypes
     if (!out)
         return E_POINTER;
 
-    if (!(object = calloc(1, sizeof(*object))))
+    if (!(object = heap_alloc_zero(sizeof(*object))))
     {
         *out = NULL;
         return E_OUTOFMEMORY;
@@ -112,7 +110,7 @@ static ULONG WINAPI enum_media_types_Release(IEnumMediaTypes *iface)
     if (!refcount)
     {
         IPin_Release(&enummt->pin->IPin_iface);
-        free(enummt);
+        heap_free(enummt);
     }
     return refcount;
 }
@@ -571,10 +569,11 @@ static HRESULT WINAPI source_Disconnect(IPin *iface)
 {
     HRESULT hr;
     struct strmbase_source *This = impl_source_from_IPin(iface);
+    struct strmbase_filter *filter = This->pin.filter;
 
     TRACE("pin %p %s:%s.\n", This, debugstr_w(This->pin.filter->name), debugstr_w(This->pin.name));
 
-    EnterCriticalSection(&This->pin.filter->filter_cs);
+    EnterCriticalSection(&filter->filter_cs);
     {
         if (This->pin.filter->state != State_Stopped)
         {
@@ -582,9 +581,6 @@ static HRESULT WINAPI source_Disconnect(IPin *iface)
             WARN("Filter is not stopped; returning VFW_E_NOT_STOPPED.\n");
             return VFW_E_NOT_STOPPED;
         }
-
-        if (This->pFuncsTable->source_disconnect)
-            This->pFuncsTable->source_disconnect(This);
 
         if (This->pMemInputPin)
         {
@@ -608,8 +604,11 @@ static HRESULT WINAPI source_Disconnect(IPin *iface)
         }
         else
             hr = S_FALSE;
+
+        if (This->pFuncsTable->source_disconnect)
+            This->pFuncsTable->source_disconnect(This);
     }
-    LeaveCriticalSection(&This->pin.filter->filter_cs);
+    LeaveCriticalSection(&filter->filter_cs);
 
     return hr;
 }

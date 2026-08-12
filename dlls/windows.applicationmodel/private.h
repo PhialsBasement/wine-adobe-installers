@@ -37,7 +37,6 @@
 #include "windows.applicationmodel.h"
 
 extern IActivationFactory *package_factory;
-extern IActivationFactory *design_mode_factory;
 
 #define DEFINE_IINSPECTABLE_( pfx, iface_type, impl_type, impl_from, iface_mem, expr )             \
     static inline impl_type *impl_from( iface_type *iface )                                        \

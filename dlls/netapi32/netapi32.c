@@ -24,6 +24,7 @@
 #include <stdarg.h>
 
 #include "ntstatus.h"
+#define WIN32_NO_STATUS
 #include "windef.h"
 #include "winbase.h"
 #include "winternl.h"
@@ -179,7 +180,6 @@ NET_API_STATUS WINAPI NetServerGetInfo(LMSTR servername, DWORD level, LPBYTE* bu
 
     TRACE("%s %ld %p\n", debugstr_w( servername ), level, bufptr );
 
-    if (!bufptr) return ERROR_INVALID_PARAMETER;
     if (!local)
     {
         if (samba_init())
@@ -189,16 +189,17 @@ NET_API_STATUS WINAPI NetServerGetInfo(LMSTR servername, DWORD level, LPBYTE* bu
 
             for (;;)
             {
-                if ((ret = NetApiBufferAllocate( size, &params.buffer ))) return ret;
+                if (!(params.buffer = malloc( size ))) return ERROR_OUTOFMEMORY;
                 ret = SAMBA_CALL( server_getinfo, &params );
                 if (!ret) *bufptr = params.buffer;
-                else NetApiBufferFree( params.buffer );
+                else free( params.buffer );
                 if (ret != ERROR_INSUFFICIENT_BUFFER) return ret;
             }
         }
         FIXME( "remote computers not supported\n" );
         return ERROR_INVALID_LEVEL;
     }
+    if (!bufptr) return ERROR_INVALID_PARAMETER;
 
     switch (level)
     {
@@ -294,6 +295,14 @@ NET_API_STATUS WINAPI NetStatisticsGet(LMSTR server, LMSTR service,
     return res;
 }
 
+NET_API_STATUS WINAPI NetUseEnum(LMSTR server, DWORD level, LPBYTE* bufptr, DWORD prefmaxsize,
+                          LPDWORD entriesread, LPDWORD totalentries, LPDWORD resumehandle)
+{
+    FIXME("stub (%p, %ld, %p, %ld, %p, %p, %p)\n", server, level, bufptr, prefmaxsize,
+           entriesread, totalentries, resumehandle);
+    return ERROR_NOT_SUPPORTED;
+}
+
 NET_API_STATUS WINAPI NetScheduleJobAdd(LPCWSTR server, LPBYTE bufptr, LPDWORD jobid)
 {
     TRACE("(%s, %p, %p)\n", debugstr_w(server), bufptr, jobid);
@@ -329,6 +338,13 @@ NET_API_STATUS WINAPI NetScheduleJobGetInfo(LPCWSTR server, DWORD jobid, LPBYTE 
 {
     TRACE("(%s, %lu, %p)\n", debugstr_w(server), jobid, bufptr);
     return NetrJobGetInfo(server, jobid, (LPAT_INFO *)bufptr);
+}
+
+NET_API_STATUS WINAPI NetUseGetInfo(LMSTR server, LMSTR name, DWORD level, LPBYTE *bufptr)
+{
+    FIXME("stub (%p, %p, %ld, %p)\n", server, name, level, bufptr);
+    return ERROR_NOT_SUPPORTED;
+
 }
 
 /************************************************************
@@ -423,28 +439,8 @@ NET_API_STATUS WINAPI NetShareDel(LMSTR servername, LMSTR netname, DWORD reserve
 NET_API_STATUS WINAPI NetShareGetInfo(LMSTR servername, LMSTR netname,
     DWORD level, LPBYTE *bufptr)
 {
-    BOOL local = NETAPI_IsLocalComputer( servername );
-
-    if (!bufptr) return ERROR_INVALID_PARAMETER;
-    if (!local && samba_init())
-    {
-        ULONG size = 1024;
-        struct share_getinfo_params params = { servername, netname, level, NULL, &size };
-        NET_API_STATUS ret;
-
-        TRACE("%s %s %ld %p\n", debugstr_w(servername), debugstr_w(netname), level, bufptr);
-
-        for (;;)
-        {
-            if ((ret = NetApiBufferAllocate( size, &params.buffer ))) return ret;
-            ret = SAMBA_CALL( share_getinfo, &params );
-            if (!ret) *bufptr = params.buffer;
-            else NetApiBufferFree( params.buffer );
-            if (ret != ERROR_INSUFFICIENT_BUFFER) return ret;
-        }
-    }
-
-    FIXME("%s %s %ld %p\n", debugstr_w(servername), debugstr_w(netname), level, bufptr);
+    FIXME("Stub (%s %s %ld %p)\n", debugstr_w(servername),
+        debugstr_w(netname),level, bufptr);
     return NERR_NetNameNotFound;
 }
 
@@ -918,7 +914,6 @@ NET_API_STATUS WINAPI NetWkstaGetInfo( LMSTR servername, DWORD level,
 
     TRACE("%s %ld %p\n", debugstr_w( servername ), level, bufptr );
 
-    if (!bufptr) return ERROR_INVALID_PARAMETER;
     if (!local)
     {
         if (samba_init())
@@ -928,16 +923,17 @@ NET_API_STATUS WINAPI NetWkstaGetInfo( LMSTR servername, DWORD level,
 
             for (;;)
             {
-                if ((ret = NetApiBufferAllocate( size, &params.buffer ))) return ret;
+                if (!(params.buffer = malloc( size ))) return ERROR_OUTOFMEMORY;
                 ret = SAMBA_CALL( wksta_getinfo, &params );
                 if (!ret) *bufptr = params.buffer;
-                else NetApiBufferFree( params.buffer );
+                else free( params.buffer );
                 if (ret != ERROR_INSUFFICIENT_BUFFER) return ret;
             }
         }
         FIXME( "remote computers not supported\n" );
         return ERROR_INVALID_LEVEL;
     }
+    if (!bufptr) return ERROR_INVALID_PARAMETER;
 
     switch (level)
     {
@@ -1005,6 +1001,28 @@ NET_API_STATUS WINAPI NetWkstaGetInfo( LMSTR servername, DWORD level,
             ret = ERROR_INVALID_LEVEL;
     }
     return ret;
+}
+
+/************************************************************
+ *                NetGetJoinInformation (NETAPI32.@)
+ */
+NET_API_STATUS NET_API_FUNCTION NetGetJoinInformation(
+    LPCWSTR Server,
+    LPWSTR *Name,
+    PNETSETUP_JOIN_STATUS type)
+{
+    static const WCHAR workgroupW[] = L"Workgroup";
+
+    FIXME("Semi-stub %s %p %p\n", wine_dbgstr_w(Server), Name, type);
+
+    if (!Name || !type)
+        return ERROR_INVALID_PARAMETER;
+
+    NetApiBufferAllocate(sizeof(workgroupW), (LPVOID *)Name);
+    lstrcpyW(*Name, workgroupW);
+    *type = NetSetupWorkgroupName;
+
+    return NERR_Success;
 }
 
 /************************************************************
@@ -2003,6 +2021,18 @@ NET_API_STATUS WINAPI NetUserChangePassword(LPCWSTR domainname, LPCWSTR username
     return NERR_Success;
 }
 
+NET_API_STATUS WINAPI NetUseAdd(LMSTR servername, DWORD level, LPBYTE bufptr, LPDWORD parm_err)
+{
+    FIXME("%s %ld %p %p stub\n", debugstr_w(servername), level, bufptr, parm_err);
+    return NERR_Success;
+}
+
+NET_API_STATUS WINAPI NetUseDel(LMSTR servername, LMSTR usename, DWORD forcecond)
+{
+    FIXME("%s %s %ld stub\n", debugstr_w(servername), debugstr_w(usename), forcecond);
+    return NERR_Success;
+}
+
 /************************************************************
  *                I_BrowserSetNetlogonState  (NETAPI32.@)
  */
@@ -2273,30 +2303,6 @@ DWORD WINAPI DsRoleGetPrimaryDomainInformation(
     return ret;
 }
 
-DWORD WINAPI DsGetDcOpenA(LPCSTR domain, ULONG flags, LPCSTR site,
-    GUID *domain_guid, LPCSTR forest, ULONG dc_flags, PHANDLE context)
-{
-    FIXME("(%s, %08lx, %s, %s, %s, %08lx, %p)\n", debugstr_a(domain),
-        flags, debugstr_a(site), wine_dbgstr_guid(domain_guid),
-        debugstr_a(forest), dc_flags, context);
-
-    *context = NULL;
-
-    return ERROR_CALL_NOT_IMPLEMENTED;
-}
-
-DWORD WINAPI DsGetDcOpenW(LPCWSTR domain, ULONG flags, LPCWSTR site,
-    GUID *domain_guid, LPCWSTR forest, ULONG dc_flags, PHANDLE context)
-{
-    FIXME("(%s, %08lx, %s, %s, %s, %08lx, %p)\n", debugstr_w(domain),
-        flags, debugstr_w(site), wine_dbgstr_guid(domain_guid),
-        debugstr_w(forest), dc_flags, context);
-
-    *context = NULL;
-
-    return ERROR_CALL_NOT_IMPLEMENTED;
-}
-
 /************************************************************
  *                NetLocalGroupAdd  (NETAPI32.@)
  */
@@ -2520,56 +2526,6 @@ NET_API_STATUS NET_API_FUNCTION NetRemoteTOD(
 {
     FIXME("(%s %p) stub!\n", debugstr_w(servername), buf);
     return ERROR_NO_BROWSER_SERVERS_FOUND;
-}
-
-
-/************************************************************
- *                NetValidatePasswordPolicy  (NETAPI32.@)
- */
-NET_API_STATUS WINAPI NetValidatePasswordPolicy(
-    LPCWSTR servername,
-    LPVOID qualifier,
-    DWORD validation_type,
-    LPVOID input_arg,
-    LPVOID *output_arg)
-{
-    NET_API_STATUS status;
-    NET_VALIDATE_OUTPUT_ARG *out = NULL;
-
-    FIXME("(%s, %p, %lu, %p, %p) stub!\n",
-          debugstr_w(servername), qualifier, validation_type, input_arg, output_arg);
-
-    if (!output_arg)
-        return ERROR_INVALID_PARAMETER;
-
-    *output_arg = NULL;
-
-    status = NetApiBufferAllocate(sizeof(*out), (LPVOID *)&out);
-    if (status != NERR_Success)
-        return status;
-
-    /* Zero all fields; report success so most probes pass */
-    memset(out, 0, sizeof(*out));
-    out->ValidationStatus = NERR_Success;
-
-    *output_arg = out;
-    return NERR_Success;
-}
-
-/************************************************************
- *          NetValidatePasswordPolicyFree  (NETAPI32.@)
- */
-NET_API_STATUS WINAPI NetValidatePasswordPolicyFree(LPVOID *output_arg)
-{
-    TRACE("(%p)\n", output_arg);
-
-    if (!output_arg) return ERROR_INVALID_PARAMETER;
-    if (*output_arg)
-    {
-        NetApiBufferFree(*output_arg);
-        *output_arg = NULL;
-    }
-    return NERR_Success;
 }
 
 /************************************************************

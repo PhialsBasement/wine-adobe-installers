@@ -50,69 +50,12 @@
 #include "winuser.h"
 #include "wine/asm.h"
 #include "wine/debug.h"
+#include "wine/heap.h"
 #include "dictionary.h"
 #include "storage32.h"
 #include "oleauto.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(storage);
-
-#ifdef __ASM_USE_THISCALL_WRAPPER
-
-#define CALL_VTBL_FUNC(this, off, ret, type, args) ((ret (WINAPI*)type)&vtbl_wrapper_##off)args
-
-#define DEFINE_VTBL_WRAPPER(off)            \
-    extern void *vtbl_wrapper_ ## off;      \
-    __ASM_GLOBAL_FUNC(vtbl_wrapper_ ## off, \
-        "popl %eax\n\t"                     \
-        "popl %ecx\n\t"                     \
-        "pushl %eax\n\t"                    \
-        "movl 0(%ecx), %eax\n\t"            \
-        "jmp *" #off "(%eax)\n\t")
-
-DEFINE_VTBL_WRAPPER(0);
-DEFINE_VTBL_WRAPPER(4);
-
-#else
-
-#define CALL_VTBL_FUNC(this, off, ret, type, args) ((ret (__thiscall***)type)this)[0][off/4]args
-
-#endif
-
-#define call_IMemoryAllocator_Allocate(this, size) CALL_VTBL_FUNC(this, 0, \
-        void*, (void*, ULONG), (this, size))
-#define call_IMemoryAllocator_Free(this, v) CALL_VTBL_FUNC(this, 4, \
-        void, (void*, void*), (this, v))
-
-DEFINE_THISCALL_WRAPPER(memory_allocator_Allocate, 8)
-void* __thiscall memory_allocator_Allocate(void *this, ULONG size)
-{
-    return CoTaskMemAlloc(size);
-}
-
-DEFINE_THISCALL_WRAPPER(memory_allocator_Free, 8)
-void __thiscall memory_allocator_Free(void *this, void *v)
-{
-    CoTaskMemFree(v);
-}
-
-struct
-{
-    void *Allocate;
-    void *Free;
-} memory_allocator_vtbl =
-{
-    THISCALL(memory_allocator_Allocate),
-    THISCALL(memory_allocator_Free)
-};
-
-struct
-{
-    void *vtbl;
-} memory_allocator =
-{
-    &memory_allocator_vtbl
-};
-
 
 static inline StorageImpl *impl_from_IPropertySetStorage( IPropertySetStorage *iface )
 {
@@ -281,8 +224,8 @@ static ULONG WINAPI enum_stat_prop_stg_Release(IEnumSTATPROPSTG *iface)
     if (!refcount)
     {
         IPropertyStorage_Release(&penum->storage->IPropertyStorage_iface);
-        free(penum->stats);
-        free(penum);
+        heap_free(penum->stats);
+        heap_free(penum);
     }
 
     return refcount;
@@ -387,7 +330,7 @@ static HRESULT create_enum_stat_prop_stg(PropertyStorage_impl *storage, IEnumSTA
     struct enum_stat_prop_stg *enum_obj;
     DWORD count;
 
-    enum_obj = calloc(1, sizeof(*enum_obj));
+    enum_obj = heap_alloc_zero(sizeof(*enum_obj));
     if (!enum_obj)
         return E_OUTOFMEMORY;
 
@@ -401,7 +344,7 @@ static HRESULT create_enum_stat_prop_stg(PropertyStorage_impl *storage, IEnumSTA
 
     if (count)
     {
-        if (!(enum_obj->stats = malloc(sizeof(*enum_obj->stats) * count)))
+        if (!(enum_obj->stats = heap_alloc(sizeof(*enum_obj->stats) * count)))
         {
             IEnumSTATPROPSTG_Release(&enum_obj->IEnumSTATPROPSTG_iface);
             return E_OUTOFMEMORY;
@@ -538,8 +481,7 @@ static HRESULT WINAPI IPropertyStorage_fnReadMultiple(
     PROPVARIANT rgpropvar[])
 {
     PropertyStorage_impl *This = impl_from_IPropertyStorage(iface);
-    HRESULT hr = S_FALSE;
-    PROPVARIANT *prop;
+    HRESULT hr = S_OK;
     ULONG i;
 
     TRACE("%p, %lu, %p, %p\n", iface, cpspec, rgpspec, rgpropvar);
@@ -554,7 +496,12 @@ static HRESULT WINAPI IPropertyStorage_fnReadMultiple(
         PropVariantInit(&rgpropvar[i]);
         if (rgpspec[i].ulKind == PRSPEC_LPWSTR)
         {
-            prop = PropertyStorage_FindPropertyByName(This, rgpspec[i].lpwstr);
+            PROPVARIANT *prop = PropertyStorage_FindPropertyByName(This,
+             rgpspec[i].lpwstr);
+
+            if (prop)
+                PropertyStorage_PropVariantCopy(&rgpropvar[i], prop, GetACP(),
+                 This->codePage);
         }
         else
         {
@@ -563,25 +510,23 @@ static HRESULT WINAPI IPropertyStorage_fnReadMultiple(
                 case PID_CODEPAGE:
                     rgpropvar[i].vt = VT_I2;
                     rgpropvar[i].iVal = This->codePage;
-                    prop = NULL;
-                    hr = S_OK;
                     break;
                 case PID_LOCALE:
                     rgpropvar[i].vt = VT_I4;
                     rgpropvar[i].lVal = This->locale;
-                    prop = NULL;
-                    hr = S_OK;
                     break;
                 default:
-                    prop = PropertyStorage_FindProperty(This, rgpspec[i].propid);
-                    break;
-            }
-        }
+                {
+                    PROPVARIANT *prop = PropertyStorage_FindProperty(This,
+                     rgpspec[i].propid);
 
-        if (prop)
-        {
-            PropertyStorage_PropVariantCopy(&rgpropvar[i], prop, GetACP(), This->codePage);
-            hr = S_OK;
+                    if (prop)
+                        PropertyStorage_PropVariantCopy(&rgpropvar[i], prop,
+                         GetACP(), This->codePage);
+                    else
+                        hr = S_FALSE;
+                }
+            }
         }
     }
     LeaveCriticalSection(&This->cs);
@@ -1062,10 +1007,7 @@ static HRESULT WINAPI IPropertyStorage_fnCommit(
         return STG_E_ACCESSDENIED;
     EnterCriticalSection(&This->cs);
     if (This->dirty)
-    {
         hr = PropertyStorage_WriteToStream(This);
-        if (hr == S_OK) This->dirty = FALSE;
-    }
     else
         hr = S_OK;
     LeaveCriticalSection(&This->cs);
@@ -1233,6 +1175,11 @@ static void PropertyStorage_ByteSwapString(LPWSTR str, size_t len)
 #define PropertyStorage_ByteSwapString(s, l)
 #endif
 
+static void* WINAPI Allocate_CoTaskMemAlloc(void *this, ULONG size)
+{
+    return CoTaskMemAlloc(size);
+}
+
 struct read_buffer
 {
     BYTE *data;
@@ -1294,8 +1241,8 @@ static HRESULT buffer_read_len(const struct read_buffer *buffer, size_t offset, 
     return hr;
 }
 
-static HRESULT propertystorage_read_scalar(PROPVARIANT *prop, const struct read_buffer *buffer, size_t *offset,
-        UINT codepage, void *pma)
+static HRESULT propertystorage_read_scalar(PROPVARIANT *prop, const struct read_buffer *buffer, size_t offset,
+        UINT codepage, void* (WINAPI *allocate)(void *this, ULONG size), void *allocate_data)
 {
     HRESULT hr;
 
@@ -1308,70 +1255,55 @@ static HRESULT propertystorage_read_scalar(PROPVARIANT *prop, const struct read_
         hr = S_OK;
         break;
     case VT_I1:
-        hr = buffer_read_byte(buffer, *offset, (BYTE *)&prop->cVal);
-        *offset += sizeof(BYTE);
+        hr = buffer_read_byte(buffer, offset, (BYTE *)&prop->cVal);
         TRACE("Read char 0x%x ('%c')\n", prop->cVal, prop->cVal);
         break;
     case VT_UI1:
-        hr = buffer_read_byte(buffer, *offset, &prop->bVal);
-        *offset += sizeof(BYTE);
+        hr = buffer_read_byte(buffer, offset, &prop->bVal);
         TRACE("Read byte 0x%x\n", prop->bVal);
         break;
     case VT_BOOL:
-        hr = buffer_read_word(buffer, *offset, (WORD *)&prop->boolVal);
-        *offset += sizeof(WORD);
+        hr = buffer_read_word(buffer, offset, (WORD *)&prop->boolVal);
         TRACE("Read bool %d\n", prop->boolVal);
         break;
     case VT_I2:
-        hr = buffer_read_word(buffer, *offset, (WORD *)&prop->iVal);
-        *offset += sizeof(WORD);
+        hr = buffer_read_word(buffer, offset, (WORD *)&prop->iVal);
         TRACE("Read short %d\n", prop->iVal);
         break;
     case VT_UI2:
-        hr = buffer_read_word(buffer, *offset, &prop->uiVal);
-        *offset += sizeof(WORD);
+        hr = buffer_read_word(buffer, offset, &prop->uiVal);
         TRACE("Read ushort %d\n", prop->uiVal);
         break;
     case VT_INT:
     case VT_I4:
-        hr = buffer_read_dword(buffer, *offset, (DWORD *)&prop->lVal);
-        *offset += sizeof(DWORD);
+        hr = buffer_read_dword(buffer, offset, (DWORD *)&prop->lVal);
         TRACE("Read long %ld\n", prop->lVal);
         break;
     case VT_UINT:
     case VT_UI4:
-        hr = buffer_read_dword(buffer, *offset, &prop->ulVal);
-        *offset += sizeof(DWORD);
+        hr = buffer_read_dword(buffer, offset, &prop->ulVal);
         TRACE("Read ulong %ld\n", prop->ulVal);
         break;
     case VT_I8:
-        hr = buffer_read_uint64(buffer, *offset, (ULARGE_INTEGER *)&prop->hVal);
-        *offset += sizeof(UINT64);
+        hr = buffer_read_uint64(buffer, offset, (ULARGE_INTEGER *)&prop->hVal);
         TRACE("Read long long %s\n", wine_dbgstr_longlong(prop->hVal.QuadPart));
         break;
     case VT_UI8:
-        hr = buffer_read_uint64(buffer, *offset, &prop->uhVal);
-        *offset += sizeof(UINT64);
+        hr = buffer_read_uint64(buffer, offset, &prop->uhVal);
         TRACE("Read ulong long %s\n", wine_dbgstr_longlong(prop->uhVal.QuadPart));
         break;
-    case VT_R4:
-        hr = buffer_read_len(buffer, *offset, &prop->fltVal, sizeof(prop->fltVal));
-        *offset += sizeof(prop->fltVal);
-        TRACE("Read float %f\n", prop->fltVal);
-        break;
     case VT_R8:
-        hr = buffer_read_len(buffer, *offset, &prop->dblVal, sizeof(prop->dblVal));
-        *offset += sizeof(prop->dblVal);
+        hr = buffer_read_len(buffer, offset, &prop->dblVal, sizeof(prop->dblVal));
         TRACE("Read double %f\n", prop->dblVal);
         break;
     case VT_LPSTR:
     {
         DWORD count;
 
-        if (FAILED(hr = buffer_read_dword(buffer, *offset, &count)))
+        if (FAILED(hr = buffer_read_dword(buffer, offset, &count)))
             break;
 
-        *offset += sizeof(DWORD);
+        offset += sizeof(DWORD);
 
         if (codepage == CP_UNICODE && count % sizeof(WCHAR))
         {
@@ -1380,12 +1312,11 @@ static HRESULT propertystorage_read_scalar(PROPVARIANT *prop, const struct read_
         }
         else
         {
-            prop->pszVal = call_IMemoryAllocator_Allocate(pma, count);
+            prop->pszVal = allocate(allocate_data, count);
             if (prop->pszVal)
             {
-                if (FAILED(hr = buffer_read_len(buffer, *offset, prop->pszVal, count)))
+                if (FAILED(hr = buffer_read_len(buffer, offset, prop->pszVal, count)))
                     break;
-                *offset += ALIGNED_LENGTH(count, sizeof(DWORD) - 1);
 
                 /* This is stored in the code page specified in codepage.
                  * Don't convert it, the caller will just store it as-is.
@@ -1413,10 +1344,10 @@ static HRESULT propertystorage_read_scalar(PROPVARIANT *prop, const struct read_
     {
         DWORD count, wcount;
 
-        if (FAILED(hr = buffer_read_dword(buffer, *offset, &count)))
+        if (FAILED(hr = buffer_read_dword(buffer, offset, &count)))
             break;
 
-        *offset += sizeof(DWORD);
+        offset += sizeof(DWORD);
 
         if (codepage == CP_UNICODE && count % sizeof(WCHAR))
         {
@@ -1429,9 +1360,9 @@ static HRESULT propertystorage_read_scalar(PROPVARIANT *prop, const struct read_
                 wcount = count / sizeof(WCHAR);
             else
             {
-                if (FAILED(hr = buffer_test_offset(buffer, *offset, count)))
+                if (FAILED(hr = buffer_test_offset(buffer, offset, count)))
                     break;
-                wcount = MultiByteToWideChar(codepage, 0, (LPCSTR)(buffer->data + *offset), count, NULL, 0);
+                wcount = MultiByteToWideChar(codepage, 0, (LPCSTR)(buffer->data + offset), count, NULL, 0);
             }
 
             prop->bstrVal = SysAllocStringLen(NULL, wcount); /* FIXME: use allocator? */
@@ -1439,15 +1370,9 @@ static HRESULT propertystorage_read_scalar(PROPVARIANT *prop, const struct read_
             if (prop->bstrVal)
             {
                 if (codepage == CP_UNICODE)
-                {
-                    hr = buffer_read_len(buffer, *offset, prop->bstrVal, count);
-                    offset += ALIGNED_LENGTH(count, sizeof(DWORD) - 1);
-                }
+                    hr = buffer_read_len(buffer, offset, prop->bstrVal, count);
                 else
-                {
-                    MultiByteToWideChar(codepage, 0, (LPCSTR)(buffer->data + *offset), count, prop->bstrVal, wcount);
-                    offset += ALIGNED_LENGTH(wcount, sizeof(DWORD) - 1);
-                }
+                    MultiByteToWideChar(codepage, 0, (LPCSTR)(buffer->data + offset), count, prop->bstrVal, wcount);
 
                 prop->bstrVal[wcount - 1] = '\0';
                 TRACE("Read string value %s\n", debugstr_w(prop->bstrVal));
@@ -1461,17 +1386,16 @@ static HRESULT propertystorage_read_scalar(PROPVARIANT *prop, const struct read_
     {
         DWORD count;
 
-        if (FAILED(hr = buffer_read_dword(buffer, *offset, &count)))
+        if (FAILED(hr = buffer_read_dword(buffer, offset, &count)))
             break;
 
-        *offset += sizeof(DWORD);
+        offset += sizeof(DWORD);
 
         prop->blob.cbSize = count;
-        prop->blob.pBlobData = call_IMemoryAllocator_Allocate(pma, count);
+        prop->blob.pBlobData = allocate(allocate_data, count);
         if (prop->blob.pBlobData)
         {
-            hr = buffer_read_len(buffer, *offset, prop->blob.pBlobData, count);
-            *offset += count;
+            hr = buffer_read_len(buffer, offset, prop->blob.pBlobData, count);
             TRACE("Read blob value of size %ld\n", count);
         }
         else
@@ -1482,17 +1406,16 @@ static HRESULT propertystorage_read_scalar(PROPVARIANT *prop, const struct read_
     {
         DWORD count;
 
-        if (FAILED(hr = buffer_read_dword(buffer, *offset, &count)))
+        if (FAILED(hr = buffer_read_dword(buffer, offset, &count)))
             break;
 
-        *offset += sizeof(DWORD);
+        offset += sizeof(DWORD);
 
-        prop->pwszVal = call_IMemoryAllocator_Allocate(pma, count * sizeof(WCHAR));
+        prop->pwszVal = allocate(allocate_data, count * sizeof(WCHAR));
         if (prop->pwszVal)
         {
-            if (SUCCEEDED(hr = buffer_read_len(buffer, *offset, prop->pwszVal, count * sizeof(WCHAR))))
+            if (SUCCEEDED(hr = buffer_read_len(buffer, offset, prop->pwszVal, count * sizeof(WCHAR))))
             {
-                *offset += ALIGNED_LENGTH(count * sizeof(WCHAR), sizeof(DWORD) - 1);
                 /* make sure string is NULL-terminated */
                 prop->pwszVal[count - 1] = '\0';
                 PropertyStorage_ByteSwapString(prop->pwszVal, count);
@@ -1504,43 +1427,38 @@ static HRESULT propertystorage_read_scalar(PROPVARIANT *prop, const struct read_
         break;
     }
     case VT_FILETIME:
-        hr = buffer_read_uint64(buffer, *offset, (ULARGE_INTEGER *)&prop->filetime);
-        *offset += sizeof(UINT64);
+        hr = buffer_read_uint64(buffer, offset, (ULARGE_INTEGER *)&prop->filetime);
         break;
     case VT_CF:
         {
             DWORD len = 0, tag = 0;
 
-            if (SUCCEEDED(hr = buffer_read_dword(buffer, *offset, &len)))
-                hr = buffer_read_dword(buffer, *offset + sizeof(DWORD), &tag);
+            if (SUCCEEDED(hr = buffer_read_dword(buffer, offset, &len)))
+                hr = buffer_read_dword(buffer, offset + sizeof(DWORD), &tag);
             if (FAILED(hr))
                 break;
 
-            *offset += 2 * sizeof(DWORD);
+            offset += 2 * sizeof(DWORD);
 
             if (len > 8)
             {
                 len -= 8;
-                prop->pclipdata = call_IMemoryAllocator_Allocate(pma, sizeof (CLIPDATA));
+                prop->pclipdata = allocate(allocate_data, sizeof (CLIPDATA));
                 prop->pclipdata->cbSize = len;
                 prop->pclipdata->ulClipFmt = tag;
-                prop->pclipdata->pClipData = call_IMemoryAllocator_Allocate(pma, len - sizeof(prop->pclipdata->ulClipFmt));
-                hr = buffer_read_len(buffer, *offset, prop->pclipdata->pClipData, len - sizeof(prop->pclipdata->ulClipFmt));
-                *offset += ALIGNED_LENGTH(len - sizeof(prop->pclipdata->ulClipFmt), sizeof(DWORD) - 1);
+                prop->pclipdata->pClipData = allocate(allocate_data, len - sizeof(prop->pclipdata->ulClipFmt));
+                hr = buffer_read_len(buffer, offset, prop->pclipdata->pClipData, len - sizeof(prop->pclipdata->ulClipFmt));
             }
             else
                 hr = STG_E_INVALIDPARAMETER;
         }
         break;
     case VT_CLSID:
-        if (!(prop->puuid = call_IMemoryAllocator_Allocate(pma, sizeof (*prop->puuid))))
+        if (!(prop->puuid = allocate(allocate_data, sizeof (*prop->puuid))))
             return STG_E_INSUFFICIENTMEMORY;
 
-        if (SUCCEEDED(hr = buffer_test_offset(buffer, *offset, sizeof(*prop->puuid))))
-        {
-            StorageUtl_ReadGUID(buffer->data, *offset, prop->puuid);
-            *offset += sizeof(*prop->puuid);
-        }
+        if (SUCCEEDED(hr = buffer_test_offset(buffer, offset, sizeof(*prop->puuid))))
+            StorageUtl_ReadGUID(buffer->data, offset, prop->puuid);
 
         break;
     default:
@@ -1553,6 +1471,9 @@ static HRESULT propertystorage_read_scalar(PROPVARIANT *prop, const struct read_
 
 static size_t propertystorage_get_elemsize(const PROPVARIANT *prop)
 {
+    if (!(prop->vt & VT_VECTOR))
+        return 0;
+
     switch (prop->vt & ~VT_VECTOR)
     {
         case VT_I1: return sizeof(*prop->cac.pElems);
@@ -1571,20 +1492,15 @@ static size_t propertystorage_get_elemsize(const PROPVARIANT *prop)
         case VT_DATE: return sizeof(*prop->cadate.pElems);
         case VT_FILETIME: return sizeof(*prop->cafiletime.pElems);
         case VT_CLSID: return sizeof(*prop->cauuid.pElems);
-        case VT_CF: return sizeof(*prop->caclipdata.pElems);
-        case VT_BSTR: return sizeof(*prop->cabstr.pElems);
-        case VT_BSTR_BLOB: return sizeof(*prop->cabstrblob.pElems);
-        case VT_LPSTR: return sizeof(*prop->calpstr.pElems);
-        case VT_LPWSTR: return sizeof(*prop->calpwstr.pElems);
         case VT_VARIANT: return sizeof(*prop->capropvar.pElems);
         default:
-            ERR("Unexpected type %#x.\n", prop->vt);
+            FIXME("Unhandled type %#x.\n", prop->vt);
             return 0;
     }
 }
 
 static HRESULT PropertyStorage_ReadProperty(PROPVARIANT *prop, const struct read_buffer *buffer,
-        size_t offset, UINT codepage, void *pma)
+        size_t offset, UINT codepage, void* (WINAPI *allocate)(void *this, ULONG size), void *allocate_data)
 {
     HRESULT hr;
     DWORD vt;
@@ -1600,65 +1516,44 @@ static HRESULT PropertyStorage_ReadProperty(PROPVARIANT *prop, const struct read
 
     if (prop->vt & VT_VECTOR)
     {
-        size_t elemsize = propertystorage_get_elemsize(prop);
-        PROPVARIANT elem;
         DWORD count, i;
 
-        if (!elemsize)
-            return HRESULT_FROM_WIN32(ERROR_INVALID_DATA);
-        if (FAILED(hr = buffer_read_dword(buffer, offset, &count)))
-            return hr;
-        offset += sizeof(DWORD);
-
-        if (!(prop->cac.pElems = call_IMemoryAllocator_Allocate(pma, elemsize * count)))
-            return STG_E_INSUFFICIENTMEMORY;
-
-        prop->cac.cElems = count;
-        elem.vt = prop->vt & ~VT_VECTOR;
-
-        for (i = 0; i < count; ++i)
+        switch (prop->vt & ~VT_VECTOR)
         {
-            if (prop->vt == (VT_VECTOR | VT_VARIANT))
-            {
-                DWORD vt;
+            case VT_BSTR:
+            case VT_VARIANT:
+            case VT_LPSTR:
+            case VT_LPWSTR:
+            case VT_CF:
+                FIXME("Vector with variable length elements are not supported.\n");
+                return STG_E_INVALIDPARAMETER;
+            default:
+                ;
+        }
 
-                offset = ALIGNED_LENGTH(offset, sizeof(DWORD) - 1);
-                hr = buffer_read_dword(buffer, offset, &vt);
-                if (SUCCEEDED(hr))
-                {
-                    offset += sizeof(DWORD);
-                    elem.vt = vt;
-                }
-            }
+        if (SUCCEEDED(hr = buffer_read_dword(buffer, offset, &count)))
+        {
+            size_t elemsize = propertystorage_get_elemsize(prop);
+            PROPVARIANT elem;
 
-            if (SUCCEEDED(hr))
-                hr = propertystorage_read_scalar(&elem, buffer, &offset, codepage, pma);
-            if (FAILED(hr))
+            offset += sizeof(DWORD);
+
+            if ((prop->capropvar.pElems = allocate(allocate_data, elemsize * count)))
             {
-                for (; i > 0; --i)
+                prop->capropvar.cElems = count;
+                elem.vt = prop->vt & ~VT_VECTOR;
+
+                for (i = 0; i < count; ++i)
                 {
-                    switch(elem.vt)
+                    if (SUCCEEDED(hr = propertystorage_read_scalar(&elem, buffer, offset + i * elemsize, codepage,
+                            allocate, allocate_data)))
                     {
-                    case VT_LPSTR:
-                    case VT_LPWSTR:
-                    case VT_CF:
-                    case VT_CLSID:
-                        call_IMemoryAllocator_Free(pma, prop->calpwstr.pElems);
-                        break;
-                    case VT_BSTR:
-                        SysFreeString(prop->cabstr.pElems[i -1]);
-                        break;
+                        memcpy(&prop->capropvar.pElems[i], &elem.lVal, elemsize);
                     }
                 }
-
-                call_IMemoryAllocator_Free(pma, prop->cac.pElems);
-                return hr;
             }
-
-            if (prop->vt == (VT_VECTOR | VT_VARIANT))
-                memcpy(prop->cac.pElems + elemsize * i, &elem, elemsize);
             else
-                memcpy(prop->cac.pElems + elemsize * i, &elem.lVal, elemsize);
+                hr = STG_E_INSUFFICIENTMEMORY;
         }
     }
     else if (prop->vt & VT_ARRAY)
@@ -1667,7 +1562,7 @@ static HRESULT PropertyStorage_ReadProperty(PROPVARIANT *prop, const struct read
         hr = STG_E_INVALIDPARAMETER;
     }
     else
-        hr = propertystorage_read_scalar(prop, buffer, &offset, codepage, pma);
+        hr = propertystorage_read_scalar(prop, buffer, offset, codepage, allocate, allocate_data);
 
     return hr;
 }
@@ -1817,7 +1712,7 @@ static HRESULT PropertyStorage_ReadDictionary(PropertyStorage_impl *This, const 
         }
 
         TRACE("Reading entry with ID %#lx, %ld chars, name %s.\n", propid, cbEntry, This->codePage == CP_UNICODE ?
-                debugstr_wn((WCHAR *)(buffer->data + offset), cbEntry) : debugstr_an((char *)buffer->data + offset, cbEntry));
+                debugstr_wn((WCHAR *)buffer->data, cbEntry) : debugstr_an((char *)buffer->data, cbEntry));
 
         hr = PropertyStorage_StoreNameWithId(This, (char *)buffer->data + offset, This->codePage, propid);
         /* Unicode entries are padded to DWORD boundaries */
@@ -1967,7 +1862,8 @@ static HRESULT PropertyStorage_ReadFromStream(PropertyStorage_impl *This)
 
                 PropVariantInit(&prop);
                 if (SUCCEEDED(PropertyStorage_ReadProperty(&prop, &read_buffer,
-                        idOffset->dwOffset - sizeof(PROPERTYSECTIONHEADER), This->codePage, &memory_allocator)))
+                        idOffset->dwOffset - sizeof(PROPERTYSECTIONHEADER), This->codePage,
+                        Allocate_CoTaskMemAlloc, NULL)))
                 {
                     TRACE("Read property with ID %#lx, type %d\n", idOffset->propid, prop.vt);
                     switch(idOffset->propid)
@@ -2116,9 +2012,9 @@ static BOOL PropertyStorage_DictionaryWriter(const void *key,
         c->bytesWritten += keyLen;
 
         /* Align to 4 bytes. */
-        if (keyLen & 3)
+        pad_len = sizeof(DWORD) - keyLen % sizeof(DWORD);
+        if (pad_len)
         {
-            pad_len = sizeof(DWORD) - (keyLen & 3);
             c->hr = IStream_Write(This->stm, &pad, pad_len, &count);
             if (FAILED(c->hr))
                 goto end;
@@ -2273,12 +2169,6 @@ static HRESULT PropertyStorage_WritePropertyToStream(PropertyStorage_impl *This,
         hr = IStream_Write(This->stm, &ularge, sizeof(ularge), &bytesWritten);
         break;
     }
-    case VT_R8:
-    {
-        hr = IStream_Write(This->stm, &var->dblVal, sizeof(var->dblVal), &count);
-        bytesWritten = count;
-        break;
-    }
     case VT_LPSTR:
     {
         if (This->codePage == CP_UNICODE)
@@ -2310,7 +2200,7 @@ static HRESULT PropertyStorage_WritePropertyToStream(PropertyStorage_impl *This,
             len = WideCharToMultiByte(This->codePage, 0, var->bstrVal, SysStringLen(var->bstrVal) + 1,
                     NULL, 0, NULL, NULL);
 
-            str = malloc(len);
+            str = heap_alloc(len);
             if (!str)
             {
                 hr = E_OUTOFMEMORY;
@@ -2323,7 +2213,7 @@ static HRESULT PropertyStorage_WritePropertyToStream(PropertyStorage_impl *This,
             hr = IStream_Write(This->stm, &dwTemp, sizeof(dwTemp), &count);
             if (SUCCEEDED(hr))
                 hr = IStream_Write(This->stm, str, len, &count);
-            free(str);
+            heap_free(str);
         }
 
         bytesWritten = count + sizeof(DWORD);
@@ -2481,17 +2371,12 @@ end:
 
 static HRESULT PropertyStorage_WriteToStream(PropertyStorage_impl *This)
 {
-    const ULARGE_INTEGER size = { .QuadPart = 0 };
     PROPERTYSECTIONHEADER sectionHdr;
     HRESULT hr;
     ULONG count;
     LARGE_INTEGER seek;
     DWORD numProps, prop, sectionOffset, dwTemp;
     PROPVARIANT var;
-
-    hr = IStream_SetSize(This->stm, size);
-    if (FAILED(hr))
-        return hr;
 
     PropertyStorage_WriteHeadersToStream(This);
 
@@ -2512,10 +2397,10 @@ static HRESULT PropertyStorage_WriteToStream(PropertyStorage_impl *This)
     seek.QuadPart = SECTIONHEADER_OFFSET;
     hr = IStream_Seek(This->stm, seek, STREAM_SEEK_SET, NULL);
     if (FAILED(hr))
-        return hr;
+        goto end;
     hr = IStream_Write(This->stm, &sectionHdr, sizeof(sectionHdr), &count);
     if (FAILED(hr))
-        return hr;
+        goto end;
 
     prop = 0;
     sectionOffset = sizeof(PROPERTYSECTIONHEADER) +
@@ -2526,7 +2411,7 @@ static HRESULT PropertyStorage_WriteToStream(PropertyStorage_impl *This)
         prop++;
         hr = PropertyStorage_WriteDictionaryToStream(This, &sectionOffset);
         if (FAILED(hr))
-            return hr;
+            goto end;
     }
 
     PropVariantInit(&var);
@@ -2536,7 +2421,7 @@ static HRESULT PropertyStorage_WriteToStream(PropertyStorage_impl *This)
     hr = PropertyStorage_WritePropertyToStream(This, prop++, PID_CODEPAGE,
      &var, &sectionOffset);
     if (FAILED(hr))
-        return hr;
+        goto end;
 
     if (This->locale != LOCALE_SYSTEM_DEFAULT)
     {
@@ -2545,7 +2430,7 @@ static HRESULT PropertyStorage_WriteToStream(PropertyStorage_impl *This)
         hr = PropertyStorage_WritePropertyToStream(This, prop++, PID_LOCALE,
          &var, &sectionOffset);
         if (FAILED(hr))
-            return hr;
+            goto end;
     }
 
     if (This->grfFlags & PROPSETFLAG_CASE_SENSITIVE)
@@ -2555,22 +2440,22 @@ static HRESULT PropertyStorage_WriteToStream(PropertyStorage_impl *This)
         hr = PropertyStorage_WritePropertyToStream(This, prop++, PID_BEHAVIOR,
          &var, &sectionOffset);
         if (FAILED(hr))
-            return hr;
+            goto end;
     }
 
     hr = PropertyStorage_WritePropertiesToStream(This, prop, &sectionOffset);
     if (FAILED(hr))
-        return hr;
+        goto end;
 
     /* Now write the byte count of the section */
     seek.QuadPart = SECTIONHEADER_OFFSET;
     hr = IStream_Seek(This->stm, seek, STREAM_SEEK_SET, NULL);
     if (FAILED(hr))
-        return hr;
+        goto end;
     StorageUtl_WriteDWord(&dwTemp, 0, sectionOffset);
     hr = IStream_Write(This->stm, &dwTemp, sizeof(dwTemp), &count);
-    if (SUCCEEDED(hr))
-        This->dirty = FALSE;
+
+end:
     return hr;
 }
 
@@ -2673,8 +2558,8 @@ static HRESULT PropertyStorage_ConstructFromStream(IStream *stm,
     return hr;
 }
 
-static HRESULT PropertyStorage_ConstructEmpty(IStream *stm, REFFMTID rfmtid,
- const CLSID *clsid, DWORD grfFlags, DWORD grfMode, IPropertyStorage** pps)
+static HRESULT PropertyStorage_ConstructEmpty(IStream *stm,
+ REFFMTID rfmtid, DWORD grfFlags, DWORD grfMode, IPropertyStorage** pps)
 {
     PropertyStorage_impl *ps;
     HRESULT hr;
@@ -2683,9 +2568,6 @@ static HRESULT PropertyStorage_ConstructEmpty(IStream *stm, REFFMTID rfmtid,
     hr = PropertyStorage_BaseConstruct(stm, rfmtid, grfMode, &ps);
     if (SUCCEEDED(hr))
     {
-        ps->dirty = TRUE;
-        if (clsid)
-            ps->clsid = *clsid;
         ps->format = 0;
         ps->grfFlags = grfFlags;
         if (ps->grfFlags & PROPSETFLAG_CASE_SENSITIVE)
@@ -2758,8 +2640,8 @@ static ULONG WINAPI enum_stat_propset_stg_Release(IEnumSTATPROPSETSTG *iface)
 
     if (!refcount)
     {
-        free(psenum->stats);
-        free(psenum);
+        heap_free(psenum->stats);
+        heap_free(psenum);
     }
 
     return refcount;
@@ -2831,7 +2713,7 @@ static HRESULT create_enum_stat_propset_stg(StorageImpl *storage, IEnumSTATPROPS
 
     struct enum_stat_propset_stg *enum_obj;
 
-    enum_obj = calloc(1, sizeof(*enum_obj));
+    enum_obj = heap_alloc_zero(sizeof(*enum_obj));
     if (!enum_obj)
         return E_OUTOFMEMORY;
 
@@ -2853,7 +2735,7 @@ static HRESULT create_enum_stat_propset_stg(StorageImpl *storage, IEnumSTATPROPS
     if (FAILED(hr))
         goto done;
 
-    enum_obj->stats = malloc(enum_obj->count * sizeof(*enum_obj->stats));
+    enum_obj->stats = heap_alloc(enum_obj->count * sizeof(*enum_obj->stats));
     if (!enum_obj->stats)
     {
         hr = E_OUTOFMEMORY;
@@ -2992,7 +2874,7 @@ static HRESULT WINAPI IPropertySetStorage_fnCreate(
     if (FAILED(r))
         goto end;
 
-    r = PropertyStorage_ConstructEmpty(stm, rfmtid, pclsid, grfFlags, grfMode, ppprstg);
+    r = PropertyStorage_ConstructEmpty(stm, rfmtid, grfFlags, grfMode, ppprstg);
 
     IStream_Release( stm );
 
@@ -3016,8 +2898,6 @@ static HRESULT WINAPI IPropertySetStorage_fnOpen(
     HRESULT r;
 
     TRACE("%p, %s, %#lx, %p.\n", This, debugstr_guid(rfmtid), grfMode, ppprstg);
-
-    grfMode &= ~STGM_TRANSACTED;
 
     /* be picky */
     if (grfMode != (STGM_READWRITE|STGM_SHARE_EXCLUSIVE) &&
@@ -3118,6 +2998,29 @@ static const IPropertyStorageVtbl IPropertyStorage_Vtbl =
     IPropertyStorage_fnStat,
 };
 
+#ifdef __i386__  /* thiscall functions are i386-specific */
+
+#define DEFINE_STDCALL_WRAPPER(num,func,args) \
+   __ASM_STDCALL_FUNC(func, args, \
+                   "popl %eax\n\t" \
+                   "popl %ecx\n\t" \
+                   "pushl %eax\n\t" \
+                   "movl (%ecx), %eax\n\t" \
+                   "jmp *(4*(" #num "))(%eax)" )
+
+DEFINE_STDCALL_WRAPPER(0,Allocate_PMemoryAllocator,8)
+extern void* WINAPI Allocate_PMemoryAllocator(void *this, ULONG cbSize);
+
+#else
+
+static void* WINAPI Allocate_PMemoryAllocator(void *this, ULONG cbSize)
+{
+    void* (WINAPI *fn)(void*,ULONG) = **(void***)this;
+    return fn(this, cbSize);
+}
+
+#endif
+
 BOOLEAN WINAPI StgConvertPropertyToVariant(const SERIALIZEDPROPERTYVALUE* prop,
     USHORT CodePage, PROPVARIANT* pvar, void* pma)
 {
@@ -3126,7 +3029,7 @@ BOOLEAN WINAPI StgConvertPropertyToVariant(const SERIALIZEDPROPERTYVALUE* prop,
 
     read_buffer.data = (BYTE *)prop;
     read_buffer.size = ~(size_t)0;
-    hr = PropertyStorage_ReadProperty(pvar, &read_buffer, 0, CodePage, pma);
+    hr = PropertyStorage_ReadProperty(pvar, &read_buffer, 0, CodePage, Allocate_PMemoryAllocator, pma);
 
     if (FAILED(hr))
     {
@@ -3180,7 +3083,7 @@ HRESULT WINAPI StgCreatePropStg(IUnknown *unk, REFFMTID fmt, const CLSID *clsid,
         if (FAILED(r))
             goto end;
 
-        r = PropertyStorage_ConstructEmpty(stm, fmt, clsid, flags,
+        r = PropertyStorage_ConstructEmpty(stm, fmt, flags,
                 STGM_CREATE|STGM_READWRITE|STGM_SHARE_EXCLUSIVE, prop_stg);
 
         IStream_Release( stm );

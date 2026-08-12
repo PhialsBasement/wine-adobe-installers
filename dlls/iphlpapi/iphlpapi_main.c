@@ -22,6 +22,7 @@
 
 #define IPHLPAPI_DLL_LINKAGE
 #include "ntstatus.h"
+#define WIN32_NO_STATUS
 #include "windef.h"
 #include "winbase.h"
 #include "winreg.h"
@@ -41,6 +42,7 @@
 
 #include "wine/nsi.h"
 #include "wine/debug.h"
+#include "wine/heap.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(iphlpapi);
 
@@ -511,7 +513,7 @@ DWORD WINAPI FlushIpNetTable(DWORD dwIfIndex)
 void WINAPI FreeMibTable( void *ptr )
 {
     TRACE( "(%p)\n", ptr );
-    HeapFree( GetProcessHeap(), 0, ptr );
+    heap_free( ptr );
 }
 
 /******************************************************************
@@ -563,7 +565,7 @@ static DWORD get_wins_servers( SOCKADDR_INET **servers )
 
     if (count)
     {
-        *servers = calloc( count, sizeof(**servers) );
+        *servers = heap_alloc_zero( count * sizeof(**servers) );
         if (!*servers) return 0;
         for (i = 0; i < count; i++)
         {
@@ -725,7 +727,7 @@ DWORD WINAPI GetAdaptersInfo( IP_ADAPTER_INFO *info, ULONG *size )
     info[-1].Next = NULL;
 
 err:
-    free( wins_servers );
+    heap_free( wins_servers );
     NsiFreeTable( fwd_keys, NULL, NULL, NULL );
     NsiFreeTable( uni_keys, uni_rw, NULL, NULL );
     NsiFreeTable( if_keys, if_rw, NULL, if_stat );
@@ -734,7 +736,7 @@ err:
 
 static void address_entry_free( void *ptr, ULONG offset, void *ctxt )
 {
-    HeapFree( GetProcessHeap(), 0, ptr );
+    heap_free( ptr );
 }
 
 static void address_entry_size( void *ptr, ULONG offset, void *ctxt )
@@ -816,9 +818,9 @@ static void adapters_addresses_free( IP_ADAPTER_ADDRESSES *info )
     {
         address_lists_iterate( aa, address_entry_free, NULL );
 
-        HeapFree( GetProcessHeap(), 0, aa->DnsSuffix );
+        heap_free( aa->DnsSuffix );
     }
-    HeapFree( GetProcessHeap(), 0, info );
+    heap_free( info );
 }
 
 static ULONG adapters_addresses_size( IP_ADAPTER_ADDRESSES *info )
@@ -852,7 +854,7 @@ static IP_ADAPTER_ADDRESSES **adapters_addresses_sort( IP_ADAPTER_ADDRESSES *src
     IP_ADAPTER_ADDRESSES **sorted;
     ULONG i = 0;
 
-    if (!(sorted = malloc( count * sizeof(*sorted) ))) return NULL;
+    if (!(sorted = heap_alloc( count * sizeof(*sorted) ))) return NULL;
 
     while (src)
     {
@@ -974,7 +976,7 @@ static DWORD unicast_addresses_alloc( IP_ADAPTER_ADDRESSES *aa, ULONG family, UL
             key6 = (struct nsi_ipv6_unicast_key *)key + i;
             luid = (family == AF_INET) ? &key4->luid : &key6->luid;
             if (luid->Value != aa->Luid.Value) continue;
-            addr = HeapAlloc( GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(*addr) + sockaddr_size );
+            addr = heap_alloc_zero( sizeof(*addr) + sockaddr_size );
             if (!addr)
             {
                 err = ERROR_NOT_ENOUGH_MEMORY;
@@ -1080,7 +1082,7 @@ static DWORD gateway_and_prefix_addresses_alloc( IP_ADAPTER_ADDRESSES *aa, ULONG
 
                 if (sockaddr.si_family)
                 {
-                    gw = HeapAlloc( GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(*gw) + sockaddr_size );
+                    gw = heap_alloc_zero( sizeof(*gw) + sockaddr_size );
                     if (!gw)
                     {
                         err = ERROR_NOT_ENOUGH_MEMORY;
@@ -1121,7 +1123,7 @@ static DWORD gateway_and_prefix_addresses_alloc( IP_ADAPTER_ADDRESSES *aa, ULONG
 
                 if (sockaddr.si_family)
                 {
-                    prefix = HeapAlloc( GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(*prefix) + sockaddr_size );
+                    prefix = heap_alloc_zero( sizeof(*prefix) + sockaddr_size );
                     if (!prefix)
                     {
                         err = ERROR_NOT_ENOUGH_MEMORY;
@@ -1191,8 +1193,8 @@ static DWORD dns_info_alloc( IP_ADAPTER_ADDRESSES *aa, ULONG family, ULONG flags
             {
                 err = DnsQueryConfig( query, 0, name, NULL, servers, &size );
                 if (err != ERROR_MORE_DATA) break;
-                if (servers != (DNS_ADDR_ARRAY *)buf) free( servers );
-                servers = malloc( size );
+                if (servers != (DNS_ADDR_ARRAY *)buf) heap_free( servers );
+                servers = heap_alloc( size );
                 if (!servers)
                 {
                     err = ERROR_NOT_ENOUGH_MEMORY;
@@ -1207,7 +1209,7 @@ static DWORD dns_info_alloc( IP_ADAPTER_ADDRESSES *aa, ULONG family, ULONG flags
                     sockaddr_len = servers->AddrArray[i].Data.DnsAddrUserDword[0];
                     if (sockaddr_len > sizeof(servers->AddrArray[i].MaxSa))
                         sockaddr_len = sizeof(servers->AddrArray[i].MaxSa);
-                    dns = HeapAlloc( GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(*dns) + sockaddr_len );
+                    dns = heap_alloc_zero( sizeof(*dns) + sockaddr_len );
                     if (!dns)
                     {
                         err = ERROR_NOT_ENOUGH_MEMORY;
@@ -1221,23 +1223,23 @@ static DWORD dns_info_alloc( IP_ADAPTER_ADDRESSES *aa, ULONG family, ULONG flags
                     next = &dns->Next;
                 }
             }
-            if (servers != (DNS_ADDR_ARRAY *)buf) free( servers );
+            if (servers != (DNS_ADDR_ARRAY *)buf) heap_free( servers );
             if (err) return err;
         }
 
-        aa->DnsSuffix = HeapAlloc( GetProcessHeap(), 0, MAX_DNS_SUFFIX_STRING_LENGTH * sizeof(WCHAR) );
+        aa->DnsSuffix = heap_alloc( MAX_DNS_SUFFIX_STRING_LENGTH * sizeof(WCHAR) );
         if (!aa->DnsSuffix) return ERROR_NOT_ENOUGH_MEMORY;
         aa->DnsSuffix[0] = '\0';
 
         if (!DnsQueryConfig( DnsConfigSearchList, 0, name, NULL, NULL, &size ) &&
-            (search = malloc( size )))
+            (search = heap_alloc( size )))
         {
             if (!DnsQueryConfig( DnsConfigSearchList, 0, name, NULL, search, &size ) &&
                 search[0] && wcslen( search ) < MAX_DNS_SUFFIX_STRING_LENGTH)
             {
                 wcscpy( aa->DnsSuffix, search );
             }
-            free( search );
+            heap_free( search );
         }
 
         aa = aa->Next;
@@ -1248,7 +1250,7 @@ static DWORD dns_info_alloc( IP_ADAPTER_ADDRESSES *aa, ULONG family, ULONG flags
 
 static DWORD adapters_addresses_alloc( ULONG family, ULONG flags, IP_ADAPTER_ADDRESSES **info, ULONG *count )
 {
-    IP_ADAPTER_ADDRESSES *aa = NULL;
+    IP_ADAPTER_ADDRESSES *aa;
     NET_LUID *luids;
     struct nsi_ndis_ifinfo_rw *rw;
     struct nsi_ndis_ifinfo_dynamic *dyn;
@@ -1262,16 +1264,10 @@ static DWORD adapters_addresses_alloc( ULONG family, ULONG flags, IP_ADAPTER_ADD
                                   (void **)&stat, sizeof(*stat), count, 0 );
     if (err) return err;
 
-    if (!*count)
-    {
-        err = ERROR_NO_DATA;
-        goto err;
-    }
-
     needed = *count * (sizeof(*aa) + ((CHARS_IN_GUID + 1) & ~1) + sizeof(stat->descr.String));
     needed += *count * sizeof(rw->alias.String); /* GAA_FLAG_SKIP_FRIENDLY_NAME is ignored */
 
-    aa = HeapAlloc( GetProcessHeap(), HEAP_ZERO_MEMORY, needed );
+    aa = heap_alloc_zero( needed );
     if (!aa)
     {
         err = ERROR_NOT_ENOUGH_MEMORY;
@@ -1351,7 +1347,7 @@ ULONG WINAPI DECLSPEC_HOTPATCH GetAdaptersAddresses( ULONG family, ULONG flags, 
         else
         {
             adapters_addresses_copy( aa, sorted, count );
-            free( sorted );
+            heap_free( sorted );
         }
     }
 
@@ -1397,20 +1393,14 @@ DWORD WINAPI GetBestInterface(IPAddr dwDestAddr, PDWORD pdwBestIfIndex)
 DWORD WINAPI GetBestInterfaceEx( struct sockaddr *dst, DWORD *best_index )
 {
     SOCKADDR_INET best_address;
-    SOCKADDR_INET dst_address;
     MIB_IPFORWARD_ROW2 row;
     DWORD ret;
 
     TRACE( "dst %p, best_index %p\n", dst, best_index );
 
     if (!dst || !best_index) return ERROR_INVALID_PARAMETER;
-    if (dst->sa_family != AF_INET && dst->sa_family != AF_INET6) return ERROR_INVALID_PARAMETER;
 
-    dst_address.si_family = dst->sa_family;
-    if (dst->sa_family == AF_INET6) dst_address.Ipv6 = *(struct sockaddr_in6 *)dst;
-    else dst_address.Ipv4 = *(struct sockaddr_in *)dst;
-
-    ret = GetBestRoute2( NULL, 0, NULL, &dst_address, 0, &row, &best_address );
+    ret = GetBestRoute2( NULL, 0, NULL, (const SOCKADDR_INET *)dst, 0, &row, &best_address );
     if (!ret) *best_index = row.InterfaceIndex;
 
     TRACE( "returning %ld\n", ret );
@@ -1888,7 +1878,7 @@ DWORD WINAPI GetIfTable2Ex( MIB_IF_TABLE_LEVEL level, MIB_IF_TABLE2 **table )
 
     size = FIELD_OFFSET( MIB_IF_TABLE2, Table[count] );
 
-    if (!(*table = HeapAlloc( GetProcessHeap(), HEAP_ZERO_MEMORY, size )))
+    if (!(*table = heap_alloc_zero( size )))
     {
         err = ERROR_OUTOFMEMORY;
         goto err;
@@ -2304,7 +2294,7 @@ DWORD WINAPI GetIpForwardTable2( ADDRESS_FAMILY family, MIB_IPFORWARD_TABLE2 **t
     }
 
     size = FIELD_OFFSET(MIB_IPFORWARD_TABLE2, Table[ count[0] + count[1] ]);
-    *table = HeapAlloc( GetProcessHeap(), 0, size );
+    *table = heap_alloc( size );
     if (!*table)
     {
         err = ERROR_NOT_ENOUGH_MEMORY;
@@ -2521,7 +2511,7 @@ DWORD WINAPI GetIpNetTable2( ADDRESS_FAMILY family, MIB_IPNET_TABLE2 **table )
     }
 
     size = FIELD_OFFSET(MIB_IPNET_TABLE2, Table[ count[0] + count[1] ]);
-    *table = HeapAlloc( GetProcessHeap(), 0, size );
+    *table = heap_alloc( size );
     if (!*table)
     {
         err = ERROR_NOT_ENOUGH_MEMORY;
@@ -2666,8 +2656,8 @@ static DWORD get_dns_server_list( const NET_LUID *luid, IP_ADDR_STRING *list, IP
         }
         if (!err) break;
 
-        if ((char *)servers != buf) free( servers );
-        servers = malloc( array_len );
+        if ((char *)servers != buf) heap_free( servers );
+        servers = heap_alloc( array_len );
         if (!servers)
         {
             err = ERROR_NOT_ENOUGH_MEMORY;
@@ -2686,7 +2676,7 @@ static DWORD get_dns_server_list( const NET_LUID *luid, IP_ADDR_STRING *list, IP
     }
 
 err:
-    if ((char *)servers != buf) free( servers );
+    if ((char *)servers != buf) heap_free( servers );
     return err;
 }
 
@@ -3820,7 +3810,7 @@ DWORD WINAPI GetUnicastIpAddressTable(ADDRESS_FAMILY family, MIB_UNICASTIPADDRES
     }
 
     size = FIELD_OFFSET(MIB_UNICASTIPADDRESS_TABLE, Table[ count[0] + count[1] ]);
-    *table = HeapAlloc( GetProcessHeap(), 0, size );
+    *table = heap_alloc( size );
     if (!*table)
     {
         err = ERROR_NOT_ENOUGH_MEMORY;
@@ -3855,7 +3845,7 @@ DWORD WINAPI GetAnycastIpAddressTable(ADDRESS_FAMILY family, MIB_ANYCASTIPADDRES
     if (!table || (family != AF_INET && family != AF_INET6 && family != AF_UNSPEC))
         return ERROR_INVALID_PARAMETER;
 
-    *table = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(MIB_ANYCASTIPADDRESS_TABLE));
+    *table = heap_alloc_zero(sizeof(MIB_ANYCASTIPADDRESS_TABLE));
     if (!*table) return ERROR_NOT_ENOUGH_MEMORY;
     (*table)->NumEntries = 0;
     return NO_ERROR;
@@ -4204,19 +4194,6 @@ ULONG WINAPI GetPerTcpConnectionEStats(MIB_TCPROW *row, TCP_ESTATS_TYPE stats, U
     return ERROR_CALL_NOT_IMPLEMENTED;
 }
 
-/***********************************************************************
- *    GetPerTcp6ConnectionEStats (IPHLPAPI.@)
- */
-ULONG WINAPI GetPerTcp6ConnectionEStats(MIB_TCP6ROW *row, TCP_ESTATS_TYPE stats, UCHAR *rw, ULONG rw_version,
-                                        ULONG rw_size, UCHAR *ro_static, ULONG ro_static_version,
-                                        ULONG ro_static_size, UCHAR *ro_dynamic, ULONG ro_dynamic_version,
-                                        ULONG ro_dynamic_size)
-{
-    FIXME( "(%p, %d, %p, %ld, %ld, %p, %ld, %ld, %p, %ld, %ld): stub\n", row, stats, rw, rw_version, rw_size,
-           ro_static, ro_static_version, ro_static_size, ro_dynamic, ro_dynamic_version, ro_dynamic_size );
-    return ERROR_CALL_NOT_IMPLEMENTED;
-}
-
 /******************************************************************
  *    SetPerTcpConnectionEStats (IPHLPAPI.@)
  */
@@ -4228,16 +4205,6 @@ DWORD WINAPI SetPerTcpConnectionEStats(PMIB_TCPROW row, TCP_ESTATS_TYPE state, P
   return ERROR_NOT_SUPPORTED;
 }
 
-/******************************************************************
- *    SetPerTcp6ConnectionEStats (IPHLPAPI.@)
- */
-DWORD WINAPI SetPerTcp6ConnectionEStats(MIB_TCP6ROW *row, TCP_ESTATS_TYPE state, BYTE *rw,
-                                        ULONG version, ULONG size, ULONG offset)
-{
-    FIXME("(row %p, state %d, rw %p, version %lu, size %lu, offset %lu): stub\n",
-          row, state, rw, version, size, offset);
-    return ERROR_NOT_SUPPORTED;
-}
 
 /******************************************************************
  *    UnenableRouter (IPHLPAPI.@)
@@ -4694,21 +4661,21 @@ DWORD WINAPI GetIpInterfaceTable( ADDRESS_FAMILY family, MIB_IPINTERFACE_TABLE *
                                       (void **)&dyn, sizeof(*dyn), NULL, 0, &count, 0 );
         if (err)
         {
-            HeapFree( GetProcessHeap(), 0, *table );
+            heap_free( *table );
             return err;
         }
         total_count += count;
-        new_alloc = HeapAlloc( GetProcessHeap(), HEAP_ZERO_MEMORY, offsetof(MIB_IPINTERFACE_TABLE, Table[total_count]) );
+        new_alloc = heap_alloc_zero( offsetof(MIB_IPINTERFACE_TABLE, Table[total_count]) );
         if (!new_alloc)
         {
-            HeapFree( GetProcessHeap(), 0, *table );
+            heap_free( *table );
             NsiFreeTable( keys, rw, dyn, NULL );
             return ERROR_NOT_ENOUGH_MEMORY;
         }
         if (*table)
         {
             memcpy( new_alloc, *table, offsetof(MIB_IPINTERFACE_TABLE, Table[(*table)->NumEntries]) );
-            HeapFree( GetProcessHeap(), 0, *table );
+            free( *table );
         }
         *table = new_alloc;
         for (i = 0; i < count; ++i)
@@ -4747,6 +4714,7 @@ DWORD WINAPI GetIpInterfaceEntry( MIB_IPINTERFACE_ROW *row )
     fill_ip_interface_table_row( row->Family, row, &key, &rw, &dyn );
     return ERROR_SUCCESS;
 }
+
 
 static BOOL match_ip_address_with_prefix( const SOCKADDR_INET *addr, const IP_ADDRESS_PREFIX *pfx )
 {
@@ -5109,7 +5077,7 @@ static void CALLBACK icmp_apc_routine( ULONG_PTR context )
     struct icmp_apc_ctxt *ctx = (struct icmp_apc_ctxt *)context;
 
     ctx->apc_routine( ctx->apc_ctxt, &ctx->iosb, 0 );
-    free( ctx );
+    heap_free( ctx );
 }
 
 static void CALLBACK icmp_iocp_callback( DWORD error, DWORD count, OVERLAPPED *ovr )
@@ -5129,7 +5097,7 @@ static void CALLBACK icmp_iocp_callback( DWORD error, DWORD count, OVERLAPPED *o
         CloseHandle( thread );
         if (ret) return;
     }
-    free( ctx );
+    heap_free( ctx );
 }
 
 /***********************************************************************
@@ -5145,7 +5113,7 @@ BOOL WINAPI IcmpCloseHandle( HANDLE handle )
     data = (struct icmp_handle_data *)handle;
 
     CloseHandle( data->nsi_device );
-    HeapFree( GetProcessHeap(), 0, data );
+    heap_free( data );
     return TRUE;
 }
 
@@ -5154,7 +5122,7 @@ BOOL WINAPI IcmpCloseHandle( HANDLE handle )
  */
 HANDLE WINAPI IcmpCreateFile( void )
 {
-    struct icmp_handle_data *data = HeapAlloc( GetProcessHeap(), 0, sizeof(*data) );
+    struct icmp_handle_data *data = heap_alloc( sizeof(*data) );
 
     if (!data)
     {
@@ -5166,14 +5134,14 @@ HANDLE WINAPI IcmpCreateFile( void )
                                     FILE_FLAG_OVERLAPPED, NULL );
     if (data->nsi_device == INVALID_HANDLE_VALUE)
     {
-        HeapFree( GetProcessHeap(), 0, data );
+        heap_free( data );
         return INVALID_HANDLE_VALUE;
     }
     if (!BindIoCompletionCallback( data->nsi_device, icmp_iocp_callback, 0 ))
     {
         ERR( "BindIoCompletionCallback failed.\n" );
         CloseHandle( data->nsi_device );
-        HeapFree( GetProcessHeap(), 0, data );
+        heap_free( data );
         return INVALID_HANDLE_VALUE;
     }
     return (HANDLE)data;
@@ -5231,7 +5199,7 @@ static NTSTATUS icmp_send_echo( HANDLE handle, HANDLE event, PIO_APC_ROUTINE apc
 
     opt_size = opts ? (opts->OptionsSize + 3) & ~3 : 0;
     in_size = FIELD_OFFSET(struct nsiproxy_icmp_echo, data[opt_size + request_size]);
-    in = calloc( 1, in_size );
+    in = heap_alloc_zero( in_size );
 
     if (!in) return STATUS_NO_MEMORY;
 
@@ -5255,9 +5223,9 @@ static NTSTATUS icmp_send_echo( HANDLE handle, HANDLE event, PIO_APC_ROUTINE apc
 
     if (event || apc_routine)
     {
-        if (!(ctxt = malloc( sizeof(*ctxt) )))
+        if (!(ctxt = heap_alloc( sizeof(*ctxt) )))
         {
-            free( in );
+            heap_free( in );
             return STATUS_NO_MEMORY;
         }
         iosb = &ctxt->iosb;
@@ -5270,8 +5238,8 @@ static NTSTATUS icmp_send_echo( HANDLE handle, HANDLE event, PIO_APC_ROUTINE apc
             if (!DuplicateHandle( GetCurrentProcess(), GetCurrentThread(), GetCurrentProcess(),
                              &ctxt->thread, 0, FALSE, DUPLICATE_SAME_ACCESS ))
             {
-                free( ctxt );
-                free( in );
+                heap_free( ctxt );
+                heap_free( in );
                 return STATUS_NO_MEMORY;
             }
         }
@@ -5292,9 +5260,9 @@ static NTSTATUS icmp_send_echo( HANDLE handle, HANDLE event, PIO_APC_ROUTINE apc
     if (ctxt && status != STATUS_PENDING)
     {
         if (ctxt->thread) CloseHandle( ctxt->thread );
-        free( ctxt );
+        heap_free( ctxt );
     }
-    free( in );
+    heap_free( in );
     return status;
 }
 

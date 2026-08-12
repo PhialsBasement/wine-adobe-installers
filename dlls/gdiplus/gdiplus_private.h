@@ -42,7 +42,7 @@
 #define VERSION_MAGIC  0xdbc01001
 #define VERSION_MAGIC2 0xdbc01002
 #define VALID_MAGIC(x) (((x) & 0xfffff000) == 0xdbc01000)
-#define TENSION_CONST (0.333333333f)
+#define TENSION_CONST (0.3)
 
 #define GIF_DISPOSE_UNSPECIFIED 0
 #define GIF_DISPOSE_DO_NOT_DISPOSE 1
@@ -51,20 +51,6 @@
 
 #define PIXELFORMATBPP(x) ((x) ? ((x) >> 8) & 255 : 24)
 
-
-struct span
-{
-    /* Represents a horizontal span between two scanline intersections */
-    int x[2];
-    int y;
-};
-
-struct span_list
-{
-    struct span *spans;
-    size_t capacity;
-    size_t length;
-};
 
 COLORREF ARGB2COLORREF(ARGB color);
 HBITMAP ARGB2BMP(ARGB color);
@@ -163,11 +149,7 @@ extern GpStatus trace_path(GpGraphics *graphics, GpPath *path);
 typedef struct region_element region_element;
 extern void delete_element(region_element *element);
 
-extern GpStatus get_region_hrgn(struct region_element *element, const RECT *bounds, HRGN *hrgn);
-
 extern GpStatus get_hatch_data(GpHatchStyle hatchstyle, const unsigned char **result);
-
-extern GpStatus region_element_to_spans(const struct region_element *element, const RECT *bounds, struct span_list *spans);
 
 static inline INT gdip_round(REAL x)
 {
@@ -414,19 +396,6 @@ typedef enum EffectType {
 
 typedef struct CGpEffect{
     EffectType type;
-    union {
-        BYTE data[1];
-        struct BlurParams blur;
-        struct TintParams tint;
-        struct RedEyeCorrectionParams redeye;
-        ColorMatrix matrix;
-        struct ColorLUTParams lut;
-        struct BrightnessContrastParams brightness;
-        struct HueSaturationLightnessParams hue;
-        struct ColorBalanceParams balance;
-        struct LevelsParams levels;
-        struct ColorCurveParams curve;
-    } params;
 } CGpEffect;
 
 struct GpImage{

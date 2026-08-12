@@ -19,6 +19,10 @@
 #ifndef __WINE_DLLS_DDRAW_DDRAW_PRIVATE_H
 #define __WINE_DLLS_DDRAW_DDRAW_PRIVATE_H
 
+#ifdef __i386__
+#pragma GCC target ("fpmath=387")
+#endif
+
 #include <assert.h>
 #include <limits.h>
 #include <math.h>
@@ -488,12 +492,14 @@ struct d3d_material
 
     /* IDirect3DMaterial2 fields */
     struct ddraw *ddraw;
+    struct d3d_device *active_device;
+
     D3DMATERIAL mat;
     DWORD Handle;
 };
 
 /* Helper functions */
-void material_activate(struct d3d_device *device, struct d3d_material *material);
+void material_activate(struct d3d_material *material);
 struct d3d_material *d3d_material_create(struct ddraw *ddraw);
 
 enum ddraw_viewport_version

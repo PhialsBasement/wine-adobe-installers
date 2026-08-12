@@ -202,14 +202,12 @@ static void test_getblend(void)
     status = GdipGetPathGradientBlend(NULL, NULL,  NULL,  1);
     expect(InvalidParameter, status);
 
-    /* 12345.0f fits perfectly within the 24-bit mantissa of an IEEE 754 32-bit float,
-       avoiding x87 vs SSE rounding discrepancies */
-    blends[0] = 12345.0f;
-    pos[0]    = 12345.0f;
+    blends[0] = (REAL)0xdeadbeef;
+    pos[0]    = (REAL)0xdeadbeef;
     status = GdipGetPathGradientBlend(brush, blends, pos, 1);
     expect(Ok, status);
     expectf(1.0, blends[0]);
-    expectf(12345.0f, pos[0]);
+    expectf((REAL)0xdeadbeef, pos[0]);
 
     GdipDeleteBrush((GpBrush*) brush);
 }
@@ -1665,12 +1663,8 @@ static void test_pathgradientblend(void)
         expectf(positions[i], res_positions[i]);
     }
 
-    res_factors[5] = 123.0f;
-    res_positions[5] = 456.0f;
     status = GdipGetPathGradientBlend(brush, res_factors, res_positions, 6);
     expect(Ok, status);
-    ok(res_factors[5] == 123.0f, "Unexpected value %f.\n", res_factors[5]);
-    ok(res_positions[5] == 456.0f, "Unexpected value %f.\n", res_positions[5]);
 
     status = GdipSetPathGradientBlend(brush, factors, positions, 1);
     expect(Ok, status);

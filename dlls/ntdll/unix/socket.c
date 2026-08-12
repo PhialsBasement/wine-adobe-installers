@@ -68,6 +68,7 @@
 #endif
 
 #include "ntstatus.h"
+#define WIN32_NO_STATUS
 #include "windef.h"
 #include "winioctl.h"
 #define USE_WS_PREFIX
@@ -152,6 +153,8 @@ struct async_transmit_ioctl
     unsigned int tail_len;
     LARGE_INTEGER offset;
 };
+
+static int get_sock_type( HANDLE handle );
 
 static NTSTATUS sock_errno_to_status( int err )
 {
@@ -1126,6 +1129,21 @@ static NTSTATUS try_send( int fd, struct async_send_ioctl *async )
     return STATUS_SUCCESS;
 }
 
+static void hack_update_status( HANDLE handle, unsigned int *status )
+{
+    /* HACK: VRChat relies on send() reporting STATUS_SUCCESS for dropped UDP sockets when the
+     * network is actually lost but network adapters are still up on Windows. Fix VRChat internal
+     * error bug when resuming from sleep */
+    const char *appid;
+
+    if (*status == STATUS_NETWORK_UNREACHABLE && get_sock_type( handle ) == SOCK_DGRAM
+        && (appid = getenv( "SteamAppId" )) && !strcmp( appid, "438100" ))
+    {
+        WARN( "Replacing STATUS_NETWORK_UNREACHABLE with STATUS_SUCCESS for VRChat.\n" );
+        *status = STATUS_SUCCESS;
+    }
+}
+
 static BOOL async_send_proc( void *user, ULONG_PTR *info, unsigned int *status )
 {
     struct async_send_ioctl *async = user;
@@ -1141,6 +1159,7 @@ static BOOL async_send_proc( void *user, ULONG_PTR *info, unsigned int *status )
 
         *status = try_send( fd, async );
         TRACE( "got status %#x\n", *status );
+        hack_update_status( async->io.handle, status );
 
         if (needs_close) close( fd );
 
@@ -1206,6 +1225,8 @@ static NTSTATUS sock_send( HANDLE handle, HANDLE event, PIO_APC_ROUTINE apc, voi
     if (status == STATUS_ALERTED)
     {
         status = try_send( fd, async );
+        hack_update_status( handle, &status );
+
         if (status == STATUS_DEVICE_NOT_READY && ((server_flags & SERVER_SOCKET_IO_FORCE_ASYNC) || !nonblocking))
             status = STATUS_PENDING;
 
@@ -1829,16 +1850,12 @@ NTSTATUS sock_ioctl( HANDLE handle, HANDLE event, PIO_APC_ROUTINE apc, void *apc
 
         case IOCTL_AFD_WINE_COMPLETE_ASYNC:
         {
-            enum server_fd_type type;
-
             if (in_size != sizeof(NTSTATUS))
                 return STATUS_BUFFER_TOO_SMALL;
 
-            if ((status = server_get_unix_fd( handle, 0, &fd, &needs_close, &type, &options )))
+            if ((status = server_get_unix_fd( handle, 0, &fd, &needs_close, NULL, &options )))
                 return status;
             if (needs_close) close( fd );
-            if (type != FD_TYPE_SOCKET)
-                return STATUS_INVALID_DEVICE_REQUEST;
 
             status = *(NTSTATUS *)in_buffer;
             file_complete_async( handle, options, event, apc, apc_user, io, status, 0 );
@@ -2092,7 +2109,6 @@ NTSTATUS sock_ioctl( HANDLE handle, HANDLE event, PIO_APC_ROUTINE apc, void *apc
             {
                 ws_linger->l_onoff = unix_linger.l_onoff;
                 ws_linger->l_linger = unix_linger.l_linger;
-                io->Status = STATUS_SUCCESS;
                 io->Information = sizeof(*ws_linger);
             }
 
@@ -2164,7 +2180,7 @@ NTSTATUS sock_ioctl( HANDLE handle, HANDLE event, PIO_APC_ROUTINE apc, void *apc
             else
             {
                 io->Information = len;
-                io->Status = status = STATUS_SUCCESS;
+                status = STATUS_SUCCESS;
             }
             break;
         }
@@ -2381,7 +2397,7 @@ NTSTATUS sock_ioctl( HANDLE handle, HANDLE event, PIO_APC_ROUTINE apc, void *apc
             else
             {
                 io->Information = len;
-                io->Status = status = STATUS_SUCCESS;
+                status = STATUS_SUCCESS;
             }
             break;
         }
@@ -2618,7 +2634,7 @@ NTSTATUS sock_ioctl( HANDLE handle, HANDLE event, PIO_APC_ROUTINE apc, void *apc
                 ws_dev->irdaDeviceHints2 = unix_dev->hints[1];
                 ws_dev->irdaCharSet = unix_dev->charset;
             }
-            io->Status = status = STATUS_SUCCESS;
+            status = STATUS_SUCCESS;
             break;
         }
 #endif

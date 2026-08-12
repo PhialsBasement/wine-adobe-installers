@@ -1,5 +1,0 @@
-TESTDLL = windows.media.playback.backgroundmediaplayer.dll
-IMPORTS = combase
-
-SOURCES = \
-	playback.c

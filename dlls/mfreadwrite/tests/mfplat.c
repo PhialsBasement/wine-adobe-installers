@@ -89,7 +89,6 @@ struct attribute_desc
     BOOL required;
     BOOL todo;
     BOOL todo_value;
-    BOOL not_present;
 };
 
 #define ATTR_GUID(k, g, ...)      {.key = &k, .name = #k, {.vt = VT_CLSID, .puuid = (GUID *)&g}, __VA_ARGS__ }
@@ -112,10 +111,7 @@ void check_attributes_(const char *file, int line, IMFAttributes *attributes,
     {
         hr = IMFAttributes_GetItem(attributes, desc[i].key, &value);
         todo_wine_if(desc[i].todo)
-        if (desc[i].not_present)
-            ok_(file, line)(hr == MF_E_ATTRIBUTENOTFOUND, "%s present, hr %#lx\n", debugstr_a(desc[i].name), hr);
-        else
-            ok_(file, line)(hr == S_OK, "%s missing, hr %#lx\n", debugstr_a(desc[i].name), hr);
+        ok_(file, line)(hr == S_OK, "%s missing, hr %#lx\n", debugstr_a(desc[i].name), hr);
         if (hr != S_OK) continue;
 
         switch (value.vt)
@@ -164,37 +160,6 @@ static void init_attributes_(const char *file, int line, IMFAttributes *attribut
         hr = IMFAttributes_SetItem(attributes, desc[i].key, &desc[i].value);
         ok_(file, line)(hr == S_OK, "SetItem %s returned %#lx\n", debugstr_a(desc[i].name), hr);
     }
-}
-
-static IMFSample *create_sample(const BYTE *data, DWORD size)
-{
-    IMFMediaBuffer *media_buffer;
-    IMFSample *sample;
-    BYTE *buffer;
-    DWORD length;
-    HRESULT hr;
-    ULONG ret;
-
-    hr = MFCreateSample(&sample);
-    ok(hr == S_OK, "MFCreateSample returned %#lx\n", hr);
-    hr = MFCreateMemoryBuffer(size, &media_buffer);
-    ok(hr == S_OK, "MFCreateMemoryBuffer returned %#lx\n", hr);
-
-    hr = IMFMediaBuffer_Lock(media_buffer, &buffer, NULL, &length);
-    ok(hr == S_OK, "Lock returned %#lx\n", hr);
-    ok(length == 0, "Unexpected length %lu\n", length);
-    memcpy(buffer, data, size);
-    hr = IMFMediaBuffer_Unlock(media_buffer);
-    ok(hr == S_OK, "Unlock returned %#lx\n", hr);
-
-    hr = IMFMediaBuffer_SetCurrentLength(media_buffer, size);
-    ok(hr == S_OK, "SetCurrentLength returned %#lx\n", hr);
-    hr = IMFSample_AddBuffer(sample, media_buffer);
-    ok(hr == S_OK, "AddBuffer returned %#lx\n", hr);
-    ret = IMFMediaBuffer_Release(media_buffer);
-    ok(ret == 1, "Release returned %lu\n", ret);
-
-    return sample;
 }
 
 static ULONG get_refcount(void *iface)
@@ -1512,27 +1477,6 @@ static void test_source_reader_from_media_source(void)
         IMFStreamDescriptor_Release(audio_streams[i]);
 }
 
-static void test_source_reader_release(void)
-{
-    IMFByteStream *stream = get_resource_stream("test.wav");
-    IMFAttributes *attributes;
-    IMFSourceReader *reader;
-    HRESULT hr;
-    LONG ref;
-
-    hr = MFCreateAttributes(&attributes, 1);
-    ok(hr == S_OK, "failed to create IMFAttributes hr %#lx\n", hr);
-
-    hr = MFCreateSourceReaderFromByteStream(stream, attributes, &reader);
-    ok(hr == S_OK, "failed to create SourceReader hr %#lx\n", hr);
-
-    ref = IMFSourceReader_Release(reader);
-    ok(ref == 0, "got unexpected ref %lu\n", ref);
-
-    ref = IMFByteStream_Release(stream);
-    ok(ref == 0, "got unexpected ref %lu\n", ref);
-}
-
 static void test_reader_d3d9(void)
 {
     static const struct attribute_desc audio_stream_type_desc[] =
@@ -1616,25 +1560,9 @@ done:
 
 static void test_sink_writer_create(void)
 {
-    WCHAR temp_path[MAX_PATH], temp_file[MAX_PATH];
     IMFSinkWriter *writer;
-    IMFByteStream *stream;
-    IMFAttributes *attr;
     HRESULT hr;
 
-    GetTempPathW(ARRAY_SIZE(temp_path), temp_path);
-    GetTempFileNameW(temp_path, L"mf", 0, temp_file);
-    wcscat(temp_file, L".mp4");
-
-    hr = MFCreateAttributes(&attr, 1);
-    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
-    hr = IMFAttributes_SetGUID(attr, &MF_TRANSCODE_CONTAINERTYPE, &MFTranscodeContainerType_MPEG4);
-    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
-
-    hr = MFCreateTempFile(MF_ACCESSMODE_READWRITE, MF_OPENMODE_DELETE_IF_EXIST, MF_FILEFLAGS_NONE, &stream);
-    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
-
-    /* MFCreateSinkWriterFromURL. */
     hr = MFCreateSinkWriterFromURL(NULL, NULL, NULL, NULL);
     ok(hr == E_INVALIDARG, "Unexpected hr %#lx.\n", hr);
 
@@ -1643,6 +1571,35 @@ static void test_sink_writer_create(void)
     ok(hr == E_INVALIDARG, "Unexpected hr %#lx.\n", hr);
     ok(!writer, "Unexpected pointer %p.\n", writer);
 
+    hr = MFCreateSinkWriterFromMediaSink(NULL, NULL, NULL);
+    ok(hr == E_INVALIDARG, "Unexpected hr %#lx.\n", hr);
+
+    writer = (void *)0xdeadbeef;
+    hr = MFCreateSinkWriterFromMediaSink(NULL, NULL, &writer);
+    ok(hr == E_INVALIDARG, "Unexpected hr %#lx.\n", hr);
+    ok(!writer, "Unexpected pointer %p.\n", writer);
+}
+
+static void test_sink_writer_mp4(void)
+{
+    WCHAR tmp_file[MAX_PATH];
+    IMFSinkWriter *writer;
+    IMFByteStream *stream;
+    IMFAttributes *attr;
+    IMFMediaSink *sink;
+    HRESULT hr;
+
+    GetTempPathW(ARRAY_SIZE(tmp_file), tmp_file);
+    wcscat(tmp_file, L"tmp.mp4");
+
+    hr = MFCreateAttributes(&attr, 1);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+    hr = IMFAttributes_SetGUID(attr, &MF_TRANSCODE_CONTAINERTYPE, &MFTranscodeContainerType_MPEG4);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+    hr = MFCreateTempFile(MF_ACCESSMODE_READWRITE, MF_OPENMODE_DELETE_IF_EXIST, MF_FILEFLAGS_NONE, &stream);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+
+    /* Test MFCreateSinkWriterFromURL. */
     writer = (void *)0xdeadbeef;
     hr = MFCreateSinkWriterFromURL(NULL, NULL, attr, &writer);
     ok(hr == E_INVALIDARG, "Unexpected hr %#lx.\n", hr);
@@ -1655,347 +1612,40 @@ static void test_sink_writer_create(void)
 
     hr = MFCreateSinkWriterFromURL(NULL, stream, attr, &writer);
     ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
-    IMFSinkWriter_Release(writer);
-
-    hr = MFCreateSinkWriterFromURL(temp_file, NULL, NULL, &writer);
-    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
-    IMFSinkWriter_Release(writer);
-
-    hr = MFCreateSinkWriterFromURL(temp_file, NULL, attr, &writer);
-    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
-    IMFSinkWriter_Release(writer);
-
-    hr = MFCreateSinkWriterFromURL(temp_file, stream, NULL, &writer);
-    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
-    IMFSinkWriter_Release(writer);
-
-    hr = MFCreateSinkWriterFromURL(temp_file, stream, attr, &writer);
-    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
-    IMFSinkWriter_Release(writer);
-
-    /* MFCreateSinkWriterFromMediaSink. */
-    hr = MFCreateSinkWriterFromMediaSink(NULL, NULL, NULL);
-    ok(hr == E_INVALIDARG, "Unexpected hr %#lx.\n", hr);
-
-    writer = (void *)0xdeadbeef;
-    hr = MFCreateSinkWriterFromMediaSink(NULL, NULL, &writer);
-    ok(hr == E_INVALIDARG, "Unexpected hr %#lx.\n", hr);
-    ok(!writer, "Unexpected pointer %p.\n", writer);
-
-    IMFByteStream_Release(stream);
-    IMFAttributes_Release(attr);
-}
-
-static void test_sink_writer_get_object(void)
-{
-    static const struct attribute_desc video_stream_type_desc[] =
-    {
-        ATTR_GUID(MF_MT_MAJOR_TYPE, MFMediaType_Video),
-        ATTR_GUID(MF_MT_SUBTYPE, MFVideoFormat_H264),
-        ATTR_RATIO(MF_MT_FRAME_SIZE, 96, 96),
-        ATTR_RATIO(MF_MT_FRAME_RATE, 30000, 1001),
-        ATTR_UINT32(MF_MT_AVG_BITRATE, 193540),
-        ATTR_UINT32(MF_MT_INTERLACE_MODE, MFVideoInterlace_Progressive),
-        {0},
-    };
-    static const struct attribute_desc video_input_type_desc[] =
-    {
-        ATTR_GUID(MF_MT_MAJOR_TYPE, MFMediaType_Video),
-        ATTR_GUID(MF_MT_SUBTYPE, MFVideoFormat_RGB32),
-        ATTR_RATIO(MF_MT_FRAME_SIZE, 96, 96),
-        ATTR_RATIO(MF_MT_FRAME_RATE, 30000, 1001),
-        {0},
-    };
-    static const struct attribute_desc video_input_type_nv12_desc[] =
-    {
-        ATTR_GUID(MF_MT_MAJOR_TYPE, MFMediaType_Video),
-        ATTR_GUID(MF_MT_SUBTYPE, MFVideoFormat_NV12),
-        ATTR_RATIO(MF_MT_FRAME_SIZE, 96, 96),
-        ATTR_RATIO(MF_MT_FRAME_RATE, 30000, 1001),
-        {0},
-    };
-    WCHAR temp_path[MAX_PATH], temp_file[MAX_PATH];
-    IMFMediaType *stream_type, *input_type;
-    IMFSinkWriterEx *writer_ex = NULL;
-    IMFTransform *transform;
-    IMFSinkWriter *writer;
-    IMFMediaSink *sink;
-    DWORD index;
-    HRESULT hr;
-    GUID guid;
-
-    GetTempPathW(ARRAY_SIZE(temp_path), temp_path);
-    GetTempFileNameW(temp_path, L"mf", 0, temp_file);
-    wcscat(temp_file, L".mp4");
-    hr = MFCreateSinkWriterFromURL(temp_file, NULL, NULL, &writer);
-    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
-
-    hr = IMFSinkWriter_QueryInterface(writer, &IID_IMFSinkWriterEx, (void **)&writer_ex);
-    ok(hr == S_OK, "QueryInterface returned %#lx.\n", hr);
-
-    hr = MFCreateMediaType(&stream_type);
-    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
-    init_media_type(stream_type, video_stream_type_desc, -1);
-    hr = IMFSinkWriter_AddStream(writer, stream_type, &index);
-    ok(hr == S_OK, "AddStream returned %#lx.\n", hr);
-    IMFMediaType_Release(stream_type);
-
-    /* Get transform before SetInputMediaType. */
-    transform = (void *)0xdeadbeef;
-    hr = IMFSinkWriter_GetServiceForStream(writer, 0, &GUID_NULL, &IID_IMFTransform, (void **)&transform);
-    todo_wine
-    ok(hr == MF_E_UNSUPPORTED_SERVICE, "GetServiceForStream returned %#lx.\n", hr);
-    ok(!transform, "Unexpected transform %p.\n", transform);
-
-    transform = (void *)0xdeadbeef;
-    hr = IMFSinkWriterEx_GetTransformForStream(writer_ex, 0, 0, &guid, &transform);
-    ok(hr == MF_E_INVALIDINDEX, "GetTransformForStream returned %#lx.\n", hr);
-    ok(!transform, "Unexpected transform %p.\n", transform);
-
-    hr = MFCreateMediaType(&input_type);
-    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
-    init_media_type(input_type, video_input_type_desc, -1);
-    hr = IMFSinkWriter_SetInputMediaType(writer, 0, input_type, NULL);
-    ok(hr == S_OK, "SetInputMediaType returned %#lx.\n", hr);
-    IMFMediaType_Release(input_type);
-
-    /* Get transform after SetInputMediaType. */
-    hr = IMFSinkWriter_GetServiceForStream(writer, 0, &GUID_NULL, &IID_IMFTransform, (void **)&transform);
-    ok(hr == S_OK, "GetServiceForStream returned %#lx.\n", hr);
     if (hr == S_OK)
-    IMFTransform_Release(transform);
+        IMFSinkWriter_Release(writer);
 
-    hr = IMFSinkWriterEx_GetTransformForStream(writer_ex, 0, 0, &guid, &transform);
-    ok(hr == S_OK, "GetTransformForStream returned %#lx.\n", hr);
-    ok(IsEqualGUID(&guid, &MFT_CATEGORY_VIDEO_PROCESSOR), "Unexpected guid %s.\n", debugstr_guid(&guid));
-    if (hr == S_OK)
-    IMFTransform_Release(transform);
-
-    hr = IMFSinkWriterEx_GetTransformForStream(writer_ex, 0, 1, &guid, &transform);
-    ok(hr == S_OK, "GetTransformForStream returned %#lx.\n", hr);
-    ok(IsEqualGUID(&guid, &MFT_CATEGORY_VIDEO_ENCODER), "Unexpected guid %s.\n", debugstr_guid(&guid));
-    if (hr == S_OK)
-    IMFTransform_Release(transform);
-
-    transform = (void *)0xdeadbeef;
-    hr = IMFSinkWriterEx_GetTransformForStream(writer_ex, 0, 2, &guid, &transform);
-    ok(hr == MF_E_INVALIDINDEX, "GetTransformForStream returned %#lx.\n", hr);
-    ok(!transform, "Unexpected transform %p.\n", transform);
-
-    /* Get transform for writer without converter. */
-    hr = MFCreateMediaType(&input_type);
+    hr = MFCreateSinkWriterFromURL(tmp_file, NULL, NULL, &writer);
     ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
-    init_media_type(input_type, video_input_type_nv12_desc, -1);
-    hr = IMFSinkWriter_SetInputMediaType(writer, 0, input_type, NULL);
-    ok(hr == S_OK, "SetInputMediaType returned %#lx.\n", hr);
-    IMFMediaType_Release(input_type);
-
-    hr = IMFSinkWriterEx_GetTransformForStream(writer_ex, 0, 0, &guid, &transform);
-    ok(hr == S_OK, "GetTransformForStream returned %#lx.\n", hr);
-    ok(IsEqualGUID(&guid, &MFT_CATEGORY_VIDEO_ENCODER), "Unexpected guid %s.\n", debugstr_guid(&guid));
     if (hr == S_OK)
-        IMFTransform_Release(transform);
+        IMFSinkWriter_Release(writer);
 
-    hr = IMFSinkWriterEx_GetTransformForStream(writer_ex, 0, 1, &guid, &transform);
-    ok(hr == MF_E_INVALIDINDEX, "GetTransformForStream returned %#lx.\n", hr);
+    hr = MFCreateSinkWriterFromURL(tmp_file, NULL, attr, &writer);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+    if (hr == S_OK)
+        IMFSinkWriter_Release(writer);
 
-    /* Get media sink before BeginWriting. */
+    hr = MFCreateSinkWriterFromURL(tmp_file, stream, NULL, &writer);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+    if (hr == S_OK)
+        IMFSinkWriter_Release(writer);
+
+    hr = MFCreateSinkWriterFromURL(tmp_file, stream, attr, &writer);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+
+    /* Test GetServiceForStream. */
     sink = (void *)0xdeadbeef;
     hr = IMFSinkWriter_GetServiceForStream(writer, MF_SINK_WRITER_MEDIASINK,
             &GUID_NULL, &IID_IMFMediaSink, (void **)&sink);
     todo_wine
-    ok(hr == MF_E_UNSUPPORTED_SERVICE, "GetServiceForStream returned %#lx.\n", hr);
+    ok(hr == MF_E_UNSUPPORTED_SERVICE, "Unexpected hr %#lx.\n", hr);
     todo_wine
-    ok(!sink, "Unexpected sink %p.\n", sink);
+    ok(!sink, "Unexpected pointer %p.\n", sink);
 
-    hr = IMFSinkWriter_BeginWriting(writer);
-    ok(hr == S_OK, "BeginWriting returned %#lx.\n", hr);
-
-    /* Get media sink after BeginWriting. */
-    hr = IMFSinkWriter_GetServiceForStream(writer, MF_SINK_WRITER_MEDIASINK,
-            &GUID_NULL, &IID_IMFMediaSink, (void **)&sink);
-    ok(hr == S_OK, "GetServiceForStream returned %#lx.\n", hr);
-    IMFMediaSink_Release(sink);
-
-    if (writer_ex)
-    IMFSinkWriterEx_Release(writer_ex);
+    DeleteFileW(tmp_file);
     IMFSinkWriter_Release(writer);
-    DeleteFileW(temp_file);
-}
-
-static void test_sink_writer_add_stream(void)
-{
-    static const struct attribute_desc video_stream_type_desc[] =
-    {
-        ATTR_GUID(MF_MT_MAJOR_TYPE, MFMediaType_Video),
-        ATTR_GUID(MF_MT_SUBTYPE, MFVideoFormat_H264),
-        ATTR_RATIO(MF_MT_FRAME_SIZE, 96, 96),
-        ATTR_RATIO(MF_MT_FRAME_RATE, 30000, 1001),
-        ATTR_UINT32(MF_MT_AVG_BITRATE, 193540),
-        ATTR_UINT32(MF_MT_INTERLACE_MODE, MFVideoInterlace_Progressive),
-        {0},
-    };
-    static const struct attribute_desc video_input_type_desc[] =
-    {
-        ATTR_GUID(MF_MT_MAJOR_TYPE, MFMediaType_Video),
-        ATTR_GUID(MF_MT_SUBTYPE, MFVideoFormat_RGB32),
-        ATTR_RATIO(MF_MT_FRAME_SIZE, 96, 96),
-        ATTR_RATIO(MF_MT_FRAME_RATE, 30000, 1001),
-        {0},
-    };
-    WCHAR temp_path[MAX_PATH], temp_file[MAX_PATH];
-    IMFMediaType *stream_type, *input_type;
-    IMFSinkWriter *writer;
-    DWORD index;
-    HRESULT hr;
-
-    GetTempPathW(ARRAY_SIZE(temp_path), temp_path);
-    GetTempFileNameW(temp_path, L"mf", 0, temp_file);
-    wcscat(temp_file, L".mp4");
-    hr = MFCreateSinkWriterFromURL(temp_file, NULL, NULL, &writer);
-    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
-
-    /* Test AddStream. */
-    hr = MFCreateMediaType(&stream_type);
-    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
-    init_media_type(stream_type, video_stream_type_desc, -1);
-
-    hr = IMFSinkWriter_AddStream(writer, NULL, NULL);
-    ok(hr == E_INVALIDARG, "AddStream returned %#lx.\n", hr);
-
-    hr = IMFSinkWriter_AddStream(writer, stream_type, NULL);
-    ok(hr == E_POINTER, "AddStream returned %#lx.\n", hr);
-
-    index = 0xdeadbeef;
-    hr = IMFSinkWriter_AddStream(writer, NULL, &index);
-    ok(hr == E_INVALIDARG, "AddStream returned %#lx.\n", hr);
-    ok(index == 0xdeadbeef, "Unexpected index %lu.\n", index);
-
-    hr = IMFSinkWriter_AddStream(writer, stream_type, &index);
-    ok(hr == S_OK, "AddStream returned %#lx.\n", hr);
-    ok(index == 0, "Unexpected index %lu.\n", index);
-
-    IMFMediaType_Release(stream_type);
-
-    /* Test SetInputMediaType. */
-    hr = MFCreateMediaType(&input_type);
-    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
-    init_media_type(input_type, video_input_type_desc, -1);
-
-    hr = IMFSinkWriter_SetInputMediaType(writer, 0xdeadbeef, NULL, NULL);
-    ok(hr == E_INVALIDARG, "SetInputMediaType returned %#lx.\n", hr);
-
-    hr = IMFSinkWriter_SetInputMediaType(writer, 0, NULL, NULL);
-    ok(hr == E_INVALIDARG, "SetInputMediaType returned %#lx.\n", hr);
-
-    hr = IMFSinkWriter_SetInputMediaType(writer, 0xdeadbeef, input_type, NULL);
-    ok(hr == MF_E_INVALIDSTREAMNUMBER, "SetInputMediaType returned %#lx.\n", hr);
-
-    hr = IMFSinkWriter_SetInputMediaType(writer, 0, input_type, NULL);
-    ok(hr == S_OK, "SetInputMediaType returned %#lx.\n", hr);
-
-    IMFMediaType_Release(input_type);
-
-    IMFSinkWriter_Release(writer);
-    DeleteFileW(temp_file);
-}
-
-
-static void test_sink_writer_sample_process(void)
-{
-    static const struct attribute_desc video_stream_type_desc[] =
-    {
-        ATTR_GUID(MF_MT_MAJOR_TYPE, MFMediaType_Video),
-        ATTR_GUID(MF_MT_SUBTYPE, MFVideoFormat_H264),
-        ATTR_RATIO(MF_MT_FRAME_SIZE, 96, 96),
-        ATTR_RATIO(MF_MT_FRAME_RATE, 30000, 1001),
-        ATTR_UINT32(MF_MT_AVG_BITRATE, 193540),
-        ATTR_UINT32(MF_MT_INTERLACE_MODE, MFVideoInterlace_Progressive),
-        {0},
-    };
-    static const struct attribute_desc video_input_type_desc[] =
-    {
-        ATTR_GUID(MF_MT_MAJOR_TYPE, MFMediaType_Video),
-        ATTR_GUID(MF_MT_SUBTYPE, MFVideoFormat_RGB32),
-        ATTR_RATIO(MF_MT_FRAME_SIZE, 96, 96),
-        ATTR_RATIO(MF_MT_FRAME_RATE, 30000, 1001),
-        {0},
-    };
-    WCHAR temp_path[MAX_PATH], temp_file[MAX_PATH];
-    IMFMediaType *stream_type, *input_type;
-    DWORD rgb32_data[96 * 96], i, index;
-    LARGE_INTEGER file_size;
-    IMFSinkWriter *writer;
-    HANDLE file;
-    HRESULT hr;
-    BOOL ret;
-
-    GetTempPathW(ARRAY_SIZE(temp_path), temp_path);
-    GetTempFileNameW(temp_path, L"mf", 0, temp_file);
-    wcscat(temp_file, L".mp4");
-    hr = MFCreateSinkWriterFromURL(temp_file, NULL, NULL, &writer);
-    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
-
-    /* BeginWriting fails before adding stream. */
-    hr = IMFSinkWriter_BeginWriting(writer);
-    ok(hr == MF_E_INVALIDREQUEST, "BeginWriting returned %#lx.\n", hr);
-
-    hr = MFCreateMediaType(&stream_type);
-    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
-    init_media_type(stream_type, video_stream_type_desc, -1);
-    hr = IMFSinkWriter_AddStream(writer, stream_type, &index);
-    ok(hr == S_OK, "AddStream returned %#lx.\n", hr);
-    IMFMediaType_Release(stream_type);
-
-    hr = MFCreateMediaType(&input_type);
-    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
-    init_media_type(input_type, video_input_type_desc, -1);
-    hr = IMFSinkWriter_SetInputMediaType(writer, 0, input_type, NULL);
-    ok(hr == S_OK, "SetInputMediaType returned %#lx.\n", hr);
-    IMFMediaType_Release(input_type);
-
-    /* BeginWriting after adding stream. */
-    hr = IMFSinkWriter_BeginWriting(writer);
-    ok(hr == S_OK, "BeginWriting returned %#lx.\n", hr);
-    hr = IMFSinkWriter_BeginWriting(writer);
-    ok(hr == MF_E_INVALIDREQUEST, "BeginWriting returned %#lx.\n", hr);
-
-    /* WriteSample. */
-    for (i = 0; i < ARRAY_SIZE(rgb32_data); ++i)
-        rgb32_data[i] = 0x0000ff00;
-    for (i = 0; i < 30; ++i)
-    {
-        IMFSample *sample = create_sample((const BYTE *)rgb32_data, sizeof(rgb32_data));
-        hr = IMFSample_SetSampleTime(sample, 333333 * i);
-        ok(hr == S_OK, "SetSampleTime returned %#lx.\n", hr);
-        hr = IMFSample_SetSampleDuration(sample, 333333);
-        ok(hr == S_OK, "SetSampleDuration returned %#lx.\n", hr);
-        hr = IMFSinkWriter_WriteSample(writer, 0, sample);
-        ok(hr == S_OK, "WriteSample returned %#lx.\n", hr);
-        IMFSample_Release(sample);
-    }
-
-    /* Finalize. */
-    hr = IMFSinkWriter_Finalize(writer);
-    todo_wine
-    ok(hr == S_OK, "Finalize returned %#lx.\n", hr);
-    hr = IMFSinkWriter_Finalize(writer);
-    todo_wine
-    ok(hr == MF_E_INVALIDREQUEST, "Finalize returned %#lx.\n", hr);
-
-    /* Check the output file. */
-    file = CreateFileW(temp_file, GENERIC_READ, 0, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
-    todo_wine
-    ok(file != INVALID_HANDLE_VALUE, "CreateFileW failed.\n");
-    if (file != INVALID_HANDLE_VALUE)
-    {
-        ret = GetFileSizeEx(file, &file_size);
-        ok(ret, "GetFileSizeEx failed.\n");
-        ok(file_size.QuadPart > 0x400, "Unexpected file size %I64x.\n", file_size.QuadPart);
-        CloseHandle(file);
-    }
-    IMFSinkWriter_Release(writer);
-    DeleteFileW(temp_file);
+    IMFByteStream_Release(stream);
+    IMFAttributes_Release(attr);
 }
 
 static void test_interfaces(void)
@@ -2086,7 +1736,6 @@ static void test_source_reader_transforms(BOOL enable_processing, BOOL enable_ad
         ATTR_UINT32(MF_MT_ALL_SAMPLES_INDEPENDENT, 1, .todo = TRUE),
         ATTR_UINT32(MF_MT_COMPRESSED, 0, .todo = TRUE),
         ATTR_UINT32(MF_MT_INTERLACE_MODE, 2, .todo = TRUE),
-        ATTR_UINT32(MF_MT_DEFAULT_STRIDE, 96, .not_present = TRUE),
         {0},
     };
     static const struct attribute_desc yuy2_stream_type_desc[] =
@@ -2121,7 +1770,6 @@ static void test_source_reader_transforms(BOOL enable_processing, BOOL enable_ad
         ATTR_UINT32(MF_MT_ALL_SAMPLES_INDEPENDENT, 1, .todo = TRUE),
         ATTR_UINT32(MF_MT_COMPRESSED, 0, .todo = TRUE),
         ATTR_UINT32(MF_MT_INTERLACE_MODE, 2, .todo = TRUE),
-        ATTR_UINT32(MF_MT_DEFAULT_STRIDE, 96, .not_present = TRUE),
         {0},
     };
     static const struct attribute_desc rgb32_stream_type_desc[] =
@@ -2150,8 +1798,6 @@ static void test_source_reader_transforms(BOOL enable_processing, BOOL enable_ad
         ATTR_UINT32(MF_MT_ALL_SAMPLES_INDEPENDENT, 1, .todo = TRUE),
         ATTR_UINT32(MF_MT_COMPRESSED, 0, .todo = TRUE),
         ATTR_UINT32(MF_MT_INTERLACE_MODE, 2, .todo = TRUE),
-        ATTR_UINT32(MF_MT_DEFAULT_STRIDE, 96, .not_present = TRUE),
-        {0},
     };
     static const struct attribute_desc rgb32_expect_advanced_desc_todo2[] =
     {
@@ -3000,11 +2646,11 @@ static HRESULT WINAPI test_decoder_ProcessOutput(IMFTransform *iface, DWORD flag
 
         hr = IMFSample_GetBufferByIndex(data->pSample, 0, &buffer);
         ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
-        todo_wine check_interface(buffer, &IID_IMF2DBuffer2, TRUE);
-        todo_wine check_interface(buffer, &IID_IMFGetService, TRUE);
+        check_interface(buffer, &IID_IMF2DBuffer2, TRUE);
+        check_interface(buffer, &IID_IMFGetService, TRUE);
         check_interface(buffer, &IID_IMFDXGIBuffer, FALSE);
         hr = MFGetService((IUnknown *)buffer, &MR_BUFFER_SERVICE, &IID_IDirect3DSurface9, (void **)&unknown);
-        todo_wine ok(hr == E_NOTIMPL, "Unexpected hr %#lx.\n", hr);
+        ok(hr == E_NOTIMPL, "Unexpected hr %#lx.\n", hr);
         IMFMediaBuffer_Release(buffer);
     }
 
@@ -3908,12 +3554,9 @@ START_TEST(mfplat)
     test_source_reader_transform_stream_change();
     test_source_reader_transforms_d3d9();
     test_source_reader_transforms_d3d11();
-    test_source_reader_release();
     test_reader_d3d9();
     test_sink_writer_create();
-    test_sink_writer_get_object();
-    test_sink_writer_add_stream();
-    test_sink_writer_sample_process();
+    test_sink_writer_mp4();
 
     hr = MFShutdown();
     ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);

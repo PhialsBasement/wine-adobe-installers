@@ -35,7 +35,6 @@ static DWORD (WINAPI *pGetConsoleProcessList)(LPDWORD, DWORD);
 static HANDLE (WINAPI *pOpenConsoleW)(LPCWSTR,DWORD,BOOL,DWORD);
 static BOOL (WINAPI *pSetConsoleInputExeNameA)(LPCSTR);
 static BOOL (WINAPI *pVerifyConsoleIoHandle)(HANDLE handle);
-static NTSTATUS (WINAPI *pNtCompareObjects)(HANDLE,HANDLE);
 
 static BOOL skip_nt;
 
@@ -84,8 +83,6 @@ static void init_function_pointers(void)
     KERNEL32_GET_PROC(VerifyConsoleIoHandle);
 
 #undef KERNEL32_GET_PROC
-    pNtCompareObjects = (void *)GetProcAddress(GetModuleHandleA("ntdll.dll"), "NtCompareObjects");
-    if(!pNtCompareObjects) trace("GetProcAddress(hNtdll, 'NtCompareObjects') failed\n");
 }
 
 static HANDLE create_unbound_handle(BOOL output, BOOL test_status)
@@ -4127,137 +4124,12 @@ static void test_GetConsoleScreenBufferInfoEx(HANDLE std_output)
     ok(GetLastError() == 0xdeadbeef, "got %lu, expected 0xdeadbeef\n", GetLastError());
 }
 
-/* Flush events and check that there was a double-click event queued.
- * Windows may also queue focus change or mouse move events. */
-static void check_mouse_event(HANDLE handle)
+static void test_FreeConsole(void)
 {
-    BOOL ret, got_mouse_event = FALSE;
-    INPUT_RECORD ir;
-    DWORD count;
-
-    while (PeekConsoleInputW(handle, &ir, 1, &count) && count)
-    {
-        ret = ReadConsoleInputW(handle, &ir, 1, &count);
-        ok(ret == TRUE, "got error %lu\n", GetLastError());
-        ok(count == 1, "got count %lu\n", count);
-        if (ir.EventType == MOUSE_EVENT && ir.Event.MouseEvent.dwEventFlags == DOUBLE_CLICK)
-            got_mouse_event = TRUE;
-    }
-    ok(got_mouse_event, "didn't find mouse event\n");
-}
-
-static void test_unbound_handles_child(DWORD parent_pid, UINT_PTR parent_input_int, UINT_PTR parent_output_int)
-{
-    HANDLE parent_process, parent_input, parent_output, unbound_input, input, parent_event, child_event;
-    OBJECT_ATTRIBUTES attr = {sizeof(attr)};
-    IO_STATUS_BLOCK iosb;
-    UNICODE_STRING name;
-    NTSTATUS status;
-    INPUT_RECORD ir;
-    DWORD count;
-    BOOL ret;
-
-    parent_event = OpenEventA(EVENT_ALL_ACCESS, FALSE, "winetest_unbound_handles_parent");
-    child_event = OpenEventA(EVENT_ALL_ACCESS, FALSE, "winetest_unbound_handles_child");
-
-    parent_process = OpenProcess(PROCESS_DUP_HANDLE, FALSE, parent_pid);
-    ok(!!parent_process, "got error %lu\n", GetLastError());
-
-    ret = DuplicateHandle(parent_process, (HANDLE)parent_input_int,
-            GetCurrentProcess(), &parent_input, 0, FALSE, DUPLICATE_SAME_ACCESS);
-    ok(ret, "got error %lu\n", GetLastError());
-    ret = DuplicateHandle(parent_process, (HANDLE)parent_output_int,
-            GetCurrentProcess(), &parent_output, 0, FALSE, DUPLICATE_SAME_ACCESS);
-    ok(ret, "got error %lu\n", GetLastError());
-
-    ret = WaitForSingleObject(parent_input, 0);
-    ok(!ret, "got %d\n", ret);
-    ret = WaitForSingleObject(parent_output, 0);
-    ok(!ret, "got %d\n", ret);
-
-    ret = PeekConsoleInputW(parent_input, &ir, 1, &count);
-    ok(!ret, "got %d\n", ret);
-    ok(GetLastError() == ERROR_INVALID_HANDLE, "got error %lu\n", GetLastError());
-
-    /* We cannot create an unbound handle, because we have no console. */
-
-    attr.ObjectName = &name;
-    attr.Attributes = OBJ_INHERIT;
-    RtlInitUnicodeString( &name, L"\\Device\\ConDrv\\Input" );
-    status = NtCreateFile( &unbound_input, FILE_READ_DATA | FILE_WRITE_DATA | SYNCHRONIZE | FILE_READ_ATTRIBUTES |
-                           FILE_WRITE_ATTRIBUTES, &attr, &iosb, NULL, FILE_ATTRIBUTE_NORMAL,
-                           FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, FILE_CREATE,
-                           FILE_NON_DIRECTORY_FILE | FILE_SYNCHRONOUS_IO_NONALERT, NULL, 0 );
-    ok(status == STATUS_INVALID_HANDLE, "got %#lx\n", status);
-    RtlInitUnicodeString( &name, L"\\Device\\ConDrv\\Output" );
-    status = NtCreateFile( &unbound_input, FILE_READ_DATA | FILE_WRITE_DATA | SYNCHRONIZE | FILE_READ_ATTRIBUTES |
-                           FILE_WRITE_ATTRIBUTES, &attr, &iosb, NULL, FILE_ATTRIBUTE_NORMAL,
-                           FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, FILE_CREATE,
-                           FILE_NON_DIRECTORY_FILE | FILE_SYNCHRONOUS_IO_NONALERT, NULL, 0 );
-    ok(status == STATUS_INVALID_HANDLE, "got %#lx\n", status);
-
-    /* Allocate a console. */
-
-    ret = AllocConsole();
-    ok(ret == TRUE, "got error %lu\n", GetLastError());
-
-    unbound_input = create_unbound_handle(FALSE, TRUE);
-
-    input = CreateFileA("CONIN$", GENERIC_READ | GENERIC_WRITE, 0, NULL, OPEN_EXISTING, 0, 0);
-    ok(input != INVALID_HANDLE_VALUE, "got error %lu\n", GetLastError());
-
-    memset(&ir, 0, sizeof(ir));
-    ir.EventType = MOUSE_EVENT;
-    ir.Event.MouseEvent.dwEventFlags = DOUBLE_CLICK;
-    ret = WriteConsoleInputW(input, &ir, 1, &count);
-    ok(ret, "got error %lu\n", GetLastError());
-
-    ret = WaitForSingleObject(unbound_input, 0);
-    ok(!ret, "got %d\n", ret);
-
-    /* We can read from our input using the parent's handle, but its signaled
-     * state will not reflect our input. */
-
-    check_mouse_event(parent_input);
-
-    ret = WaitForSingleObject(unbound_input, 0);
-    ok(ret == WAIT_TIMEOUT, "got %d\n", ret);
-    ret = WaitForSingleObject(parent_input, 0);
-    ok(!ret, "got %d\n", ret);
-
-    CloseHandle(input);
-    ret = FreeConsole();
-    ok(ret == TRUE, "got error %lu\n", GetLastError());
-
-    ret = WaitForSingleObject(unbound_input, 0);
-    ok(ret == WAIT_TIMEOUT, "got %d\n", ret);
-    CloseHandle(unbound_input);
-
-    ret = WaitForSingleObject(parent_input, 0);
-    ok(!ret, "got %d\n", ret);
-    ret = WaitForSingleObject(parent_output, 0);
-    ok(!ret, "got %d\n", ret);
-
-    /* Parent will consume its input, designalling those handles. */
-    SetEvent(child_event);
-    ret = WaitForSingleObject(parent_event, 1000);
-    ok(!ret, "got %d\n", ret);
-
-    ret = WaitForSingleObject(parent_input, 0);
-    ok(ret == WAIT_TIMEOUT, "got %d\n", ret);
-    ret = WaitForSingleObject(parent_output, 0);
-    ok(ret == WAIT_TIMEOUT, "got %d\n", ret);
-}
-
-static void test_FreeConsole(HANDLE input, HANDLE orig_output)
-{
-    static const INPUT_RECORD ir = {.EventType = MOUSE_EVENT, .Event.MouseEvent.dwEventFlags = DOUBLE_CLICK};
-    HANDLE handle, output, parent_event, child_event, unbound_output = NULL, unbound_input = NULL, unbound_input2;
-    STARTUPINFOA si = {sizeof(si)};
-    char buf[MAX_PATH], **argv;
-    PROCESS_INFORMATION info;
+    HANDLE handle, unbound_output = NULL, unbound_input = NULL;
     DWORD size, mode, type;
     WCHAR title[16];
+    char buf[32];
     HWND hwnd;
     UINT cp;
     BOOL ret;
@@ -4271,51 +4143,6 @@ static void test_FreeConsole(HANDLE input, HANDLE orig_output)
         unbound_input  = create_unbound_handle(FALSE, TRUE);
         unbound_output = create_unbound_handle(TRUE, TRUE);
     }
-
-    output = CreateConsoleScreenBuffer(GENERIC_READ | GENERIC_WRITE,
-            FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, CONSOLE_TEXTMODE_BUFFER, NULL);
-    ok(output != INVALID_HANDLE_VALUE, "got error %lu\n", GetLastError());
-
-    ret = WriteConsoleInputW(input, &ir, 1, &size);
-    ok(ret, "got error %lu\n", GetLastError());
-
-    ret = WaitForSingleObject(output, 0);
-    ok(!ret, "got %d\n", ret);
-    ret = WaitForSingleObject(unbound_output, 0);
-    ok(!ret, "got %d\n", ret);
-    ret = WaitForSingleObject(unbound_input, 0);
-    ok(!ret, "got %d\n", ret);
-
-    parent_event = CreateEventA(NULL, FALSE, FALSE, "winetest_unbound_handles_parent");
-    child_event = CreateEventA(NULL, FALSE, FALSE, "winetest_unbound_handles_child");
-
-    winetest_get_mainargs(&argv);
-    sprintf(buf, "\"%s\" console unbound_handles %#lx %#Ix %#Ix",
-            argv[0], GetCurrentProcessId(), (UINT_PTR)unbound_input, (UINT_PTR)unbound_output);
-    ret = CreateProcessA(NULL, buf, NULL, NULL, FALSE, DETACHED_PROCESS, NULL, NULL, &si, &info);
-    ok(ret, "got error %lu\n", GetLastError());
-
-    /* Wait for child to test our handles while there's input available. */
-    ret = WaitForSingleObject(child_event, 5000);
-    ok(!ret, "got %d\n", ret);
-
-    /* Read the input. */
-    check_mouse_event(unbound_input);
-
-    ret = WaitForSingleObject(output, 0);
-    ok(ret == WAIT_TIMEOUT, "got %d\n", ret);
-    ret = WaitForSingleObject(unbound_output, 0);
-    ok(ret == WAIT_TIMEOUT, "got %d\n", ret);
-    ret = WaitForSingleObject(unbound_input, 0);
-    ok(ret == WAIT_TIMEOUT, "got %d\n", ret);
-
-    /* Test that our handles are now designaled in the child. */
-    SetEvent(parent_event);
-
-    wait_child_process(&info);
-
-    ret = WriteConsoleInputW(input, &ir, 1, &size);
-    ok(ret, "got error %lu\n", GetLastError());
 
     ret = FreeConsole();
     ok(ret, "FreeConsole failed: %lu\n", GetLastError());
@@ -4342,71 +4169,6 @@ static void test_FreeConsole(HANDLE input, HANDLE orig_output)
     ok(handle == INVALID_HANDLE_VALUE &&
        (GetLastError() == ERROR_INVALID_HANDLE || broken(GetLastError() == ERROR_FILE_NOT_FOUND /* winxp */)),
        "CreateFileA failed: %lu\n", GetLastError());
-
-    CloseHandle(input);
-    CloseHandle(orig_output);
-
-    /* In Windows 10 the handles are consistently unsignaled here.
-     * Windows 11 is weirdly inconsistent; the state seems to be very sensitive
-     * to timing, in unclear ways. */
-    ret = WaitForSingleObject(output, 0);
-    ok(!ret || ret == WAIT_TIMEOUT, "got %d\n", ret);
-    ret = WaitForSingleObject(unbound_output, 0);
-    ok(!ret || ret == WAIT_TIMEOUT, "got %d\n", ret);
-    ret = WaitForSingleObject(unbound_input, 0);
-    ok(!ret || ret == WAIT_TIMEOUT, "got %d\n", ret);
-
-    /* Create a new console.
-     *
-     * The previous unbound handles remain associated with the old console.
-     * As with the cross-process case, they can be read from, which reads from
-     * the current process's active console, but the signaled state does not
-     * reflect the current console.
-     *
-     * For some inexplicable reason, allocating the new console also causes the
-     * original orphaned handles to become signaled. */
-    ret = AllocConsole();
-    ok(ret, "got error %lu\n", GetLastError());
-
-    ret = WaitForSingleObject(output, 0);
-    todo_wine ok(!ret, "got %d\n", ret);
-    ret = WaitForSingleObject(unbound_output, 0);
-    todo_wine ok(!ret, "got %d\n", ret);
-    ret = WaitForSingleObject(unbound_input, 0);
-    todo_wine ok(!ret, "got %d\n", ret);
-
-    input = CreateFileA("CONIN$", GENERIC_READ | GENERIC_WRITE, 0, NULL, OPEN_EXISTING, 0, 0);
-    ok(input != INVALID_HANDLE_VALUE, "got error %lu\n", GetLastError());
-    ret = WriteConsoleInputW(input, &ir, 1, &size);
-    ok(ret, "got error %lu\n", GetLastError());
-
-    unbound_input2 = create_unbound_handle(FALSE, TRUE);
-
-    ret = WaitForSingleObject(unbound_input2, 0);
-    ok(!ret, "got %d\n", ret);
-
-    check_mouse_event(unbound_input);
-
-    ret = WaitForSingleObject(output, 0);
-    todo_wine ok(!ret, "got %d\n", ret);
-    ret = WaitForSingleObject(unbound_output, 0);
-    todo_wine ok(!ret, "got %d\n", ret);
-    ret = WaitForSingleObject(unbound_input, 0);
-    todo_wine ok(!ret, "got %d\n", ret);
-
-    ret = WaitForSingleObject(unbound_input2, 0);
-    ok(ret == WAIT_TIMEOUT, "got %d\n", ret);
-
-    ret = FreeConsole();
-    ok(ret, "got error %lu\n", GetLastError());
-    CloseHandle(input);
-
-    ret = WaitForSingleObject(output, 0);
-    todo_wine ok(!ret, "got %d\n", ret);
-    ret = WaitForSingleObject(unbound_output, 0);
-    todo_wine ok(!ret, "got %d\n", ret);
-    ret = WaitForSingleObject(unbound_input, 0);
-    todo_wine ok(!ret, "got %d\n", ret);
 
     handle = CreateConsoleScreenBuffer(GENERIC_READ | GENERIC_WRITE,
                                        FILE_SHARE_READ | FILE_SHARE_WRITE, NULL,
@@ -4490,7 +4252,6 @@ static void test_FreeConsole(HANDLE input, HANDLE orig_output)
 
     CloseHandle(unbound_input);
     CloseHandle(unbound_output);
-    CloseHandle(output);
 }
 
 static void test_SetConsoleScreenBufferInfoEx(HANDLE std_output)
@@ -4620,13 +4381,17 @@ static void test_GetConsoleOriginalTitle(void)
     si.lpTitle = title;
     ret = CreateProcessA(NULL, buf, NULL, NULL, TRUE, CREATE_NEW_CONSOLE, NULL, NULL, &si, &info);
     ok(ret, "CreateProcess failed: %lu\n", GetLastError());
-    wait_child_process(&info);
+    CloseHandle(info.hThread);
+    wait_child_process(info.hProcess);
+    CloseHandle(info.hProcess);
 
     strcat(buf, " empty");
     title[0] = 0;
     ret = CreateProcessA(NULL, buf, NULL, NULL, TRUE, CREATE_NEW_CONSOLE, NULL, NULL, &si, &info);
     ok(ret, "CreateProcess failed: %lu\n", GetLastError());
-    wait_child_process(&info);
+    CloseHandle(info.hThread);
+    wait_child_process(info.hProcess);
+    CloseHandle(info.hProcess);
 }
 
 static void test_GetConsoleTitleA(void)
@@ -4901,7 +4666,10 @@ static void test_AttachConsole(HANDLE console)
     sprintf(buf, "\"%s\" console attach_console %lx", argv[0], GetCurrentProcessId());
     res = CreateProcessA(NULL, buf, NULL, NULL, TRUE, 0, NULL, NULL, &si, &info);
     ok(res, "CreateProcess failed: %lu\n", GetLastError());
-    wait_child_process(&info);
+    CloseHandle(info.hThread);
+
+    wait_child_process(info.hProcess);
+    CloseHandle(info.hProcess);
 
     res = ReadConsoleOutputCharacterA(console, buf, 5, c, &len);
     ok(res, "ReadConsoleOutputCharacterA failed: %lu\n", GetLastError());
@@ -4994,7 +4762,9 @@ static void test_AllocConsole(void)
     sprintf(buf, "\"%s\" console alloc_console", argv[0]);
     res = CreateProcessA(NULL, buf, NULL, NULL, FALSE, CREATE_NEW_CONSOLE, NULL, NULL, &si, &info);
     ok(res, "CreateProcess failed: %lu\n", GetLastError());
-    wait_child_process(&info);
+    CloseHandle(info.hThread);
+    wait_child_process(info.hProcess);
+    CloseHandle(info.hProcess);
 
     res = CreatePipe(&pipe_read, &pipe_write, &inheritable_attr, 0);
     ok(res, "CreatePipe failed: %lu\n", GetLastError());
@@ -5003,7 +4773,9 @@ static void test_AllocConsole(void)
     si.hStdError = pipe_write;
     res = CreateProcessA(NULL, buf, NULL, NULL, TRUE, CREATE_NEW_CONSOLE, NULL, NULL, &si, &info);
     ok(res, "CreateProcess failed: %lu\n", GetLastError());
-    wait_child_process(&info);
+    CloseHandle(info.hThread);
+    wait_child_process(info.hProcess);
+    CloseHandle(info.hProcess);
 
     CloseHandle(pipe_read);
     CloseHandle(pipe_write);
@@ -5142,8 +4914,10 @@ static void test_pseudo_console(void)
     ret = CreateProcessA(NULL, cmdline, NULL, NULL, FALSE, EXTENDED_STARTUPINFO_PRESENT, NULL, NULL, &startup.StartupInfo, &info);
     ok(ret, "CreateProcessW failed: %lu\n", GetLastError());
 
+    CloseHandle(info.hThread);
     HeapFree(GetProcessHeap(), 0, startup.lpAttributeList);
-    wait_child_process(&info);
+    wait_child_process(info.hProcess);
+    CloseHandle(info.hProcess);
 
     pClosePseudoConsole(pseudo_console);
 }
@@ -5604,119 +5378,6 @@ static void test_CtrlHandlerSubsystem(void)
     DeleteFileA(cuiexec);
 }
 
-#define CFC_VALID_STD_HANDLE        0x01
-#define CFC_CLOSED_BY_FREECONSOLE   0x02
-#define CFC_SAME_OBJECTS            0x04
-
-static void test_child_free_console(void)
-{
-    HANDLE std, std_clone = NULL;
-    unsigned exit_code = 0;
-    DWORD dw;
-
-    std = GetStdHandle(STD_ERROR_HANDLE);
-    if (GetHandleInformation(std, &dw))
-        exit_code |= CFC_VALID_STD_HANDLE;
-    if (std && std != INVALID_HANDLE_VALUE &&
-        !DuplicateHandle(GetCurrentProcess(), std, GetCurrentProcess(), &std_clone, 0, FALSE, DUPLICATE_SAME_ACCESS))
-        exit_code |= 0xff;
-    FreeConsole();
-    if ((exit_code & CFC_VALID_STD_HANDLE) && !GetHandleInformation(std, &dw))
-    {
-        exit_code |= CFC_CLOSED_BY_FREECONSOLE;
-        SetStdHandle(STD_ERROR_HANDLE, NULL); /* so that we can grab the new std handle set by AllocConsole() */
-    }
-    AllocConsole(); /* need a new console so that the unbound handles point to something */
-
-    if (std && std != INVALID_HANDLE_VALUE && pNtCompareObjects && !pNtCompareObjects(std_clone, GetStdHandle(STD_ERROR_HANDLE)))
-        exit_code |= CFC_SAME_OBJECTS;
-
-    CloseHandle(std_clone);
-    ExitProcess(exit_code);
-}
-
-static void test_FreeConsoleStd(void)
-{
-    char buf[MAX_PATH], **argv;
-    HANDLE saved_std;
-    unsigned i;
-    BOOL ret;
-    STARTUPINFOA si = {sizeof(si)};
-    PROCESS_INFORMATION info;
-    DWORD status;
-
-    static const struct
-    {
-        DWORD cp_flags;
-        enum {with_global, with_startupinfo, with_none} with;
-        unsigned expected_bits;
-    }
-        tests[] =
-    {
-        {0,                     with_global,      CFC_VALID_STD_HANDLE},
-        {0,                     with_startupinfo, CFC_VALID_STD_HANDLE | CFC_SAME_OBJECTS},
-        {CREATE_NEW_CONSOLE,    with_global,      CFC_VALID_STD_HANDLE | CFC_CLOSED_BY_FREECONSOLE},
-        {CREATE_NEW_CONSOLE,    with_startupinfo, CFC_VALID_STD_HANDLE | CFC_SAME_OBJECTS},
-        {CREATE_NEW_CONSOLE,    with_none,        CFC_VALID_STD_HANDLE | CFC_CLOSED_BY_FREECONSOLE},
-        {DETACHED_PROCESS,      with_global,      0},
-        {DETACHED_PROCESS,      with_startupinfo, CFC_VALID_STD_HANDLE | CFC_SAME_OBJECTS},
-        {DETACHED_PROCESS,      with_none,        0},
-    };
-
-    if (!pVerifyConsoleIoHandle || skip_nt)
-    {
-        win_skip("Can't run test\n");
-        return;
-    }
-    si.hStdInput = si.hStdOutput = INVALID_HANDLE_VALUE;
-    winetest_get_mainargs(&argv);
-    for (i = 0; i < ARRAY_SIZE(tests); i++)
-    {
-        winetest_push_context("test[%u]", i);
-        sprintf(buf, "\"%s\" console free_console", argv[0]);
-        switch (tests[i].with)
-        {
-        case with_global:
-            si.dwFlags &= ~STARTF_USESTDHANDLES;
-            saved_std = GetStdHandle(STD_ERROR_HANDLE);
-            SetStdHandle(STD_ERROR_HANDLE, create_unbound_handle(TRUE, TRUE));
-            break;
-        case with_startupinfo:
-            si.dwFlags |= STARTF_USESTDHANDLES;
-            si.hStdError = create_unbound_handle(TRUE, TRUE);
-            break;
-        case with_none:
-            si.dwFlags &= ~STARTF_USESTDHANDLES;
-            break;
-        }
-
-        ret = CreateProcessA(NULL, buf, NULL, NULL, TRUE, tests[i].cp_flags, NULL, NULL, &si, &info);
-        ok(ret, "got error %lu\n", GetLastError());
-        status = WaitForSingleObject(info.hProcess, INFINITE);
-        ok(status == WAIT_OBJECT_0, "Unexpected wait status\n");
-        ret = GetExitCodeProcess(info.hProcess, &status);
-        ok(status == tests[i].expected_bits ||
-            broken(!pNtCompareObjects && status == (tests[i].expected_bits & ~CFC_SAME_OBJECTS)),
-            "Expected %x but got %lx\n", tests[i].expected_bits, status);
-        switch (tests[i].with)
-        {
-        case with_global:
-            CloseHandle(GetStdHandle(STD_ERROR_HANDLE));
-            SetStdHandle(STD_ERROR_HANDLE, saved_std);
-            break;
-        case with_startupinfo:
-            CloseHandle(si.hStdError);
-            break;
-        case with_none:
-            break;
-        }
-
-        CloseHandle(info.hProcess);
-        CloseHandle(info.hThread);
-        winetest_pop_context();
-    }
-}
-
 START_TEST(console)
 {
     HANDLE hConIn, hConOut, revert_output = NULL, unbound_output;
@@ -5809,18 +5470,6 @@ START_TEST(console)
         }
         else
             test_GetConsoleOriginalTitleW_empty();
-        return;
-    }
-
-    if (argc == 6 && !strcmp(argv[2], "unbound_handles"))
-    {
-        test_unbound_handles_child(strtoul(argv[3], NULL, 16), strtoull(argv[4], NULL, 16), strtoull(argv[5], NULL, 16));
-        return;
-    }
-
-    if (argc >= 3 && !strcmp(argv[2], "free_console"))
-    {
-        test_child_free_console();
         return;
     }
 
@@ -6013,11 +5662,10 @@ START_TEST(console)
     test_console_as_root_directory();
     if (!test_current)
     {
-        test_FreeConsoleStd();
         test_pseudo_console();
         test_AttachConsole(hConOut);
         test_AllocConsole();
-        test_FreeConsole(hConIn, hConOut);
+        test_FreeConsole();
         test_condrv_server_as_root_directory();
         test_CreateProcessCUI();
         test_CtrlHandlerSubsystem();

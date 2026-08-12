@@ -22,11 +22,16 @@
 
 #include <stdarg.h>
 
+#include "ntstatus.h"
+#define WIN32_NO_STATUS
+#include "winerror.h"
+#include "winternl.h"
 #define COBJMACROS
 #include "corerror.h"
 #include "windef.h"
 #include "winbase.h"
 #include "winstring.h"
+#include "winuser.h"
 #include "objbase.h"
 
 #include "activation.h"
@@ -34,6 +39,7 @@
 #define WIDL_using_Windows_Foundation
 #define WIDL_using_Windows_Foundation_Collections
 #define WIDL_using_Windows_Storage_Streams
+#define WIDL_using_Windows_Foundation
 #include "windows.foundation.h"
 #define WIDL_using_Windows_Globalization
 #include "windows.globalization.h"
@@ -44,7 +50,7 @@
 
 #include "wine/list.h"
 
-#include "async_private.h"
+#define SPERR_WINRT_INTERNAL_ERROR 0x800455a0
 
 /*
  *
@@ -73,8 +79,11 @@ struct vector_iids
     const GUID *view;
 };
 
-HRESULT async_action_create( IUnknown *invoker, async_operation_callback callback, IAsyncAction **out );
-HRESULT async_operation_inspectable_create( const GUID *iid, IUnknown *invoker, IUnknown *param, async_operation_callback callback,
+typedef HRESULT (*async_action_callback)( IInspectable *invoker );
+typedef HRESULT (*async_operation_inspectable_callback)( IInspectable *invoker, IInspectable **result );
+
+HRESULT async_action_create( IInspectable *invoker, async_action_callback callback, IAsyncAction **out );
+HRESULT async_operation_inspectable_create( const GUID *iid, IInspectable *invoker, async_operation_inspectable_callback callback,
                                             IAsyncOperation_IInspectable **out );
 
 HRESULT typed_event_handlers_append( struct list *list, ITypedEventHandler_IInspectable_IInspectable *handler, EventRegistrationToken *token );
@@ -125,5 +134,15 @@ HRESULT vector_inspectable_create( const struct vector_iids *iids, IVector_IInsp
     DEFINE_IINSPECTABLE_( pfx, iface_type, impl_type, impl_from_##iface_type, iface_type##_iface, &impl->base_iface )
 #define DEFINE_IINSPECTABLE_OUTER( pfx, iface_type, impl_type, outer_iface )                       \
     DEFINE_IINSPECTABLE_( pfx, iface_type, impl_type, impl_from_##iface_type, iface_type##_iface, impl->outer_iface )
+
+struct synth_provider
+{
+    struct IVoiceInformation **voices;
+    unsigned num_voices;
+    void (*dispose)(struct synth_provider *provider);
+};
+
+HRESULT voice_information_allocate(const WCHAR *display_name, const WCHAR *id, const WCHAR *locale,
+                                   VoiceGender gender, IVoiceInformation **pvoice);
 
 #endif

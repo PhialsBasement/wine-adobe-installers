@@ -29,6 +29,7 @@
 #include <sys/types.h>
 
 #include "ntstatus.h"
+#define WIN32_NO_STATUS
 #include "windef.h"
 #include "winbase.h"
 #include "winver.h"
@@ -36,10 +37,12 @@
 #include "winnls.h"
 #include "winternl.h"
 #include "winerror.h"
+#include "winreg.h"
 #include "appmodel.h"
 
 #include "kernelbase.h"
 #include "wine/debug.h"
+#include "wine/heap.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(ver);
 
@@ -158,6 +161,8 @@ static const struct
     }
 };
 
+static const WCHAR packages_key_name[] = L"Software\\Classes\\Local Settings\\Software\\Microsoft\\Windows"
+        L"\\CurrentVersion\\AppModel\\PackageRepository\\Packages";
 
 /******************************************************************************
  *  init_current_version
@@ -775,6 +780,32 @@ DWORD WINAPI GetFileVersionInfoSizeExW( DWORD flags, LPCWSTR filename, LPDWORD r
     if ((hModule = LoadLibraryExW( filename, 0, LOAD_LIBRARY_AS_IMAGE_RESOURCE )))
     {
         HRSRC hRsrc = NULL;
+
+        static const char builtin_signature[] = "Wine builtin DLL";
+        HMODULE mod = (HMODULE)((ULONG_PTR)hModule & ~(ULONG_PTR)3);
+        char *signature = (char *)((IMAGE_DOS_HEADER *)mod + 1);
+        WCHAR exe_name[MAX_PATH];
+        IMAGE_NT_HEADERS *nt;
+        DWORD exe_name_len;
+
+        if ((exe_name_len = GetModuleFileNameW( NULL, exe_name, ARRAY_SIZE(exe_name) ))
+            && ((exe_name_len >= 16
+                && (!memcmp( exe_name + exe_name_len - 16, L"vcredist_x64.exe", 16 * sizeof(*exe_name) )
+                || !memcmp( exe_name + exe_name_len - 16, L"vcredist_x86.exe", 16 * sizeof(*exe_name) )))
+                || (exe_name_len >= 17
+                && (!memcmp( exe_name + exe_name_len - 17, L"vc_redist.x64.exe", 17 * sizeof(*exe_name) )
+                || !memcmp( exe_name + exe_name_len - 17, L"vc_redist.x86.exe", 17 * sizeof(*exe_name) )
+                || !memcmp( exe_name + exe_name_len - 17, L"VC_redist.x64.exe", 17 * sizeof(*exe_name) )
+                || !memcmp( exe_name + exe_name_len - 17, L"VC_redist.x86.exe", 17 * sizeof(*exe_name) ))))
+            && (nt = RtlImageNtHeader( mod )) && (char *)nt - signature >= sizeof(builtin_signature)
+            && !memcmp( signature, builtin_signature, sizeof(builtin_signature) ))
+        {
+            ERR("HACK: not exposing version info.\n");
+            FreeLibrary( hModule );
+            SetLastError( ERROR_RESOURCE_NAME_NOT_FOUND );
+            return 0;
+        }
+
         if (!(flags & FILE_VER_GET_LOCALISED))
         {
             LANGID english = MAKELANGID( LANG_ENGLISH, SUBLANG_DEFAULT );
@@ -1068,7 +1099,6 @@ static BOOL VersionInfo16_QueryValue( const VS_VERSION_INFO_STRUCT16 *info, LPCS
 static BOOL VersionInfo32_QueryValue( const VS_VERSION_INFO_STRUCT32 *info, LPCWSTR lpSubBlock,
                                       LPVOID *lplpBuffer, UINT *puLen, BOOL *pbText )
 {
-    PVOID ptr;
     TRACE("lpSubBlock : (%s)\n", debugstr_w(lpSubBlock));
 
     while ( *lpSubBlock )
@@ -1100,11 +1130,7 @@ static BOOL VersionInfo32_QueryValue( const VS_VERSION_INFO_STRUCT32 *info, LPCW
     }
 
     /* Return value */
-    ptr = VersionInfo32_Value(info);
-    if ((PBYTE)ptr >= ((PBYTE)info + info->wLength))  /* empty value */
-        ptr = (WCHAR*)info->szKey + wcslen(info->szKey);
-
-    *lplpBuffer = ptr;
+    *lplpBuffer = VersionInfo32_Value( info );
     if (puLen)
         *puLen = info->wValueLength;
     if (pbText)
@@ -1546,14 +1572,6 @@ BOOL WINAPI GetVersionExW( OSVERSIONINFOW *info )
     return TRUE;
 }
 
-/***********************************************************************
- *         GetCurrentApplicationUserModelId   (kernelbase.@)
- */
-LONG WINAPI /* DECLSPEC_HOTPATCH */ GetCurrentApplicationUserModelId( UINT32 *length, WCHAR *id )
-{
-    FIXME( "(%p %p): stub\n", length, id );
-    return APPMODEL_ERROR_NO_APPLICATION;
-}
 
 /***********************************************************************
  *         GetCurrentPackageFamilyName   (kernelbase.@)
@@ -1623,22 +1641,6 @@ LONG WINAPI /* DECLSPEC_HOTPATCH */ GetPackageFamilyName( HANDLE process, UINT32
 }
 
 /***********************************************************************
- *         GetPackagesByPackageFamily   (kernelbase.@)
- */
-LONG WINAPI DECLSPEC_HOTPATCH GetPackagesByPackageFamily(const WCHAR *family_name, UINT32 *count,
-                                                         WCHAR *full_names, UINT32 *buffer_len, WCHAR *buffer)
-{
-    FIXME( "(%s %p %p %p %p): stub\n", debugstr_w(family_name), count, full_names, buffer_len, buffer );
-
-    if (!count || !buffer_len)
-        return ERROR_INVALID_PARAMETER;
-
-    *count = 0;
-    *buffer_len = 0;
-    return ERROR_SUCCESS;
-}
-
-/***********************************************************************
  *         GetPackagePathByFullName   (kernelbase.@)
  */
 LONG WINAPI GetPackagePathByFullName(const WCHAR *name, UINT32 *len, WCHAR *path)
@@ -1674,6 +1676,16 @@ static UINT32 processor_arch_from_string(const WCHAR *str, unsigned int len)
         if (lstrlenW(arch_names[i].name) == len && !wcsnicmp(str, arch_names[i].name, len))
             return arch_names[i].code;
     return ~0u;
+}
+
+const WCHAR *string_from_processor_arch(UINT32 code)
+{
+    unsigned int i;
+
+    for (i = 0; i < ARRAY_SIZE(arch_names); ++i)
+        if (code == arch_names[i].code)
+            return arch_names[i].name;
+    return NULL;
 }
 
 /***********************************************************************
@@ -1763,4 +1775,230 @@ LONG WINAPI PackageIdFromFullName(const WCHAR *full_name, UINT32 flags, UINT32 *
     id->publisherId[len] = 0;
 
     return ERROR_SUCCESS;
+}
+
+
+/***********************************************************************
+ *         PackageFullNameFromId   (kernelbase.@)
+ */
+LONG WINAPI PackageFullNameFromId(const PACKAGE_ID *package_id, UINT32 *length, WCHAR *full_name)
+{
+    WCHAR ver_str[5 * 4 + 3 + 1];
+    const WCHAR *arch_str;
+    UINT32 have_length;
+
+    TRACE("package_id %p, length %p, full_name %p.\n", package_id, length, full_name);
+
+    if (!package_id || !length)
+        return ERROR_INVALID_PARAMETER;
+    if (!full_name && *length)
+        return ERROR_INVALID_PARAMETER;
+    if (!package_id->name || !package_id->resourceId || !package_id->publisherId
+            || !(arch_str = string_from_processor_arch(package_id->processorArchitecture)))
+        return ERROR_INVALID_PARAMETER;
+
+    swprintf(ver_str, ARRAY_SIZE(ver_str), L"%u.%u.%u.%u", package_id->version.Major,
+            package_id->version.Minor, package_id->version.Build, package_id->version.Revision);
+    have_length = *length;
+    *length = lstrlenW(package_id->name) + 1 + lstrlenW(ver_str) + 1 + lstrlenW(arch_str) + 1
+            + lstrlenW(package_id->resourceId) + 1 + lstrlenW(package_id->publisherId) + 1;
+
+    if (have_length < *length)
+        return ERROR_INSUFFICIENT_BUFFER;
+
+    swprintf(full_name, *length, L"%s_%s_%s_%s_%s", package_id->name, ver_str, arch_str, package_id->resourceId, package_id->publisherId);
+    return ERROR_SUCCESS;
+}
+
+
+/***********************************************************************
+ *         GetPackagesByPackageFamily   (kernelbase.@)
+ */
+LONG WINAPI GetPackagesByPackageFamily(const WCHAR *family_name, UINT32 *count, WCHAR **full_names,
+        UINT32 *buffer_length, WCHAR *buffer)
+{
+    UINT32 curr_count, curr_length, package_id_buf_size, size;
+    unsigned int i, name_len, publisher_id_len;
+    DWORD subkey_count, max_key_len, length;
+    const WCHAR *publisher_id;
+    WCHAR *package_name;
+    BOOL short_buffer;
+    PACKAGE_ID *id;
+    HKEY key;
+
+    TRACE("family_name %s, count %p, full_names %p, buffer_length %p, buffer %p.\n",
+            debugstr_w(family_name), count, full_names, buffer_length, buffer);
+
+    if (!buffer_length || !count || !family_name)
+        return ERROR_INVALID_PARAMETER;
+
+    if ((*buffer_length || *count) && (!full_names || !buffer))
+        return ERROR_INVALID_PARAMETER;
+
+    if (!(publisher_id = wcschr(family_name, L'_')))
+        return ERROR_INVALID_PARAMETER;
+
+    name_len = publisher_id - family_name;
+    ++publisher_id;
+    publisher_id_len = lstrlenW(publisher_id);
+
+    if (RegOpenKeyExW(HKEY_LOCAL_MACHINE, packages_key_name, 0, KEY_READ, &key))
+    {
+        ERR("Key open failed.\n");
+        *count = 0;
+        *buffer_length = 0;
+        return ERROR_SUCCESS;
+    }
+    if (RegQueryInfoKeyW(key, NULL, NULL, NULL, &subkey_count, &max_key_len, NULL, NULL, NULL, NULL, NULL, NULL))
+    {
+        ERR("Query key info failed.\n");
+        RegCloseKey(key);
+        *count = 0;
+        *buffer_length = 0;
+        return ERROR_SUCCESS;
+    }
+
+    if (!(package_name = heap_alloc((max_key_len + 1) * sizeof(*package_name))))
+    {
+        ERR("No memory.\n");
+        RegCloseKey(key);
+        return ERROR_OUTOFMEMORY;
+    }
+
+    package_id_buf_size = sizeof(*id) + (max_key_len + 1) * sizeof(WCHAR);
+    if (!(id = heap_alloc(package_id_buf_size)))
+    {
+        ERR("No memory.\n");
+        heap_free(package_name);
+        RegCloseKey(key);
+        return ERROR_OUTOFMEMORY;
+    }
+
+    curr_count = curr_length = 0;
+    for (i = 0; i < subkey_count; ++i)
+    {
+        length = max_key_len + 1;
+        if (RegEnumKeyExW(key, i, package_name, &length, NULL, NULL, NULL, NULL))
+        {
+            ERR("Error enumerating key %u.\n", i);
+            continue;
+        }
+
+        size = package_id_buf_size;
+        if (PackageIdFromFullName(package_name, 0, &size, (BYTE *)id))
+        {
+            ERR("Error getting package id from full name.\n");
+            continue;
+        }
+
+        if (lstrlenW(id->name) != name_len)
+            continue;
+        if (wcsnicmp(family_name, id->name, name_len))
+            continue;
+
+        if (lstrlenW(id->publisherId) != publisher_id_len)
+            continue;
+        if (wcsnicmp(publisher_id, id->publisherId, publisher_id_len))
+            continue;
+        if (curr_length + length < *buffer_length)
+        {
+            memcpy(buffer + curr_length, package_name, (length + 1) * sizeof(*package_name));
+            if (curr_count < *count)
+                full_names[curr_count] = buffer + curr_length;
+        }
+        curr_length += length + 1;
+        ++curr_count;
+    }
+
+    heap_free(id);
+    heap_free(package_name);
+    RegCloseKey(key);
+
+    short_buffer = curr_length > *buffer_length || curr_count > *count;
+    *count = curr_count;
+    *buffer_length = curr_length;
+
+    return short_buffer ? ERROR_INSUFFICIENT_BUFFER : ERROR_SUCCESS;
+}
+
+
+/***********************************************************************
+ *         GetPackagePath   (kernelbase.@)
+ */
+LONG WINAPI GetPackagePath(const PACKAGE_ID *package_id, const UINT32 reserved, UINT32 *length, WCHAR *path)
+{
+    WCHAR *key_name = NULL, *expanded_path = NULL;
+    UINT32 required_length, have_length;
+    unsigned int offset;
+    HKEY key = NULL;
+    DWORD size;
+    LONG ret;
+
+    TRACE("package_id %p, reserved %u, length %p, path %p.\n", package_id, reserved, length, path);
+
+    if (!length)
+        return ERROR_INVALID_PARAMETER;
+    if (!path && *length)
+        return ERROR_INVALID_PARAMETER;
+
+    required_length = 0;
+    if ((ret = PackageFullNameFromId(package_id, &required_length, NULL)) != ERROR_INSUFFICIENT_BUFFER)
+        return ret;
+
+    offset = lstrlenW(packages_key_name) + 1;
+    if (!(key_name = heap_alloc((offset + required_length) * sizeof(WCHAR))))
+    {
+        ERR("No memory.");
+        return ERROR_OUTOFMEMORY;
+    }
+
+    if ((ret = PackageFullNameFromId(package_id, &required_length, key_name + offset)))
+        goto done;
+
+    memcpy(key_name, packages_key_name, (offset - 1) * sizeof(WCHAR));
+    key_name[offset - 1] = L'\\';
+
+    if (RegOpenKeyExW(HKEY_LOCAL_MACHINE, key_name, 0, KEY_READ, &key))
+    {
+        WARN("Key %s not found.\n", debugstr_w(key_name));
+        ret = ERROR_NOT_FOUND;
+        goto done;
+    }
+    if (RegGetValueW(key, NULL, L"Path", RRF_RT_REG_SZ, NULL, NULL, &size))
+    {
+        WARN("Path value not found in %s.\n", debugstr_w(key_name));
+        ret = ERROR_NOT_FOUND;
+        goto done;
+    }
+    if (!(expanded_path = heap_alloc(size)))
+    {
+        ERR("No memory.");
+        ret = ERROR_OUTOFMEMORY;
+        goto done;
+    }
+    if (RegGetValueW(key, NULL, L"Path", RRF_RT_REG_SZ, NULL, expanded_path, &size))
+    {
+        WARN("Could not get Path value from %s.\n", debugstr_w(key_name));
+        ret = ERROR_NOT_FOUND;
+        goto done;
+    }
+
+    have_length = *length;
+    *length = lstrlenW(expanded_path) + 1;
+    if (have_length >= *length)
+    {
+        memcpy(path, expanded_path, *length * sizeof(*path));
+        ret = ERROR_SUCCESS;
+    }
+    else
+    {
+        ret = ERROR_INSUFFICIENT_BUFFER;
+    }
+
+done:
+    if (key)
+        RegCloseKey(key);
+    heap_free(expanded_path);
+    heap_free(key_name);
+    return ret;
 }

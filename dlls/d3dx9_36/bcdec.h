@@ -92,11 +92,9 @@ BCDECDEF void bcdec_bc2(const void* compressedBlock, void* decompressedBlock, in
 BCDECDEF void bcdec_bc3(const void* compressedBlock, void* decompressedBlock, int destinationPitch);
 BCDECDEF void bcdec_bc4(const void* compressedBlock, void* decompressedBlock, int destinationPitch);
 BCDECDEF void bcdec_bc5(const void* compressedBlock, void* decompressedBlock, int destinationPitch);
-#ifdef WINE_UNUSED  /* unused for now in Wine */
 BCDECDEF void bcdec_bc6h_float(const void* compressedBlock, void* decompressedBlock, int destinationPitch, int isSigned);
 BCDECDEF void bcdec_bc6h_half(const void* compressedBlock, void* decompressedBlock, int destinationPitch, int isSigned);
 BCDECDEF void bcdec_bc7(const void* compressedBlock, void* decompressedBlock, int destinationPitch);
-#endif  /* WINE_UNUSED */
 
 #endif /* BCDEC_HEADER_INCLUDED */
 
@@ -221,8 +219,6 @@ static void bcdec__smooth_alpha_block(const void* compressedBlock, void* decompr
     }
 }
 
-#ifdef WINE_UNUSED  /* unused for now in Wine */
-
 typedef struct bcdec__bitstream {
     unsigned long long low;
     unsigned long long high;
@@ -237,7 +233,7 @@ static int bcdec__bitstream_read_bits(bcdec__bitstream_t* bstream, int numBits) 
     /* Put the low N bits of "high" into the high 64-N bits of "low". */
     bstream->low |= (bstream->high & mask) << (sizeof(bstream->high) * 8 - numBits);
     bstream->high >>= numBits;
-
+    
     return bits;
 }
 
@@ -259,7 +255,7 @@ static int bcdec__bitstream_read_bits_r(bcdec__bitstream_t* bstream, int numBits
     return result;
 }
 
-#endif  /* WINE_UNUSED */
+
 
 BCDECDEF void bcdec_bc1(const void* compressedBlock, void* decompressedBlock, int destinationPitch) {
     bcdec__color_block(compressedBlock, decompressedBlock, destinationPitch, 0);
@@ -283,8 +279,6 @@ BCDECDEF void bcdec_bc5(const void* compressedBlock, void* decompressedBlock, in
     bcdec__smooth_alpha_block(compressedBlock, decompressedBlock, destinationPitch, 2);
     bcdec__smooth_alpha_block(((char*)compressedBlock) + 8, ((char*)decompressedBlock) + 1, destinationPitch, 2);
 }
-
-#ifdef WINE_UNUSED  /* unused for now in Wine */
 
 /* http://graphics.stanford.edu/~seander/bithacks.html#VariableSignExtend */
 static int bcdec__extend_sign(int val, int bits) {
@@ -600,7 +594,7 @@ BCDECDEF void bcdec_bc6h_half(const void* compressedBlock, void* decompressedBlo
             b[3] |= bcdec__bitstream_read_bit(&bstream) << 1;       /* bz[1]   */
             b[3] |= bcdec__bitstream_read_bit(&bstream) << 2;       /* bz[2]   */
             r[3] |= bcdec__bitstream_read_bits(&bstream, 4);        /* rz[3:0] */
-            b[3] |= bcdec__bitstream_read_bit(&bstream) << 4;       /* bz[4]   */
+            b[3] |= bcdec__bitstream_read_bit(&bstream) << 4;       /* bz[4]   */ 
             b[3] |= bcdec__bitstream_read_bit(&bstream) << 3;       /* bz[3]   */
             partition = bcdec__bitstream_read_bits(&bstream, 5);    /* d[4:0]  */
             mode = 4;
@@ -1273,8 +1267,6 @@ BCDECDEF void bcdec_bc7(const void* compressedBlock, void* decompressedBlock, in
         decompressed += destinationPitch;
     }
 }
-
-#endif  /* WINE_UNUSED */
 
 #endif /* BCDEC_IMPLEMENTATION */
 

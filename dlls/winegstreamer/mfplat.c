@@ -39,10 +39,12 @@ DEFINE_GUID(DMOVideoFormat_RGB565,D3DFMT_R5G6B5,0x524f,0x11ce,0x9f,0x53,0x00,0x2
 DEFINE_GUID(DMOVideoFormat_RGB555,D3DFMT_X1R5G5B5,0x524f,0x11ce,0x9f,0x53,0x00,0x20,0xaf,0x0b,0xa7,0x70);
 DEFINE_GUID(DMOVideoFormat_RGB8,D3DFMT_P8,0x524f,0x11ce,0x9f,0x53,0x00,0x20,0xaf,0x0b,0xa7,0x70);
 DEFINE_MEDIATYPE_GUID(MFAudioFormat_RAW_AAC,WAVE_FORMAT_RAW_AAC1);
+DEFINE_MEDIATYPE_GUID(MFAudioFormat_XMAudio2, 0x0166);
 DEFINE_MEDIATYPE_GUID(MFVideoFormat_VC1S,MAKEFOURCC('V','C','1','S'));
 DEFINE_MEDIATYPE_GUID(MFVideoFormat_IV50,MAKEFOURCC('I','V','5','0'));
 DEFINE_MEDIATYPE_GUID(MFVideoFormat_ABGR32,D3DFMT_A8B8G8R8);
 DEFINE_GUID(MEDIASUBTYPE_WMV_Unknown, 0x7ce12ca9,0xbfbf,0x43d9,0x9d,0x00,0x82,0xb8,0xed,0x54,0x31,0x6b);
+DEFINE_MEDIATYPE_GUID(MFVideoFormat_theora,MAKEFOURCC('t','h','e','o'));
 
 struct class_factory
 {
@@ -120,11 +122,14 @@ static const IClassFactoryVtbl class_factory_vtbl =
     class_factory_LockServer,
 };
 
+static const GUID CLSID_GStreamerAudioDecoder = {0x480b1517, 0xc8e9, 0x4eae, {0xb0, 0x06, 0xe6, 0x30, 0x07, 0x18, 0xd8, 0x5d}};
 static const GUID CLSID_GStreamerByteStreamHandler = {0x317df618, 0x5e5a, 0x468a, {0x9f, 0x15, 0xd8, 0x27, 0xa9, 0xa0, 0x81, 0x62}};
 static const GUID CLSID_wg_video_processor = {0xd527607f,0x89cb,0x4e94,{0x95,0x71,0xbc,0xfe,0x62,0x17,0x56,0x13}};
 static const GUID CLSID_wg_aac_decoder = {0xe7889a8a,0x2083,0x4844,{0x83,0x70,0x5e,0xe3,0x49,0xb1,0x45,0x03}};
 static const GUID CLSID_wg_h264_decoder = {0x1f1e273d,0x12c0,0x4b3a,{0x8e,0x9b,0x19,0x33,0xc2,0x49,0x8a,0xea}};
 static const GUID CLSID_wg_h264_encoder = {0x6c34de69,0x4670,0x46cd,{0x8c,0xb4,0x1f,0x2f,0xa1,0xdf,0xfb,0x65}};
+
+static const GUID CLSID_GStreamerSchemePlugin = {0x587eeb6a,0x7336,0x4ebd,{0xa4,0xf2,0x91,0xc9,0x48,0xde,0x62,0x2c}};
 
 static const struct class_object
 {
@@ -134,7 +139,9 @@ static const struct class_object
 class_objects[] =
 {
     { &CLSID_wg_video_processor, &video_processor_create },
+    { &CLSID_GStreamerAudioDecoder, &audio_decoder_create },
     { &CLSID_GStreamerByteStreamHandler, &gstreamer_byte_stream_handler_create },
+    { &CLSID_GStreamerSchemePlugin, &gstreamer_scheme_handler_create },
     { &CLSID_wg_aac_decoder, &aac_decoder_create },
     { &CLSID_wg_h264_decoder, &h264_decoder_create },
     { &CLSID_wg_h264_encoder, &h264_encoder_create },
@@ -492,6 +499,10 @@ static void mf_media_type_to_wg_format_audio(IMFMediaType *type, const GUID *sub
             channel_mask = KSAUDIO_SPEAKER_MONO;
         else if (channels == 2)
             channel_mask = KSAUDIO_SPEAKER_STEREO;
+        else if (channels == 6)
+            channel_mask = KSAUDIO_SPEAKER_5POINT1;
+        else if (channels == 8)
+            channel_mask = KSAUDIO_SPEAKER_7POINT1;
         else
         {
             FIXME("Channel mask is not set.\n");
@@ -669,6 +680,7 @@ static void mf_media_type_to_wg_format_audio_wma(IMFMediaType *type, const GUID 
 {
     UINT32 rate, depth, channels, block_align, bytes_per_second, codec_data_len;
     BYTE codec_data[64];
+    bool is_xma = false;
     UINT32 version;
 
     if (FAILED(IMFMediaType_GetUINT32(type, &MF_MT_AUDIO_SAMPLES_PER_SECOND, &rate)))
@@ -710,6 +722,11 @@ static void mf_media_type_to_wg_format_audio_wma(IMFMediaType *type, const GUID 
         version = 3;
     else if (IsEqualGUID(subtype, &MFAudioFormat_WMAudio_Lossless))
         version = 4;
+    else if (IsEqualGUID(subtype, &MFAudioFormat_XMAudio2))
+    {
+        version = 2;
+        is_xma = true;
+    }
     else
     {
         assert(0);
@@ -725,6 +742,7 @@ static void mf_media_type_to_wg_format_audio_wma(IMFMediaType *type, const GUID 
     format->u.audio.block_align = block_align;
     format->u.audio.codec_data_len = codec_data_len;
     memcpy(format->u.audio.codec_data, codec_data, codec_data_len);
+    format->u.audio.is_xma = is_xma;
 }
 
 static void mf_media_type_to_wg_format_video_h264(IMFMediaType *type, struct wg_format *format)
@@ -881,7 +899,8 @@ void mf_media_type_to_wg_format(IMFMediaType *type, struct wg_format *format)
         else if (IsEqualGUID(&subtype, &MEDIASUBTYPE_MSAUDIO1) ||
                 IsEqualGUID(&subtype, &MFAudioFormat_WMAudioV8) ||
                 IsEqualGUID(&subtype, &MFAudioFormat_WMAudioV9) ||
-                IsEqualGUID(&subtype, &MFAudioFormat_WMAudio_Lossless))
+                IsEqualGUID(&subtype, &MFAudioFormat_WMAudio_Lossless) ||
+                IsEqualGUID(&subtype, &MFAudioFormat_XMAudio2))
             mf_media_type_to_wg_format_audio_wma(type, &subtype, format);
         else if (IsEqualGUID(&subtype, &MFAudioFormat_AAC) || IsEqualGUID(&subtype, &MFAudioFormat_RAW_AAC))
             mf_media_type_to_wg_format_audio_mpeg4(type, &subtype, format);

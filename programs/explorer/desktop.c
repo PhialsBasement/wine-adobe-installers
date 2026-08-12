@@ -842,7 +842,7 @@ static LRESULT WINAPI desktop_wnd_proc( HWND hwnd, UINT message, WPARAM wp, LPAR
             BeginPaint( hwnd, &ps );
             if (!using_root)
             {
-                PaintDesktop( ps.hdc );
+                if (ps.fErase) PaintDesktop( ps.hdc );
                 draw_launchers( ps.hdc, ps.rcPaint );
             }
             EndPaint( hwnd, &ps );
@@ -1193,6 +1193,78 @@ static void set_shell_window( HWND hwnd )
     SetShellWindow( hwnd );
 }
 
+static HANDLE start_tabtip_process(void)
+{
+    static const WCHAR tabtip_started_event[] = L"TABTIP_STARTED_EVENT";
+    PROCESS_INFORMATION pi;
+    STARTUPINFOW si = { sizeof(si) };
+    HANDLE wait_handles[2];
+
+    if (!CreateProcessW(L"C:\\windows\\system32\\tabtip.exe", NULL,
+                        NULL, NULL, TRUE, DETACHED_PROCESS, NULL, NULL, &si, &pi))
+    {
+        WINE_ERR("Couldn't start tabtip.exe: error %lu\n", GetLastError());
+        return FALSE;
+    }
+    CloseHandle(pi.hThread);
+
+    wait_handles[0] = CreateEventW(NULL, TRUE, FALSE, tabtip_started_event);
+    wait_handles[1] = pi.hProcess;
+
+    /* wait for the event to become available or the process to exit */
+    if ((WaitForMultipleObjects(2, wait_handles, FALSE, INFINITE)) == WAIT_OBJECT_0 + 1)
+    {
+        DWORD exit_code;
+        GetExitCodeProcess(pi.hProcess, &exit_code);
+        WINE_ERR("Unexpected termination of tabtip.exe - exit code %ld\n", exit_code);
+        CloseHandle(wait_handles[0]);
+        return pi.hProcess;
+    }
+
+    CloseHandle(wait_handles[0]);
+    return pi.hProcess;
+}
+
+static void start_xalia_process(void)
+{
+    PROCESS_INFORMATION pi;
+    STARTUPINFOW si = { sizeof(si) };
+    WCHAR use_envvar[2];
+    LPWSTR path;
+    LPCWSTR path_suffix = L"/../xalia/xalia.exe";
+    DWORD ret, buffersize;
+
+    /* check if xalia is enabled */
+    ret = GetEnvironmentVariableW(L"PROTON_USE_XALIA", use_envvar, ARRAY_SIZE(use_envvar));
+    if (!ret || (ret <= ARRAY_SIZE(use_envvar) && lstrcmpW(use_envvar, L"0") == 0))
+        return;
+
+    /* locate xalia.exe */
+    ret = GetEnvironmentVariableW(L"WINEDATADIR", NULL, 0);
+    if (ret == 0)
+        return;
+
+    buffersize = ret + lstrlenW(path_suffix);
+    path = HeapAlloc(GetProcessHeap(), 0, buffersize * sizeof(*path));
+
+    GetEnvironmentVariableW(L"WINEDATADIR", path, ret);
+    if (!memcmp(path, L"\\??\\", 8))  path[1] = '\\';  /* change \??\ into \\?\ */
+    lstrcatW(path, path_suffix);
+
+    /* setup environment */
+    SetEnvironmentVariableW(L"XALIA_WINE_SYSTEM_PROCESS", L"1");
+
+    if (!CreateProcessW(path, NULL,
+                        NULL, NULL, TRUE, DETACHED_PROCESS, NULL, NULL, &si, &pi))
+    {
+        WINE_ERR("Couldn't start xalia.exe: error %lu\n", GetLastError());
+        return;
+    }
+    CloseHandle(pi.hThread);
+    CloseHandle(pi.hProcess);
+    return;
+}
+
 /* main desktop management function */
 void manage_desktop( WCHAR *arg )
 {
@@ -1210,6 +1282,7 @@ void manage_desktop( WCHAR *arg )
     HANDLE thread;
     DWORD id;
     NTSTATUS status;
+    HANDLE tabtip = NULL;
 
     /* get the rest of the command line (if any) */
     while (*p && !is_whitespace(*p)) p++;
@@ -1326,12 +1399,24 @@ void manage_desktop( WCHAR *arg )
     /* run the desktop message loop */
     if (hwnd)
     {
+        /* FIXME: hack, run tabtip.exe on startup. */
+        tabtip = start_tabtip_process();
+
+        start_xalia_process();
+
         TRACE( "desktop message loop starting on hwnd %p\n", hwnd );
         while (GetMessageW( &msg, 0, 0, 0 )) DispatchMessageW( &msg );
         TRACE( "desktop message loop exiting for hwnd %p\n", hwnd );
     }
 
     if (pShellDDEInit) pShellDDEInit( FALSE );
+
+    if (tabtip)
+    {
+        TerminateProcess( tabtip, 0 );
+        WaitForSingleObject( tabtip, INFINITE );
+        CloseHandle( tabtip );
+    }
 
     ExitProcess( 0 );
 }

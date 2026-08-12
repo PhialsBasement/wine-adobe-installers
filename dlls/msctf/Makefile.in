@@ -3,8 +3,6 @@ IMPORTS   = uuid ole32 oleaut32 user32 advapi32
 
 EXTRADLLFLAGS = -Wb,--prefer-native
 
-VER_PRODUCTVERSION = 5,1,2600,3319
-
 SOURCES = \
 	categorymgr.c \
 	compartmentmgr.c \
@@ -16,4 +14,5 @@ SOURCES = \
 	msctf.c \
 	msctf_classes.idl \
 	range.c \
-	threadmgr.c
+	threadmgr.c \
+	version.rc

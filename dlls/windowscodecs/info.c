@@ -38,25 +38,10 @@ typedef struct {
     IWICComponentInfo IWICComponentInfo_iface;
     LONG ref;
     CLSID clsid;
-    HKEY classkey;
     struct wine_rb_entry entry;
 } ComponentInfo;
 
-static void component_info_init(ComponentInfo *object, HKEY classkey,
-        REFGUID clsid, const IWICComponentInfoVtbl *vtbl)
-{
-    object->IWICComponentInfo_iface.lpVtbl = vtbl;
-    object->ref = 1;
-    object->classkey = classkey;
-    object->clsid = *clsid;
-}
-
-static void component_info_cleanup(ComponentInfo *info)
-{
-    RegCloseKey(info->classkey);
-}
-
-static HRESULT ComponentInfo_GetStringValue(ComponentInfo *info, LPCWSTR value,
+static HRESULT ComponentInfo_GetStringValue(HKEY classkey, LPCWSTR value,
     UINT buffer_size, WCHAR *buffer, UINT *actual_size)
 {
     LONG ret;
@@ -65,7 +50,7 @@ static HRESULT ComponentInfo_GetStringValue(ComponentInfo *info, LPCWSTR value,
     if (!actual_size)
         return E_INVALIDARG;
 
-    ret = RegQueryValueExW(info->classkey, value, 0, NULL, (void *)buffer, &cbdata);
+    ret = RegQueryValueExW(classkey, value, 0, NULL, (void *)buffer, &cbdata);
 
     if (ret == ERROR_FILE_NOT_FOUND)
     {
@@ -86,7 +71,7 @@ static HRESULT ComponentInfo_GetStringValue(ComponentInfo *info, LPCWSTR value,
     return HRESULT_FROM_WIN32(ret);
 }
 
-static HRESULT ComponentInfo_GetGUIDValue(ComponentInfo *info, LPCWSTR value,
+static HRESULT ComponentInfo_GetGUIDValue(HKEY classkey, LPCWSTR value,
     GUID *result)
 {
     LONG ret;
@@ -97,7 +82,7 @@ static HRESULT ComponentInfo_GetGUIDValue(ComponentInfo *info, LPCWSTR value,
     if (!result)
         return E_INVALIDARG;
 
-    ret = RegGetValueW(info->classkey, NULL, value, RRF_RT_REG_SZ|RRF_NOEXPAND, NULL,
+    ret = RegGetValueW(classkey, NULL, value, RRF_RT_REG_SZ|RRF_NOEXPAND, NULL,
         guid_string, &cbdata);
 
     if (ret != ERROR_SUCCESS)
@@ -114,7 +99,7 @@ static HRESULT ComponentInfo_GetGUIDValue(ComponentInfo *info, LPCWSTR value,
     return hr;
 }
 
-static HRESULT ComponentInfo_GetUINTValue(ComponentInfo *info, LPCWSTR value,
+static HRESULT ComponentInfo_GetUINTValue(HKEY classkey, LPCWSTR value,
     void *result)
 {
     LONG ret;
@@ -123,7 +108,7 @@ static HRESULT ComponentInfo_GetUINTValue(ComponentInfo *info, LPCWSTR value,
     if (!result)
         return E_INVALIDARG;
 
-    ret = RegGetValueW(info->classkey, NULL, value, RRF_RT_DWORD, NULL,
+    ret = RegGetValueW(classkey, NULL, value, RRF_RT_DWORD, NULL,
         result, &cbdata);
 
     if (ret == ERROR_FILE_NOT_FOUND)
@@ -135,7 +120,7 @@ static HRESULT ComponentInfo_GetUINTValue(ComponentInfo *info, LPCWSTR value,
     return HRESULT_FROM_WIN32(ret);
 }
 
-static HRESULT ComponentInfo_GetGuidList(ComponentInfo *info, LPCWSTR subkeyname,
+static HRESULT ComponentInfo_GetGuidList(HKEY classkey, LPCWSTR subkeyname,
     UINT buffersize, GUID *buffer, UINT *actual_size)
 {
     LONG ret;
@@ -148,7 +133,7 @@ static HRESULT ComponentInfo_GetGuidList(ComponentInfo *info, LPCWSTR subkeyname
     if (!actual_size)
         return E_INVALIDARG;
 
-    ret = RegOpenKeyExW(info->classkey, subkeyname, 0, KEY_READ, &subkey);
+    ret = RegOpenKeyExW(classkey, subkeyname, 0, KEY_READ, &subkey);
     if (ret == ERROR_FILE_NOT_FOUND)
     {
         *actual_size = 0;
@@ -204,6 +189,7 @@ static HRESULT ComponentInfo_GetGuidList(ComponentInfo *info, LPCWSTR subkeyname
 
 typedef struct {
     ComponentInfo base;
+    HKEY classkey;
     WICBitmapPattern *patterns;
     UINT pattern_count;
     UINT patterns_size;
@@ -258,7 +244,7 @@ static ULONG WINAPI BitmapDecoderInfo_Release(IWICBitmapDecoderInfo *iface)
 
     if (ref == 0)
     {
-        component_info_cleanup(&This->base);
+        RegCloseKey(This->classkey);
         free(This->patterns);
         free(This);
     }
@@ -300,7 +286,7 @@ static HRESULT WINAPI BitmapDecoderInfo_GetAuthor(IWICBitmapDecoderInfo *iface, 
 
     TRACE("(%p,%u,%p,%p)\n", iface, cchAuthor, wzAuthor, pcchActual);
 
-    return ComponentInfo_GetStringValue(&This->base, L"Author", cchAuthor, wzAuthor, pcchActual);
+    return ComponentInfo_GetStringValue(This->classkey, L"Author", cchAuthor, wzAuthor, pcchActual);
 }
 
 static HRESULT WINAPI BitmapDecoderInfo_GetVendorGUID(IWICBitmapDecoderInfo *iface, GUID *pguidVendor)
@@ -309,7 +295,7 @@ static HRESULT WINAPI BitmapDecoderInfo_GetVendorGUID(IWICBitmapDecoderInfo *ifa
 
     TRACE("(%p,%p)\n", iface, pguidVendor);
 
-    return ComponentInfo_GetGUIDValue(&This->base, L"Vendor", pguidVendor);
+    return ComponentInfo_GetGUIDValue(This->classkey, L"Vendor", pguidVendor);
 }
 
 static HRESULT WINAPI BitmapDecoderInfo_GetVersion(IWICBitmapDecoderInfo *iface, UINT cchVersion,
@@ -319,7 +305,7 @@ static HRESULT WINAPI BitmapDecoderInfo_GetVersion(IWICBitmapDecoderInfo *iface,
 
     TRACE("(%p,%u,%p,%p)\n", iface, cchVersion, wzVersion, pcchActual);
 
-    return ComponentInfo_GetStringValue(&This->base, L"Version",
+    return ComponentInfo_GetStringValue(This->classkey, L"Version",
         cchVersion, wzVersion, pcchActual);
 }
 
@@ -330,7 +316,7 @@ static HRESULT WINAPI BitmapDecoderInfo_GetSpecVersion(IWICBitmapDecoderInfo *if
 
     TRACE("(%p,%u,%p,%p)\n", iface, cchSpecVersion, wzSpecVersion, pcchActual);
 
-    return ComponentInfo_GetStringValue(&This->base, L"SpecVersion",
+    return ComponentInfo_GetStringValue(This->classkey, L"SpecVersion",
         cchSpecVersion, wzSpecVersion, pcchActual);
 }
 
@@ -341,7 +327,7 @@ static HRESULT WINAPI BitmapDecoderInfo_GetFriendlyName(IWICBitmapDecoderInfo *i
 
     TRACE("(%p,%u,%p,%p)\n", iface, cchFriendlyName, wzFriendlyName, pcchActual);
 
-    return ComponentInfo_GetStringValue(&This->base, L"FriendlyName",
+    return ComponentInfo_GetStringValue(This->classkey, L"FriendlyName",
         cchFriendlyName, wzFriendlyName, pcchActual);
 }
 
@@ -350,7 +336,7 @@ static HRESULT WINAPI BitmapDecoderInfo_GetContainerFormat(IWICBitmapDecoderInfo
 {
     BitmapDecoderInfo *This = impl_from_IWICBitmapDecoderInfo(iface);
     TRACE("(%p,%p)\n", iface, pguidContainerFormat);
-    return ComponentInfo_GetGUIDValue(&This->base, L"ContainerFormat", pguidContainerFormat);
+    return ComponentInfo_GetGUIDValue(This->classkey, L"ContainerFormat", pguidContainerFormat);
 }
 
 static HRESULT WINAPI BitmapDecoderInfo_GetPixelFormats(IWICBitmapDecoderInfo *iface,
@@ -358,7 +344,7 @@ static HRESULT WINAPI BitmapDecoderInfo_GetPixelFormats(IWICBitmapDecoderInfo *i
 {
     BitmapDecoderInfo *This = impl_from_IWICBitmapDecoderInfo(iface);
     TRACE("(%p,%u,%p,%p)\n", iface, cFormats, pguidPixelFormats, pcActual);
-    return ComponentInfo_GetGuidList(&This->base, L"Formats", cFormats, pguidPixelFormats, pcActual);
+    return ComponentInfo_GetGuidList(This->classkey, L"Formats", cFormats, pguidPixelFormats, pcActual);
 }
 
 static HRESULT WINAPI BitmapDecoderInfo_GetColorManagementVersion(IWICBitmapDecoderInfo *iface,
@@ -389,7 +375,7 @@ static HRESULT WINAPI BitmapDecoderInfo_GetMimeTypes(IWICBitmapDecoderInfo *ifac
 
     TRACE("(%p,%u,%p,%p)\n", iface, cchMimeTypes, wzMimeTypes, pcchActual);
 
-    return ComponentInfo_GetStringValue(&This->base, L"MimeTypes",
+    return ComponentInfo_GetStringValue(This->classkey, L"MimeTypes",
         cchMimeTypes, wzMimeTypes, pcchActual);
 }
 
@@ -400,7 +386,7 @@ static HRESULT WINAPI BitmapDecoderInfo_GetFileExtensions(IWICBitmapDecoderInfo 
 
     TRACE("(%p,%u,%p,%p)\n", iface, cchFileExtensions, wzFileExtensions, pcchActual);
 
-    return ComponentInfo_GetStringValue(&This->base, L"FileExtensions",
+    return ComponentInfo_GetStringValue(This->classkey, L"FileExtensions",
         cchFileExtensions, wzFileExtensions, pcchActual);
 }
 
@@ -574,7 +560,7 @@ static void read_bitmap_patterns(BitmapDecoderInfo *info)
     BYTE *patterns_ptr;
     DWORD length, valuesize;
 
-    res = RegOpenKeyExW(info->base.classkey, L"Patterns", 0, KEY_READ, &patternskey);
+    res = RegOpenKeyExW(info->classkey, L"Patterns", 0, KEY_READ, &patternskey);
     if (res != ERROR_SUCCESS) return;
 
     res = RegQueryInfoKeyW(patternskey, NULL, NULL, NULL, &pattern_count, NULL, NULL, NULL, NULL, NULL, NULL, NULL);
@@ -672,9 +658,15 @@ static HRESULT BitmapDecoderInfo_Constructor(HKEY classkey, REFCLSID clsid, Comp
 
     This = calloc(1, sizeof(BitmapDecoderInfo));
     if (!This)
+    {
+        RegCloseKey(classkey);
         return E_OUTOFMEMORY;
+    }
 
-    component_info_init(&This->base, classkey, clsid, (const IWICComponentInfoVtbl *)&BitmapDecoderInfo_Vtbl);
+    This->base.IWICComponentInfo_iface.lpVtbl = (const IWICComponentInfoVtbl*)&BitmapDecoderInfo_Vtbl;
+    This->base.ref = 1;
+    This->classkey = classkey;
+    This->base.clsid = *clsid;
 
     read_bitmap_patterns(This);
 
@@ -684,6 +676,7 @@ static HRESULT BitmapDecoderInfo_Constructor(HKEY classkey, REFCLSID clsid, Comp
 
 typedef struct {
     ComponentInfo base;
+    HKEY classkey;
 } BitmapEncoderInfo;
 
 static inline BitmapEncoderInfo *impl_from_IWICBitmapEncoderInfo(IWICBitmapEncoderInfo *iface)
@@ -735,7 +728,7 @@ static ULONG WINAPI BitmapEncoderInfo_Release(IWICBitmapEncoderInfo *iface)
 
     if (ref == 0)
     {
-        component_info_cleanup(&This->base);
+        RegCloseKey(This->classkey);
         free(This);
     }
 
@@ -776,7 +769,7 @@ static HRESULT WINAPI BitmapEncoderInfo_GetAuthor(IWICBitmapEncoderInfo *iface, 
 
     TRACE("(%p,%u,%p,%p)\n", iface, cchAuthor, wzAuthor, pcchActual);
 
-    return ComponentInfo_GetStringValue(&This->base, L"Author", cchAuthor, wzAuthor, pcchActual);
+    return ComponentInfo_GetStringValue(This->classkey, L"Author", cchAuthor, wzAuthor, pcchActual);
 }
 
 static HRESULT WINAPI BitmapEncoderInfo_GetVendorGUID(IWICBitmapEncoderInfo *iface, GUID *pguidVendor)
@@ -785,7 +778,7 @@ static HRESULT WINAPI BitmapEncoderInfo_GetVendorGUID(IWICBitmapEncoderInfo *ifa
 
     TRACE("(%p,%p)\n", iface, pguidVendor);
 
-    return ComponentInfo_GetGUIDValue(&This->base, L"Vendor", pguidVendor);
+    return ComponentInfo_GetGUIDValue(This->classkey, L"Vendor", pguidVendor);
 }
 
 static HRESULT WINAPI BitmapEncoderInfo_GetVersion(IWICBitmapEncoderInfo *iface, UINT cchVersion,
@@ -795,7 +788,7 @@ static HRESULT WINAPI BitmapEncoderInfo_GetVersion(IWICBitmapEncoderInfo *iface,
 
     TRACE("(%p,%u,%p,%p)\n", iface, cchVersion, wzVersion, pcchActual);
 
-    return ComponentInfo_GetStringValue(&This->base, L"Version",
+    return ComponentInfo_GetStringValue(This->classkey, L"Version",
         cchVersion, wzVersion, pcchActual);
 }
 
@@ -806,7 +799,7 @@ static HRESULT WINAPI BitmapEncoderInfo_GetSpecVersion(IWICBitmapEncoderInfo *if
 
     TRACE("(%p,%u,%p,%p)\n", iface, cchSpecVersion, wzSpecVersion, pcchActual);
 
-    return ComponentInfo_GetStringValue(&This->base, L"SpecVersion",
+    return ComponentInfo_GetStringValue(This->classkey, L"SpecVersion",
         cchSpecVersion, wzSpecVersion, pcchActual);
 }
 
@@ -817,7 +810,7 @@ static HRESULT WINAPI BitmapEncoderInfo_GetFriendlyName(IWICBitmapEncoderInfo *i
 
     TRACE("(%p,%u,%p,%p)\n", iface, cchFriendlyName, wzFriendlyName, pcchActual);
 
-    return ComponentInfo_GetStringValue(&This->base, L"FriendlyName",
+    return ComponentInfo_GetStringValue(This->classkey, L"FriendlyName",
         cchFriendlyName, wzFriendlyName, pcchActual);
 }
 
@@ -826,7 +819,7 @@ static HRESULT WINAPI BitmapEncoderInfo_GetContainerFormat(IWICBitmapEncoderInfo
 {
     BitmapEncoderInfo *This = impl_from_IWICBitmapEncoderInfo(iface);
     TRACE("(%p,%p)\n", iface, pguidContainerFormat);
-    return ComponentInfo_GetGUIDValue(&This->base, L"ContainerFormat", pguidContainerFormat);
+    return ComponentInfo_GetGUIDValue(This->classkey, L"ContainerFormat", pguidContainerFormat);
 }
 
 static HRESULT WINAPI BitmapEncoderInfo_GetPixelFormats(IWICBitmapEncoderInfo *iface,
@@ -834,7 +827,7 @@ static HRESULT WINAPI BitmapEncoderInfo_GetPixelFormats(IWICBitmapEncoderInfo *i
 {
     BitmapEncoderInfo *This = impl_from_IWICBitmapEncoderInfo(iface);
     TRACE("(%p,%u,%p,%p)\n", iface, cFormats, pguidPixelFormats, pcActual);
-    return ComponentInfo_GetGuidList(&This->base, L"Formats", cFormats, pguidPixelFormats, pcActual);
+    return ComponentInfo_GetGuidList(This->classkey, L"Formats", cFormats, pguidPixelFormats, pcActual);
 }
 
 static HRESULT WINAPI BitmapEncoderInfo_GetColorManagementVersion(IWICBitmapEncoderInfo *iface,
@@ -865,7 +858,7 @@ static HRESULT WINAPI BitmapEncoderInfo_GetMimeTypes(IWICBitmapEncoderInfo *ifac
 
     TRACE("(%p,%u,%p,%p)\n", iface, cchMimeTypes, wzMimeTypes, pcchActual);
 
-    return ComponentInfo_GetStringValue(&This->base, L"MimeTypes",
+    return ComponentInfo_GetStringValue(This->classkey, L"MimeTypes",
         cchMimeTypes, wzMimeTypes, pcchActual);
 }
 
@@ -876,7 +869,7 @@ static HRESULT WINAPI BitmapEncoderInfo_GetFileExtensions(IWICBitmapEncoderInfo 
 
     TRACE("(%p,%u,%p,%p)\n", iface, cchFileExtensions, wzFileExtensions, pcchActual);
 
-    return ComponentInfo_GetStringValue(&This->base, L"FileExtensions",
+    return ComponentInfo_GetStringValue(This->classkey, L"FileExtensions",
         cchFileExtensions, wzFileExtensions, pcchActual);
 }
 
@@ -958,9 +951,15 @@ static HRESULT BitmapEncoderInfo_Constructor(HKEY classkey, REFCLSID clsid, Comp
 
     This = malloc(sizeof(BitmapEncoderInfo));
     if (!This)
+    {
+        RegCloseKey(classkey);
         return E_OUTOFMEMORY;
+    }
 
-    component_info_init(&This->base, classkey, clsid, (const IWICComponentInfoVtbl *)&BitmapEncoderInfo_Vtbl);
+    This->base.IWICComponentInfo_iface.lpVtbl = (const IWICComponentInfoVtbl*)&BitmapEncoderInfo_Vtbl;
+    This->base.ref = 1;
+    This->classkey = classkey;
+    This->base.clsid = *clsid;
 
     *ret = &This->base;
     return S_OK;
@@ -968,6 +967,7 @@ static HRESULT BitmapEncoderInfo_Constructor(HKEY classkey, REFCLSID clsid, Comp
 
 typedef struct {
     ComponentInfo base;
+    HKEY classkey;
 } FormatConverterInfo;
 
 static inline FormatConverterInfo *impl_from_IWICFormatConverterInfo(IWICFormatConverterInfo *iface)
@@ -1018,7 +1018,7 @@ static ULONG WINAPI FormatConverterInfo_Release(IWICFormatConverterInfo *iface)
 
     if (ref == 0)
     {
-        component_info_cleanup(&This->base);
+        RegCloseKey(This->classkey);
         free(This);
     }
 
@@ -1059,7 +1059,7 @@ static HRESULT WINAPI FormatConverterInfo_GetAuthor(IWICFormatConverterInfo *ifa
 
     TRACE("(%p,%u,%p,%p)\n", iface, cchAuthor, wzAuthor, pcchActual);
 
-    return ComponentInfo_GetStringValue(&This->base, L"Author", cchAuthor, wzAuthor, pcchActual);
+    return ComponentInfo_GetStringValue(This->classkey, L"Author", cchAuthor, wzAuthor, pcchActual);
 }
 
 static HRESULT WINAPI FormatConverterInfo_GetVendorGUID(IWICFormatConverterInfo *iface, GUID *pguidVendor)
@@ -1068,7 +1068,7 @@ static HRESULT WINAPI FormatConverterInfo_GetVendorGUID(IWICFormatConverterInfo 
 
     TRACE("(%p,%p)\n", iface, pguidVendor);
 
-    return ComponentInfo_GetGUIDValue(&This->base, L"Vendor", pguidVendor);
+    return ComponentInfo_GetGUIDValue(This->classkey, L"Vendor", pguidVendor);
 }
 
 static HRESULT WINAPI FormatConverterInfo_GetVersion(IWICFormatConverterInfo *iface, UINT cchVersion,
@@ -1078,7 +1078,7 @@ static HRESULT WINAPI FormatConverterInfo_GetVersion(IWICFormatConverterInfo *if
 
     TRACE("(%p,%u,%p,%p)\n", iface, cchVersion, wzVersion, pcchActual);
 
-    return ComponentInfo_GetStringValue(&This->base, L"Version",
+    return ComponentInfo_GetStringValue(This->classkey, L"Version",
         cchVersion, wzVersion, pcchActual);
 }
 
@@ -1089,7 +1089,7 @@ static HRESULT WINAPI FormatConverterInfo_GetSpecVersion(IWICFormatConverterInfo
 
     TRACE("(%p,%u,%p,%p)\n", iface, cchSpecVersion, wzSpecVersion, pcchActual);
 
-    return ComponentInfo_GetStringValue(&This->base, L"SpecVersion",
+    return ComponentInfo_GetStringValue(This->classkey, L"SpecVersion",
         cchSpecVersion, wzSpecVersion, pcchActual);
 }
 
@@ -1100,7 +1100,7 @@ static HRESULT WINAPI FormatConverterInfo_GetFriendlyName(IWICFormatConverterInf
 
     TRACE("(%p,%u,%p,%p)\n", iface, cchFriendlyName, wzFriendlyName, pcchActual);
 
-    return ComponentInfo_GetStringValue(&This->base, L"FriendlyName",
+    return ComponentInfo_GetStringValue(This->classkey, L"FriendlyName",
         cchFriendlyName, wzFriendlyName, pcchActual);
 }
 
@@ -1131,7 +1131,7 @@ static BOOL ConverterSupportsFormat(IWICFormatConverterInfo *iface, const WCHAR 
     /* Avoid testing using IWICFormatConverter_GetPixelFormats because that
         would be O(n). A registry test should do better. */
 
-    res = RegOpenKeyExW(This->base.classkey, L"PixelFormats", 0, KEY_READ, &formats_key);
+    res = RegOpenKeyExW(This->classkey, L"PixelFormats", 0, KEY_READ, &formats_key);
     if (res != ERROR_SUCCESS) return FALSE;
 
     res = RegOpenKeyExW(formats_key, formatguid, 0, KEY_READ, &guid_key);
@@ -1164,9 +1164,15 @@ static HRESULT FormatConverterInfo_Constructor(HKEY classkey, REFCLSID clsid, Co
 
     This = malloc(sizeof(FormatConverterInfo));
     if (!This)
+    {
+        RegCloseKey(classkey);
         return E_OUTOFMEMORY;
+    }
 
-    component_info_init(&This->base, classkey, clsid, (const IWICComponentInfoVtbl *)&FormatConverterInfo_Vtbl);
+    This->base.IWICComponentInfo_iface.lpVtbl = (const IWICComponentInfoVtbl*)&FormatConverterInfo_Vtbl;
+    This->base.ref = 1;
+    This->classkey = classkey;
+    This->base.clsid = *clsid;
 
     *ret = &This->base;
     return S_OK;
@@ -1174,6 +1180,7 @@ static HRESULT FormatConverterInfo_Constructor(HKEY classkey, REFCLSID clsid, Co
 
 typedef struct {
     ComponentInfo base;
+    HKEY classkey;
 } PixelFormatInfo;
 
 static inline PixelFormatInfo *impl_from_IWICPixelFormatInfo2(IWICPixelFormatInfo2 *iface)
@@ -1225,7 +1232,7 @@ static ULONG WINAPI PixelFormatInfo_Release(IWICPixelFormatInfo2 *iface)
 
     if (ref == 0)
     {
-        component_info_cleanup(&This->base);
+        RegCloseKey(This->classkey);
         free(This);
     }
 
@@ -1273,7 +1280,7 @@ static HRESULT WINAPI PixelFormatInfo_GetAuthor(IWICPixelFormatInfo2 *iface, UIN
 
     TRACE("(%p,%u,%p,%p)\n", iface, cchAuthor, wzAuthor, pcchActual);
 
-    return ComponentInfo_GetStringValue(&This->base, L"Author", cchAuthor, wzAuthor, pcchActual);
+    return ComponentInfo_GetStringValue(This->classkey, L"Author", cchAuthor, wzAuthor, pcchActual);
 }
 
 static HRESULT WINAPI PixelFormatInfo_GetVendorGUID(IWICPixelFormatInfo2 *iface, GUID *pguidVendor)
@@ -1282,7 +1289,7 @@ static HRESULT WINAPI PixelFormatInfo_GetVendorGUID(IWICPixelFormatInfo2 *iface,
 
     TRACE("(%p,%p)\n", iface, pguidVendor);
 
-    return ComponentInfo_GetGUIDValue(&This->base, L"Vendor", pguidVendor);
+    return ComponentInfo_GetGUIDValue(This->classkey, L"Vendor", pguidVendor);
 }
 
 static HRESULT WINAPI PixelFormatInfo_GetVersion(IWICPixelFormatInfo2 *iface, UINT cchVersion,
@@ -1292,7 +1299,7 @@ static HRESULT WINAPI PixelFormatInfo_GetVersion(IWICPixelFormatInfo2 *iface, UI
 
     TRACE("(%p,%u,%p,%p)\n", iface, cchVersion, wzVersion, pcchActual);
 
-    return ComponentInfo_GetStringValue(&This->base, L"Version",
+    return ComponentInfo_GetStringValue(This->classkey, L"Version",
         cchVersion, wzVersion, pcchActual);
 }
 
@@ -1303,7 +1310,7 @@ static HRESULT WINAPI PixelFormatInfo_GetSpecVersion(IWICPixelFormatInfo2 *iface
 
     TRACE("(%p,%u,%p,%p)\n", iface, cchSpecVersion, wzSpecVersion, pcchActual);
 
-    return ComponentInfo_GetStringValue(&This->base, L"SpecVersion",
+    return ComponentInfo_GetStringValue(This->classkey, L"SpecVersion",
         cchSpecVersion, wzSpecVersion, pcchActual);
 }
 
@@ -1314,7 +1321,7 @@ static HRESULT WINAPI PixelFormatInfo_GetFriendlyName(IWICPixelFormatInfo2 *ifac
 
     TRACE("(%p,%u,%p,%p)\n", iface, cchFriendlyName, wzFriendlyName, pcchActual);
 
-    return ComponentInfo_GetStringValue(&This->base, L"FriendlyName",
+    return ComponentInfo_GetStringValue(This->classkey, L"FriendlyName",
         cchFriendlyName, wzFriendlyName, pcchActual);
 }
 
@@ -1345,7 +1352,7 @@ static HRESULT WINAPI PixelFormatInfo_GetBitsPerPixel(IWICPixelFormatInfo2 *ifac
 
     TRACE("(%p,%p)\n", iface, puiBitsPerPixel);
 
-    return ComponentInfo_GetUINTValue(&This->base, L"BitLength", puiBitsPerPixel);
+    return ComponentInfo_GetUINTValue(This->classkey, L"BitLength", puiBitsPerPixel);
 }
 
 static HRESULT WINAPI PixelFormatInfo_GetChannelCount(IWICPixelFormatInfo2 *iface,
@@ -1355,7 +1362,7 @@ static HRESULT WINAPI PixelFormatInfo_GetChannelCount(IWICPixelFormatInfo2 *ifac
 
     TRACE("(%p,%p)\n", iface, puiChannelCount);
 
-    return ComponentInfo_GetUINTValue(&This->base, L"ChannelCount", puiChannelCount);
+    return ComponentInfo_GetUINTValue(This->classkey, L"ChannelCount", puiChannelCount);
 }
 
 static HRESULT WINAPI PixelFormatInfo_GetChannelMask(IWICPixelFormatInfo2 *iface,
@@ -1384,7 +1391,7 @@ static HRESULT WINAPI PixelFormatInfo_GetChannelMask(IWICPixelFormatInfo2 *iface
 
         cbData = cbMaskBuffer;
 
-        ret = RegGetValueW(This->base.classkey, L"ChannelMasks", valuename, RRF_RT_REG_BINARY, NULL, pbMaskBuffer, &cbData);
+        ret = RegGetValueW(This->classkey, L"ChannelMasks", valuename, RRF_RT_REG_BINARY, NULL, pbMaskBuffer, &cbData);
 
         if (ret == ERROR_SUCCESS || ret == ERROR_MORE_DATA)
             *pcbActual = cbData;
@@ -1405,7 +1412,7 @@ static HRESULT WINAPI PixelFormatInfo_SupportsTransparency(IWICPixelFormatInfo2 
 
     TRACE("(%p,%p)\n", iface, pfSupportsTransparency);
 
-    return ComponentInfo_GetUINTValue(&This->base, L"SupportsTransparency", pfSupportsTransparency);
+    return ComponentInfo_GetUINTValue(This->classkey, L"SupportsTransparency", pfSupportsTransparency);
 }
 
 static HRESULT WINAPI PixelFormatInfo_GetNumericRepresentation(IWICPixelFormatInfo2 *iface,
@@ -1415,7 +1422,7 @@ static HRESULT WINAPI PixelFormatInfo_GetNumericRepresentation(IWICPixelFormatIn
 
     TRACE("(%p,%p)\n", iface, pNumericRepresentation);
 
-    return ComponentInfo_GetUINTValue(&This->base, L"NumericRepresentation", pNumericRepresentation);
+    return ComponentInfo_GetUINTValue(This->classkey, L"NumericRepresentation", pNumericRepresentation);
 }
 
 static const IWICPixelFormatInfo2Vtbl PixelFormatInfo_Vtbl = {
@@ -1445,9 +1452,15 @@ static HRESULT PixelFormatInfo_Constructor(HKEY classkey, REFCLSID clsid, Compon
 
     This = malloc(sizeof(PixelFormatInfo));
     if (!This)
+    {
+        RegCloseKey(classkey);
         return E_OUTOFMEMORY;
+    }
 
-    component_info_init(&This->base, classkey, clsid, (const IWICComponentInfoVtbl *)&PixelFormatInfo_Vtbl);
+    This->base.IWICComponentInfo_iface.lpVtbl = (const IWICComponentInfoVtbl*)&PixelFormatInfo_Vtbl;
+    This->base.ref = 1;
+    This->classkey = classkey;
+    This->base.clsid = *clsid;
 
     *ret = &This->base;
     return S_OK;
@@ -1463,6 +1476,7 @@ struct metadata_container
 typedef struct
 {
     ComponentInfo base;
+    HKEY classkey;
     GUID *container_formats;
     struct metadata_container *containers;
     UINT container_count;
@@ -1529,7 +1543,7 @@ static ULONG WINAPI MetadataReaderInfo_Release(IWICMetadataReaderInfo *iface)
     if (!ref)
     {
         unsigned i;
-        component_info_cleanup(&This->base);
+        RegCloseKey(This->classkey);
         for (i = 0; i < This->container_count; i++)
             free(This->containers[i].patterns);
         free(This->containers);
@@ -1575,7 +1589,7 @@ static HRESULT WINAPI MetadataReaderInfo_GetAuthor(IWICMetadataReaderInfo *iface
 
     TRACE("(%p,%u,%p,%p)\n", iface, length, author, actual_length);
 
-    return ComponentInfo_GetStringValue(&This->base, L"Author", length, author, actual_length);
+    return ComponentInfo_GetStringValue(This->classkey, L"Author", length, author, actual_length);
 }
 
 static HRESULT WINAPI MetadataReaderInfo_GetVendorGUID(IWICMetadataReaderInfo *iface,
@@ -1585,7 +1599,7 @@ static HRESULT WINAPI MetadataReaderInfo_GetVendorGUID(IWICMetadataReaderInfo *i
 
     TRACE("(%p,%p)\n", iface, vendor);
 
-    return ComponentInfo_GetGUIDValue(&This->base, L"Vendor", vendor);
+    return ComponentInfo_GetGUIDValue(This->classkey, L"Vendor", vendor);
 }
 
 static HRESULT WINAPI MetadataReaderInfo_GetVersion(IWICMetadataReaderInfo *iface,
@@ -1595,7 +1609,7 @@ static HRESULT WINAPI MetadataReaderInfo_GetVersion(IWICMetadataReaderInfo *ifac
 
     TRACE("(%p,%u,%p,%p)\n", iface, length, version, actual_length);
 
-    return ComponentInfo_GetStringValue(&This->base, L"Version", length, version, actual_length);
+    return ComponentInfo_GetStringValue(This->classkey, L"Version", length, version, actual_length);
 }
 
 static HRESULT WINAPI MetadataReaderInfo_GetSpecVersion(IWICMetadataReaderInfo *iface,
@@ -1605,7 +1619,7 @@ static HRESULT WINAPI MetadataReaderInfo_GetSpecVersion(IWICMetadataReaderInfo *
 
     TRACE("(%p,%u,%p,%p)\n", iface, length, version, actual_length);
 
-    return ComponentInfo_GetStringValue(&This->base, L"SpecVersion",
+    return ComponentInfo_GetStringValue(This->classkey, L"SpecVersion",
                                         length, version, actual_length);
 }
 
@@ -1616,7 +1630,7 @@ static HRESULT WINAPI MetadataReaderInfo_GetFriendlyName(IWICMetadataReaderInfo 
 
     TRACE("(%p,%u,%p,%p)\n", iface, length, name, actual_length);
 
-    return ComponentInfo_GetStringValue(&This->base, L"FriendlyName",
+    return ComponentInfo_GetStringValue(This->classkey, L"FriendlyName",
                                         length, name, actual_length);
 }
 
@@ -1625,7 +1639,7 @@ static HRESULT WINAPI MetadataReaderInfo_GetMetadataFormat(IWICMetadataReaderInf
 {
     MetadataReaderInfo *This = impl_from_IWICMetadataReaderInfo(iface);
     TRACE("(%p,%p)\n", iface, format);
-    return ComponentInfo_GetGUIDValue(&This->base, L"MetadataFormat", format);
+    return ComponentInfo_GetGUIDValue(This->classkey, L"MetadataFormat", format);
 }
 
 static HRESULT WINAPI MetadataReaderInfo_GetContainerFormats(IWICMetadataReaderInfo *iface,
@@ -1667,7 +1681,7 @@ static HRESULT WINAPI MetadataReaderInfo_DoesRequireFullStream(IWICMetadataReade
 {
     MetadataReaderInfo *This = impl_from_IWICMetadataReaderInfo(iface);
     TRACE("(%p,%p)\n", iface, param);
-    return ComponentInfo_GetUINTValue(&This->base, L"RequiresFullStream", param);
+    return ComponentInfo_GetUINTValue(This->classkey, L"RequiresFullStream", param);
 }
 
 static HRESULT WINAPI MetadataReaderInfo_DoesSupportPadding(IWICMetadataReaderInfo *iface,
@@ -1675,7 +1689,7 @@ static HRESULT WINAPI MetadataReaderInfo_DoesSupportPadding(IWICMetadataReaderIn
 {
     MetadataReaderInfo *This = impl_from_IWICMetadataReaderInfo(iface);
     TRACE("(%p,%p)\n", iface, param);
-    return ComponentInfo_GetUINTValue(&This->base, L"SupportsPadding", param);
+    return ComponentInfo_GetUINTValue(This->classkey, L"SupportsPadding", param);
 }
 
 static HRESULT WINAPI MetadataReaderInfo_DoesRequireFixedSize(IWICMetadataReaderInfo *iface,
@@ -1821,7 +1835,7 @@ static void read_metadata_patterns(MetadataReaderInfo *info, GUID *container_gui
     BYTE *patterns_ptr;
     DWORD length, valuesize;
 
-    res = RegOpenKeyExW(info->base.classkey, L"Containers", 0, KEY_READ, &containers_key);
+    res = RegOpenKeyExW(info->classkey, L"Containers", 0, KEY_READ, &containers_key);
     if (res != ERROR_SUCCESS) return;
 
     StringFromGUID2(container_guid, guidkeyname, 39);
@@ -1924,13 +1938,13 @@ static BOOL read_metadata_info(MetadataReaderInfo *info)
     GUID *formats;
     HRESULT hr;
 
-    hr = ComponentInfo_GetGuidList(&info->base, L"Containers", 0, NULL, &format_count);
+    hr = ComponentInfo_GetGuidList(info->classkey, L"Containers", 0, NULL, &format_count);
     if (FAILED(hr)) return TRUE;
 
     formats = calloc(format_count, sizeof(*formats));
     if (!formats) return FALSE;
 
-    hr = ComponentInfo_GetGuidList(&info->base, L"Containers", format_count, formats,
+    hr = ComponentInfo_GetGuidList(info->classkey, L"Containers", format_count, formats,
                                    &format_count);
     if (FAILED(hr))
     {
@@ -1961,9 +1975,15 @@ static HRESULT MetadataReaderInfo_Constructor(HKEY classkey, REFCLSID clsid, Com
 
     This = calloc(1, sizeof(*This));
     if (!This)
+    {
+        RegCloseKey(classkey);
         return E_OUTOFMEMORY;
+    }
 
-    component_info_init(&This->base, classkey, clsid, (const IWICComponentInfoVtbl *)&MetadataReaderInfo_Vtbl);
+    This->base.IWICComponentInfo_iface.lpVtbl = (const IWICComponentInfoVtbl*)&MetadataReaderInfo_Vtbl;
+    This->base.ref = 1;
+    This->classkey = classkey;
+    This->base.clsid = *clsid;
 
     if (!read_metadata_info(This))
     {
@@ -1972,253 +1992,6 @@ static HRESULT MetadataReaderInfo_Constructor(HKEY classkey, REFCLSID clsid, Com
     }
 
     *info = &This->base;
-    return S_OK;
-}
-
-struct metadata_writer_info
-{
-    ComponentInfo base;
-};
-
-static inline struct metadata_writer_info *impl_from_IWICMetadataWriterInfo(IWICMetadataWriterInfo *iface)
-{
-    return CONTAINING_RECORD(iface, struct metadata_writer_info, base.IWICComponentInfo_iface);
-}
-
-static HRESULT WINAPI metadata_writer_info_QueryInterface(IWICMetadataWriterInfo *iface, REFIID riid, void **ppv)
-{
-    struct metadata_writer_info *info = impl_from_IWICMetadataWriterInfo(iface);
-
-    TRACE("(%p,%s,%p)\n", iface, debugstr_guid(riid), ppv);
-
-    if (!ppv) return E_INVALIDARG;
-
-    if (IsEqualIID(&IID_IUnknown, riid) ||
-        IsEqualIID(&IID_IWICComponentInfo, riid) ||
-        IsEqualIID(&IID_IWICMetadataHandlerInfo, riid) ||
-        IsEqualIID(&IID_IWICMetadataWriterInfo, riid))
-    {
-        *ppv = &info->base.IWICComponentInfo_iface;
-    }
-    else
-    {
-        *ppv = NULL;
-        return E_NOINTERFACE;
-    }
-
-    IUnknown_AddRef((IUnknown *)*ppv);
-    return S_OK;
-}
-
-static ULONG WINAPI metadata_writer_info_AddRef(IWICMetadataWriterInfo *iface)
-{
-    struct metadata_writer_info *info = impl_from_IWICMetadataWriterInfo(iface);
-    ULONG ref = InterlockedIncrement(&info->base.ref);
-
-    TRACE("(%p) refcount=%lu\n", iface, ref);
-    return ref;
-}
-
-static ULONG WINAPI metadata_writer_info_Release(IWICMetadataWriterInfo *iface)
-{
-    struct metadata_writer_info *info = impl_from_IWICMetadataWriterInfo(iface);
-    ULONG ref = InterlockedDecrement(&info->base.ref);
-
-    TRACE("(%p) refcount=%lu\n", iface, ref);
-
-    if (!ref)
-    {
-        component_info_cleanup(&info->base);
-        free(info);
-    }
-    return ref;
-}
-
-static HRESULT WINAPI metadata_writer_info_GetComponentType(IWICMetadataWriterInfo *iface, WICComponentType *type)
-{
-    TRACE("(%p,%p)\n", iface, type);
-
-    if (!type)
-        return E_INVALIDARG;
-
-    *type = WICMetadataWriter;
-    return S_OK;
-}
-
-static HRESULT WINAPI metadata_writer_info_GetCLSID(IWICMetadataWriterInfo *iface, CLSID *clsid)
-{
-    struct metadata_writer_info *info = impl_from_IWICMetadataWriterInfo(iface);
-
-    TRACE("(%p,%p)\n", iface, clsid);
-
-    if (!clsid)
-        return E_INVALIDARG;
-
-    *clsid = info->base.clsid;
-    return S_OK;
-}
-
-static HRESULT WINAPI metadata_writer_info_GetSigningStatus(IWICMetadataWriterInfo *iface, DWORD *status)
-{
-    FIXME("(%p,%p): stub\n", iface, status);
-    return E_NOTIMPL;
-}
-
-static HRESULT WINAPI metadata_writer_info_GetAuthor(IWICMetadataWriterInfo *iface,
-        UINT length, WCHAR *author, UINT *actual_length)
-{
-    struct metadata_writer_info *info = impl_from_IWICMetadataWriterInfo(iface);
-
-    TRACE("(%p,%u,%p,%p)\n", iface, length, author, actual_length);
-
-    return ComponentInfo_GetStringValue(&info->base, L"Author", length, author, actual_length);
-}
-
-static HRESULT WINAPI metadata_writer_info_GetVendorGUID(IWICMetadataWriterInfo *iface, GUID *vendor)
-{
-    struct metadata_writer_info *info = impl_from_IWICMetadataWriterInfo(iface);
-
-    TRACE("(%p,%p)\n", iface, vendor);
-
-    return ComponentInfo_GetGUIDValue(&info->base, L"Vendor", vendor);
-}
-
-static HRESULT WINAPI metadata_writer_info_GetVersion(IWICMetadataWriterInfo *iface, UINT length,
-        WCHAR *version, UINT *actual_length)
-{
-    struct metadata_writer_info *info = impl_from_IWICMetadataWriterInfo(iface);
-
-    TRACE("(%p,%u,%p,%p)\n", iface, length, version, actual_length);
-
-    return ComponentInfo_GetStringValue(&info->base, L"Version", length, version, actual_length);
-}
-
-static HRESULT WINAPI metadata_writer_info_GetSpecVersion(IWICMetadataWriterInfo *iface,
-        UINT length, WCHAR *version, UINT *actual_length)
-{
-    struct metadata_writer_info *info = impl_from_IWICMetadataWriterInfo(iface);
-
-    TRACE("(%p,%u,%p,%p)\n", iface, length, version, actual_length);
-
-    return ComponentInfo_GetStringValue(&info->base, L"SpecVersion", length, version, actual_length);
-}
-
-static HRESULT WINAPI metadata_writer_info_GetFriendlyName(IWICMetadataWriterInfo *iface,
-        UINT length, WCHAR *name, UINT *actual_length)
-{
-    struct metadata_writer_info *info = impl_from_IWICMetadataWriterInfo(iface);
-
-    TRACE("(%p,%u,%p,%p)\n", iface, length, name, actual_length);
-
-    return ComponentInfo_GetStringValue(&info->base, L"FriendlyName", length, name, actual_length);
-}
-
-static HRESULT WINAPI metadata_writer_info_GetMetadataFormat(IWICMetadataWriterInfo *iface, GUID *format)
-{
-    struct metadata_writer_info *info = impl_from_IWICMetadataWriterInfo(iface);
-
-    TRACE("(%p,%p)\n", iface, format);
-
-    return ComponentInfo_GetGUIDValue(&info->base, L"MetadataFormat", format);
-}
-
-static HRESULT WINAPI metadata_writer_info_GetContainerFormats(IWICMetadataWriterInfo *iface,
-        UINT length, GUID *formats, UINT *actual_length)
-{
-    FIXME("(%p,%u,%p,%p): stub\n", iface, length, formats, actual_length);
-
-    return E_NOTIMPL;
-}
-
-static HRESULT WINAPI metadata_writer_info_GetDeviceManufacturer(IWICMetadataWriterInfo *iface,
-        UINT length, WCHAR *manufacturer, UINT *actual_length)
-{
-    FIXME("(%p,%u,%p,%p): stub\n", iface, length, manufacturer, actual_length);
-    return E_NOTIMPL;
-}
-
-static HRESULT WINAPI metadata_writer_info_GetDeviceModels(IWICMetadataWriterInfo *iface,
-        UINT length, WCHAR *models, UINT *actual_length)
-{
-    FIXME("(%p,%u,%p,%p): stub\n", iface, length, models, actual_length);
-    return E_NOTIMPL;
-}
-
-static HRESULT WINAPI metadata_writer_info_DoesRequireFullStream(IWICMetadataWriterInfo *iface, BOOL *param)
-{
-    struct metadata_writer_info *info = impl_from_IWICMetadataWriterInfo(iface);
-
-    TRACE("(%p,%p)\n", iface, param);
-
-    return ComponentInfo_GetUINTValue(&info->base, L"RequiresFullStream", param);
-}
-
-static HRESULT WINAPI metadata_writer_info_DoesSupportPadding(IWICMetadataWriterInfo *iface, BOOL *param)
-{
-    struct metadata_writer_info *info = impl_from_IWICMetadataWriterInfo(iface);
-
-    TRACE("(%p,%p)\n", iface, param);
-
-    return ComponentInfo_GetUINTValue(&info->base, L"SupportsPadding", param);
-}
-
-static HRESULT WINAPI metadata_writer_info_DoesRequireFixedSize(IWICMetadataWriterInfo *iface, BOOL *param)
-{
-    FIXME("(%p,%p): stub\n", iface, param);
-    return E_NOTIMPL;
-}
-
-static HRESULT WINAPI metadata_writer_info_GetHeader(IWICMetadataWriterInfo *iface, REFGUID container_format,
-        UINT size, WICMetadataHeader *header, UINT *actual_size)
-{
-    FIXME("(%p,%s,%u,%p,%p): stub\n", iface, debugstr_guid(container_format), size, header, actual_size);
-
-    return E_NOTIMPL;
-}
-
-static HRESULT WINAPI metadata_writer_info_CreateInstance(IWICMetadataWriterInfo *iface, IWICMetadataWriter **writer)
-{
-    struct metadata_writer_info *info = impl_from_IWICMetadataWriterInfo(iface);
-
-    TRACE("(%p,%p)\n", iface, writer);
-
-    return create_instance(&info->base.clsid, &IID_IWICMetadataWriter, (void **)writer);
-}
-
-static const IWICMetadataWriterInfoVtbl metadata_writer_info_vtbl =
-{
-    metadata_writer_info_QueryInterface,
-    metadata_writer_info_AddRef,
-    metadata_writer_info_Release,
-    metadata_writer_info_GetComponentType,
-    metadata_writer_info_GetCLSID,
-    metadata_writer_info_GetSigningStatus,
-    metadata_writer_info_GetAuthor,
-    metadata_writer_info_GetVendorGUID,
-    metadata_writer_info_GetVersion,
-    metadata_writer_info_GetSpecVersion,
-    metadata_writer_info_GetFriendlyName,
-    metadata_writer_info_GetMetadataFormat,
-    metadata_writer_info_GetContainerFormats,
-    metadata_writer_info_GetDeviceManufacturer,
-    metadata_writer_info_GetDeviceModels,
-    metadata_writer_info_DoesRequireFullStream,
-    metadata_writer_info_DoesSupportPadding,
-    metadata_writer_info_DoesRequireFixedSize,
-    metadata_writer_info_GetHeader,
-    metadata_writer_info_CreateInstance,
-};
-
-static HRESULT MetadataWriterInfo_Constructor(HKEY classkey, REFCLSID clsid, ComponentInfo **info)
-{
-    struct metadata_writer_info *obj;
-
-    if (!(obj = calloc(1, sizeof(*obj))))
-        return E_OUTOFMEMORY;
-
-    component_info_init(&obj->base, classkey, clsid, (const IWICComponentInfoVtbl *)&metadata_writer_info_vtbl);
-
-    *info = &obj->base;
     return S_OK;
 }
 
@@ -2234,7 +2007,6 @@ static const struct category categories[] = {
     {WICPixelFormatConverter, &CATID_WICFormatConverters, FormatConverterInfo_Constructor},
     {WICPixelFormat, &CATID_WICPixelFormats, PixelFormatInfo_Constructor},
     {WICMetadataReader, &CATID_WICMetadataReader, MetadataReaderInfo_Constructor},
-    {WICMetadataWriter, &CATID_WICMetadataWriter, MetadataWriterInfo_Constructor},
     {0}
 };
 
@@ -2314,11 +2086,7 @@ HRESULT CreateComponentInfo(REFCLSID clsid, IWICComponentInfo **ppIInfo)
     {
         res = RegOpenKeyExW(clsidkey, guidstring, 0, KEY_READ, &classkey);
         if (res == ERROR_SUCCESS)
-        {
-            /* Key handle ownership is transferred to the object. */
-            if (FAILED(hr = category->constructor(classkey, clsid, &info)))
-                RegCloseKey(classkey);
-        }
+            hr = category->constructor(classkey, clsid, &info);
         else
             hr = HRESULT_FROM_WIN32(res);
     }
@@ -2652,6 +2420,12 @@ HRESULT CreateComponentEnumerator(DWORD componentTypes, DWORD options, IEnumUnkn
     return hr;
 }
 
+static BOOL is_1bpp_format(const WICPixelFormatGUID *format)
+{
+    return IsEqualGUID(format, &GUID_WICPixelFormatBlackWhite) ||
+           IsEqualGUID(format, &GUID_WICPixelFormat1bppIndexed);
+}
+
 HRESULT WINAPI WICConvertBitmapSource(REFWICPixelFormatGUID dstFormat, IWICBitmapSource *pISrc, IWICBitmapSource **ppIDst)
 {
     HRESULT res;
@@ -2669,7 +2443,7 @@ HRESULT WINAPI WICConvertBitmapSource(REFWICPixelFormatGUID dstFormat, IWICBitma
     res = IWICBitmapSource_GetPixelFormat(pISrc, &srcFormat);
     if (FAILED(res)) return res;
 
-    if (IsEqualGUID(&srcFormat, dstFormat))
+    if (IsEqualGUID(&srcFormat, dstFormat) || (is_1bpp_format(&srcFormat) && is_1bpp_format(dstFormat)))
     {
         IWICBitmapSource_AddRef(pISrc);
         *ppIDst = pISrc;

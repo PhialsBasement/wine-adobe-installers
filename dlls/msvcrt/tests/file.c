@@ -695,9 +695,11 @@ static void test_fputc( void )
 
 static void test_flsbuf( void )
 {
-  int bufmode, ret, c, pos;
   char* tempf;
   FILE *tempfh;
+  int  c;
+  int  ret;
+  int  bufmode;
   static const int bufmodes[] = {_IOFBF,_IONBF};
 
   tempf=_tempnam(".","wne");
@@ -752,16 +754,6 @@ static void test_flsbuf( void )
   ok(c == 'Q', "first byte should be 'Q'\n");
   c = fgetc(tempfh);
   ok(c == EOF, "there should only be one byte\n");
-  fclose(tempfh);
-
-  tempfh = fopen(tempf,"ab");
-  ok(tempfh != NULL, "fopen failed\n");
-  pos = _lseek(_fileno(tempfh), 0, SEEK_CUR);
-  ok(!pos, "incorrect stream position: %d\n", pos);
-  ret = _flsbuf(0, tempfh);
-  ok(!ret, "_flsbuf returned %x\n", ret);
-  pos = _lseek(_fileno(tempfh), 0, SEEK_CUR);
-  ok(pos == 1, "incorrect stream position: %d\n", pos);
   fclose(tempfh);
 
   unlink(tempf);
@@ -1722,7 +1714,7 @@ static void test_stdout_handle( STARTUPINFOA *startup, char *cmdline, HANDLE hst
 
     CreateProcessA( NULL, cmdline, NULL, NULL, TRUE,
                     CREATE_DEFAULT_ERROR_MODE | NORMAL_PRIORITY_CLASS, NULL, NULL, startup, &proc );
-    wait_child_process( &proc );
+    wait_child_process( proc.hProcess );
 
     data = read_file( hErrorFile );
     if (expect_stdout)
@@ -2002,7 +1994,7 @@ static void test_invalid_stdin( const char* selfname )
     sprintf(cmdline, "%s file stdin", selfname);
     CreateProcessA(NULL, cmdline, NULL, NULL, TRUE,
             CREATE_DEFAULT_ERROR_MODE|NORMAL_PRIORITY_CLASS, NULL, NULL, &startup, &proc);
-    wait_child_process(&proc);
+    wait_child_process(proc.hProcess);
 
     ret = RegCloseKey(key);
     ok(!ret, "RegCloseKey failed: %lx\n", ret);

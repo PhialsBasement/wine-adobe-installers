@@ -23,6 +23,7 @@
 #include <stdint.h>
 
 #include "ntstatus.h"
+#define WIN32_NO_STATUS
 #include "windef.h"
 #include "winbase.h"
 #include "winternl.h"
@@ -37,8 +38,12 @@
 #define CL_USE_DEPRECATED_OPENCL_2_0_APIS
 #define CL_TARGET_OPENCL_VERSION 220
 #include <CL/cl.h>
+#define HAVE_OPENCL
 #elif defined(HAVE_OPENCL_OPENCL_H)
 #include <OpenCL/opencl.h>
+#define HAVE_OPENCL
+#else
+#include "opencl_types.h"
 #endif
 
 #include "unixlib.h"

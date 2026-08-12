@@ -23,7 +23,10 @@
 #pragma makedep unix
 #endif
 
+#include "config.h"
 #include <stdarg.h>
+#include <stdlib.h>
+#include <stdint.h>
 #include <pthread.h>
 #include <math.h>
 #include <poll.h>
@@ -31,6 +34,7 @@
 #include <pulse/pulseaudio.h>
 
 #include "ntstatus.h"
+#define WIN32_NO_STATUS
 #include "winternl.h"
 
 #include "mmdeviceapi.h"
@@ -41,7 +45,15 @@
 #include "wine/list.h"
 #include "wine/unixlib.h"
 
+#include "initguid.h"
+#include "devpkey.h"
+DEFINE_GUID(GUID_NULL,0,0,0,0,0,0,0,0,0,0,0);
+
 #include "../mmdevapi/unixlib.h"
+
+#ifdef HAVE_LIBUDEV_H
+#include <libudev.h>
+#endif
 
 #include "mult.h"
 
@@ -52,6 +64,17 @@ enum phys_device_bus_type {
     phys_device_bus_pci,
     phys_device_bus_usb
 };
+
+struct pulse_period
+{
+    struct list entry;
+    pa_usec_t timer_last_time;
+    pa_usec_t period;
+    struct list streams;
+    pa_time_event *time_event;
+};
+
+static struct list active_periods = LIST_INIT(active_periods);
 
 struct pulse_stream
 {
@@ -65,7 +88,6 @@ struct pulse_stream
     DWORD flags;
     AUDCLNT_SHAREMODE share;
     HANDLE event;
-    HANDLE timer_thread;
     float vol[PA_CHANNELS_MAX];
 
     REFERENCE_TIME def_period;
@@ -78,13 +100,15 @@ struct pulse_stream
     SIZE_T tmp_buffer_bytes, held_bytes, peek_len, peek_buffer_len, pa_held_bytes;
     BYTE *local_buffer, *tmp_buffer, *peek_buffer;
     void *locked_ptr;
-    BOOL please_quit, just_started, just_underran;
+    BOOL just_started, just_underran;
     pa_usec_t mmdev_period_usec;
 
     INT64 clock_lastpos, clock_written;
 
     struct list packet_free_head;
     struct list packet_filled_head;
+    struct list period_entry;
+    struct pulse_period *period;
 };
 
 typedef struct _ACPacket
@@ -105,6 +129,7 @@ typedef struct _PhysDevice {
     UINT index;
     REFERENCE_TIME min_period, def_period;
     WAVEFORMATEXTENSIBLE fmt;
+    GUID container_id;
     char pulse_name[0];
 } PhysDevice;
 
@@ -249,6 +274,16 @@ static NTSTATUS pulse_process_attach(void *args)
     if (pthread_mutex_init(&pulse_mutex, &attr) != 0)
         pthread_mutex_init(&pulse_mutex, NULL);
 
+#ifdef _WIN64
+    if (NtCurrentTeb()->WowTebOffset)
+    {
+        SYSTEM_BASIC_INFORMATION info;
+
+        NtQuerySystemInformation(SystemEmulationBasicInformation, &info, sizeof(info), NULL);
+        zero_bits = (ULONG_PTR)info.HighestUserAddress | 0x7fffffff;
+    }
+#endif
+
     return STATUS_SUCCESS;
 }
 
@@ -274,47 +309,19 @@ static void pulse_main_loop_thread_cleanup(void *context)
     pulse_broadcast();
 }
 
-static void pulse_main_loop(void *args)
+static NTSTATUS pulse_main_loop(void *args)
 {
-    HANDLE event = args;
+    struct main_loop_params *params = args;
     int ret;
     pulse_lock();
     pulse_ml = pa_mainloop_new();
     pa_mainloop_set_poll_func(pulse_ml, pulse_poll_func, NULL);
-    NtSetEvent(event, NULL);
+    NtSetEvent(params->event, NULL);
     pthread_cleanup_push(pulse_main_loop_thread_cleanup, NULL);
     pa_mainloop_run(pulse_ml, &ret);
     pthread_cleanup_pop(0);
     pa_mainloop_free(pulse_ml);
     pulse_unlock();
-    PsTerminateSystemThread( 0 );
-}
-
-static HANDLE main_loop_thread;
-
-static NTSTATUS pulse_main_loop_start(void *args)
-{
-    static const WCHAR name[] = {'a','u','d','i','o','_','c','l','i','e','n','t','_','m','a','i','n',0};
-    HANDLE event;
-    NTSTATUS status;
-
-    if (main_loop_thread) return STATUS_SUCCESS;
-
-    NtCreateEvent( &event, EVENT_ALL_ACCESS, NULL, NotificationEvent, FALSE );
-    if (!(status = create_unix_thread( &main_loop_thread, name, pulse_main_loop, event )))
-        NtWaitForSingleObject( event, FALSE, NULL );
-    NtClose( event );
-    return status;
-}
-
-static NTSTATUS pulse_main_loop_stop(void *args)
-{
-    if (main_loop_thread)
-    {
-        NtWaitForSingleObject( main_loop_thread, FALSE, NULL );
-        NtClose( main_loop_thread );
-        main_loop_thread = 0;
-    }
     return STATUS_SUCCESS;
 }
 
@@ -433,6 +440,7 @@ static HRESULT pulse_connect(const char *name)
         pa_context_unref(pulse_ctx);
 
     pulse_ctx = pa_context_new(pa_mainloop_get_api(pulse_ml), name);
+    setenv("PULSE_PROP_application.name", name, 1);
     if (!pulse_ctx) {
         ERR("Failed to create context\n");
         return E_FAIL;
@@ -571,6 +579,77 @@ static WCHAR *get_device_name(const char *desc, pa_proplist *proplist)
     return name;
 }
 
+#ifdef HAVE_UDEV
+static void create_usb_dev_container_id(uint64_t usec_init, uint16_t vid, uint16_t pid, uint8_t bus_num, uint8_t dev_num,
+        GUID *out)
+{
+    out->Data1 = MAKELONG(vid, pid);
+    out->Data2 = bus_num;
+    out->Data3 = dev_num;
+    memcpy(out->Data4, &usec_init, sizeof(out->Data4));
+}
+
+static GUID get_container_id(const char *sysfs_path)
+{
+    struct udev_device *audio_dev, *usb_dev;
+    struct udev *udev = udev_new();
+    char buffer[4096] = "/sys";
+    uint32_t vid, pid, version;
+    uint8_t bus_num, dev_num;
+    uint64_t init_time;
+    const char *tmp;
+    GUID tmp_guid;
+
+    tmp_guid = GUID_NULL;
+    strcat(buffer, sysfs_path);
+    audio_dev = usb_dev = NULL;
+    if (!udev)
+    {
+        ERR("Failed to get udev!\n");
+        goto exit;
+    }
+
+    audio_dev = udev_device_new_from_syspath(udev, buffer);
+    if (!audio_dev)
+        goto exit;
+
+    usb_dev = udev_device_get_parent_with_subsystem_devtype(audio_dev, "usb", "usb_device");
+    TRACE("usb dev %p, udev %p.\n", usb_dev, udev);
+    if (!usb_dev)
+        goto exit;
+
+    init_time = 0;
+    bus_num = dev_num = 0;
+    vid = pid = version = 0;
+    if ((tmp = udev_device_get_property_value(usb_dev, "PRODUCT")))
+        sscanf(tmp, "%x/%x/%x", &vid, &pid, &version);
+    if ((tmp = udev_device_get_property_value(usb_dev, "USEC_INITIALIZED")))
+        init_time = strtoull(tmp, NULL, 10);
+    if ((tmp = udev_device_get_property_value(usb_dev, "BUSNUM")))
+        bus_num = strtol(tmp, NULL, 10);
+    if ((tmp = udev_device_get_property_value(usb_dev, "DEVNUM")))
+        dev_num = strtol(tmp, NULL, 10);
+
+    create_usb_dev_container_id(init_time, vid, pid, bus_num, dev_num, &tmp_guid);
+
+exit:
+    if (udev)
+        udev_unref(udev);
+    if (audio_dev)
+        udev_device_unref(audio_dev);
+
+    TRACE("Returning %s.\n", debugstr_guid(&tmp_guid));
+    return tmp_guid;
+}
+#else
+static GUID get_container_id(const char *sysfs_path)
+{
+    FIXME("No udev, can't get device data.\n");
+    return GUID_NULL;
+}
+#endif
+
+
 static void fill_device_info(PhysDevice *dev, pa_proplist *p)
 {
     const char *buffer;
@@ -578,6 +657,7 @@ static void fill_device_info(PhysDevice *dev, pa_proplist *p)
     dev->bus_type = phys_device_bus_invalid;
     dev->vendor_id = 0;
     dev->product_id = 0;
+    memset(&dev->container_id, 0, sizeof(dev->container_id));
 
     if (!p)
         return;
@@ -594,6 +674,9 @@ static void fill_device_info(PhysDevice *dev, pa_proplist *p)
 
     if ((buffer = pa_proplist_gets(p, PA_PROP_DEVICE_PRODUCT_ID)))
         dev->product_id = strtol(buffer, NULL, 16);
+
+    if ((buffer = pa_proplist_gets(p, "sysfs.path")))
+        dev->container_id = get_container_id(buffer);
 }
 
 static void pulse_add_device(struct list *list, pa_proplist *proplist, int index, EndpointFormFactor form,
@@ -980,10 +1063,6 @@ static HRESULT pulse_spec_from_waveformat(struct pulse_stream *stream, const WAV
             stream->ss.format = PA_SAMPLE_U8;
         else if (fmt->wBitsPerSample == 16)
             stream->ss.format = PA_SAMPLE_S16LE;
-        else if (fmt->wBitsPerSample == 24)
-            stream->ss.format = PA_SAMPLE_S24LE;
-        else if (fmt->wBitsPerSample == 32)
-            stream->ss.format = PA_SAMPLE_S32LE;
         else
             return AUDCLNT_E_UNSUPPORTED_FORMAT;
         pa_channel_map_init_auto(&stream->map, fmt->nChannels, PA_CHANNEL_MAP_ALSA);
@@ -992,7 +1071,7 @@ static HRESULT pulse_spec_from_waveformat(struct pulse_stream *stream, const WAV
         WAVEFORMATEXTENSIBLE *wfe = (WAVEFORMATEXTENSIBLE*)fmt;
         UINT mask = wfe->dwChannelMask;
         unsigned i = 0, j;
-        if (fmt->cbSize < sizeof(*wfe) - sizeof(*fmt))
+        if (fmt->cbSize != (sizeof(*wfe) - sizeof(*fmt)) && fmt->cbSize != sizeof(*wfe))
             break;
         if (IsEqualGUID(&wfe->SubFormat, &KSDATAFORMAT_SUBTYPE_IEEE_FLOAT) &&
             (!wfe->Samples.wValidBitsPerSample || wfe->Samples.wValidBitsPerSample == 32) &&
@@ -1018,7 +1097,9 @@ static HRESULT pulse_spec_from_waveformat(struct pulse_stream *stream, const WAV
                         stream->ss.format = PA_SAMPLE_S24LE;
                     break;
                 case 32:
-                    if (valid == 32)
+                    if (valid == 24)
+                        stream->ss.format = PA_SAMPLE_S24_32LE;
+                    else if (valid == 32)
                         stream->ss.format = PA_SAMPLE_S32LE;
                     break;
                 default:
@@ -1044,6 +1125,19 @@ static HRESULT pulse_spec_from_waveformat(struct pulse_stream *stream, const WAV
         }
         break;
         }
+    case WAVE_FORMAT_ALAW:
+    case WAVE_FORMAT_MULAW:
+        if (fmt->wBitsPerSample != 8) {
+            FIXME("Unsupported bpp %u for LAW\n", fmt->wBitsPerSample);
+            return AUDCLNT_E_UNSUPPORTED_FORMAT;
+        }
+        if (fmt->nChannels != 1 && fmt->nChannels != 2) {
+            FIXME("Unsupported channels %u for LAW\n", fmt->nChannels);
+            return AUDCLNT_E_UNSUPPORTED_FORMAT;
+        }
+        stream->ss.format = fmt->wFormatTag == WAVE_FORMAT_MULAW ? PA_SAMPLE_ULAW : PA_SAMPLE_ALAW;
+        pa_channel_map_init_auto(&stream->map, fmt->nChannels, PA_CHANNEL_MAP_ALSA);
+        break;
     default:
         WARN("Unhandled tag %x\n", fmt->wFormatTag);
         return AUDCLNT_E_UNSUPPORTED_FORMAT;
@@ -1183,12 +1277,6 @@ static NTSTATUS pulse_create_stream(void *args)
                                                                stream->ss.rate,
                                                                10000000);
 
-    if (stream->period_bytes == 0)
-    {
-        hr = E_INVALIDARG;
-        goto exit;
-    }
-
     stream->bufsize_frames = ceil((params->duration / 10000000.) * params->fmt->nSamplesPerSec);
     bufsize_bytes = stream->bufsize_frames * pa_frame_size(&stream->ss);
     stream->mmdev_period_usec = params->period / 10;
@@ -1253,42 +1341,6 @@ exit:
     }
 
     pulse_unlock();
-    return STATUS_SUCCESS;
-}
-
-static NTSTATUS pulse_release_stream(void *args)
-{
-    struct release_stream_params *params = args;
-    struct pulse_stream *stream = handle_get_stream(params->stream);
-    SIZE_T size;
-
-    if(stream->timer_thread) {
-        stream->please_quit = TRUE;
-        NtWaitForSingleObject(stream->timer_thread, FALSE, NULL);
-        NtClose(stream->timer_thread);
-    }
-
-    pulse_lock();
-    if (PA_STREAM_IS_GOOD(pa_stream_get_state(stream->stream))) {
-        pa_stream_disconnect(stream->stream);
-        while (pulse_ml && PA_STREAM_IS_GOOD(pa_stream_get_state(stream->stream)))
-            pulse_cond_wait();
-    }
-    pa_stream_unref(stream->stream);
-    pulse_unlock();
-
-    if (stream->tmp_buffer) {
-        size = 0;
-        NtFreeVirtualMemory(GetCurrentProcess(), (void **)&stream->tmp_buffer,
-                            &size, MEM_RELEASE);
-    }
-    if (stream->local_buffer) {
-        size = 0;
-        NtFreeVirtualMemory(GetCurrentProcess(), (void **)&stream->local_buffer,
-                            &size, MEM_RELEASE);
-    }
-    free(stream->peek_buffer);
-    free(stream);
     return STATUS_SUCCESS;
 }
 
@@ -1577,109 +1629,154 @@ static void pulse_read(struct pulse_stream *stream)
     }
 }
 
-static void pulse_timer_loop(void *args)
+static NTSTATUS pulse_timer_loop(void *args)
 {
-    struct pulse_stream *stream = args;
-    LARGE_INTEGER delay;
-    pa_usec_t last_time;
+    /* Stream's data are read and written from the main loop timer callback. */
+    return STATUS_SUCCESS;
+}
+
+static void pa_streams_timer_cb(pa_mainloop_api *api, pa_time_event *e, const struct timeval *tv, void *userdata)
+{
+    struct pulse_period *period = userdata;
+    struct pulse_stream *stream;
     UINT32 adv_bytes;
-    int success;
 
-    pulse_lock();
-    delay.QuadPart = -stream->mmdev_period_usec * 10;
-    pa_stream_get_time(stream->stream, &last_time);
-    pulse_unlock();
+    period->timer_last_time += period->period;
 
-    while (!stream->please_quit)
+    TRACE("period %p, now %llu, timer_last_time %llu.\n", period, (long long)pa_rtclock_now(), (long long)period->timer_last_time);
+
+    LIST_FOR_EACH_ENTRY(stream, &period->streams, struct pulse_stream, period_entry)
     {
-        pa_usec_t now, adv_usec = 0;
-        int err;
-
-        NtDelayExecution(FALSE, &delay);
-
-        pulse_lock();
-
-        delay.QuadPart = -stream->mmdev_period_usec * 10;
-
-        wait_pa_operation_complete(pa_stream_update_timing_info(stream->stream, pulse_op_cb, &success));
-        err = pa_stream_get_time(stream->stream, &now);
-        if (err == 0)
+        if (stream->started)
         {
-            TRACE("got now: %s, last time: %s\n", wine_dbgstr_longlong(now), wine_dbgstr_longlong(last_time));
-            if (stream->started && (stream->dataflow == eCapture || stream->held_bytes))
+            if (stream->dataflow == eRender)
             {
-                if(stream->just_underran)
-                {
-                    last_time = now;
-                    stream->just_started = TRUE;
-                }
+                pulse_write(stream);
 
-                if (stream->just_started)
-                {
-                    /* let it play out a period to absorb some latency and get accurate timing */
-                    pa_usec_t diff = now - last_time;
-
-                    if (diff > stream->mmdev_period_usec)
-                    {
-                        stream->just_started = FALSE;
-                        last_time = now;
-                    }
-                }
-                else
-                {
-                    INT32 adjust = last_time + stream->mmdev_period_usec - now;
-
-                    adv_usec = now - last_time;
-
-                    if(adjust > ((INT32)(stream->mmdev_period_usec / 2)))
-                        adjust = stream->mmdev_period_usec / 2;
-                    else if(adjust < -((INT32)(stream->mmdev_period_usec / 2)))
-                        adjust = -1 * stream->mmdev_period_usec / 2;
-
-                    delay.QuadPart = -(stream->mmdev_period_usec + adjust) * 10;
-
-                    last_time += stream->mmdev_period_usec;
-                }
-
-                if (stream->dataflow == eRender)
-                {
-                    pulse_write(stream);
-
-                    /* regardless of what PA does, advance one period */
-                    adv_bytes = min(stream->period_bytes, stream->held_bytes);
-                    stream->lcl_offs_bytes += adv_bytes;
-                    stream->lcl_offs_bytes %= stream->real_bufsize_bytes;
-                    stream->held_bytes -= adv_bytes;
-                }
-                else if(stream->dataflow == eCapture)
-                {
-                    pulse_read(stream);
-                }
+                /* regardless of what PA does, advance one period */
+                adv_bytes = min(stream->period_bytes, stream->held_bytes);
+                stream->lcl_offs_bytes += adv_bytes;
+                stream->lcl_offs_bytes %= stream->real_bufsize_bytes;
+                stream->held_bytes -= adv_bytes;
             }
-            else
+            else if(stream->dataflow == eCapture)
             {
-                last_time = now;
-                delay.QuadPart = -stream->mmdev_period_usec * 10;
+                pulse_read(stream);
             }
         }
-
         if (stream->event)
             NtSetEvent(stream->event, NULL);
-
-        TRACE("%p after update, adv usec: %d, held: %u, delay usec: %u\n",
-                stream, (int)adv_usec,
-                (int)(stream->held_bytes/ pa_frame_size(&stream->ss)),
-                (unsigned int)(-delay.QuadPart / 10));
-
-        pulse_unlock();
     }
+    pa_context_rttime_restart(pulse_ctx, e, period->timer_last_time + period->period);
+}
+
+static void pa_streams_timer_cb_destroy(pa_mainloop_api *api, pa_time_event *e, void *userdata)
+{
+    struct pulse_period *period = userdata;
+
+    TRACE("period %p.\n", period);
+
+    list_remove(&period->entry);
+    free(period);
+}
+
+static void remove_stream_from_period(struct pulse_stream *stream)
+{
+    if (!stream->period)
+        return;
+
+    list_remove(&stream->period_entry);
+    if (list_empty(&stream->period->streams) && pulse_ml)
+    {
+        pa_mainloop_api *api = pa_mainloop_get_api(pulse_ml);
+
+        TRACE("freeing time event for period %p.\n", stream->period);
+        api->time_free(stream->period->time_event);
+        stream->period->time_event = NULL;
+    }
+}
+
+static void pulse_add_stream_to_period(struct pulse_stream *stream)
+{
+    struct pulse_period *period;
+    pa_mainloop_api *api;
+
+    if (stream->period)
+    {
+        assert(stream->mmdev_period_usec == stream->period->period);
+        return;
+    }
+
+    LIST_FOR_EACH_ENTRY(period, &active_periods, struct pulse_period, entry)
+    {
+        if (!period->time_event)
+        {
+            /* Period is being removed but pa_streams_timer_cb_destroy was not called yet. */
+            continue;
+        }
+        if (period->period == stream->mmdev_period_usec)
+        {
+            TRACE("Using period %p.\n", period);
+            stream->period = period;
+            list_add_tail(&period->streams, &stream->period_entry);
+            return;
+        }
+    }
+
+    period = calloc(1, sizeof(*period));
+    period->period = stream->mmdev_period_usec;
+    list_init(&period->streams);
+    stream->period = period;
+    list_add_tail(&period->streams, &stream->period_entry);
+    list_add_tail(&active_periods, &period->entry);
+    period->timer_last_time = pa_rtclock_now();
+    period->time_event = pa_context_rttime_new(pulse_ctx, period->timer_last_time + period->period,
+            pa_streams_timer_cb, period);
+    api = pa_mainloop_get_api(pulse_ml);
+    api->time_set_destroy(period->time_event, pa_streams_timer_cb_destroy);
+    TRACE("Created period %p.\n", period);
+}
+
+static NTSTATUS pulse_release_stream(void *args)
+{
+    struct release_stream_params *params = args;
+    struct pulse_stream *stream = handle_get_stream(params->stream);
+    SIZE_T size;
+
+    if(params->timer_thread) {
+        NtWaitForSingleObject(params->timer_thread, FALSE, NULL);
+        NtClose(params->timer_thread);
+    }
+
+    pulse_lock();
+    remove_stream_from_period(stream);
+    if (PA_STREAM_IS_GOOD(pa_stream_get_state(stream->stream))) {
+        pa_stream_disconnect(stream->stream);
+        while (pulse_ml && PA_STREAM_IS_GOOD(pa_stream_get_state(stream->stream)))
+            pulse_cond_wait();
+    }
+    pa_stream_unref(stream->stream);
+    pulse_unlock();
+
+    if (stream->tmp_buffer) {
+        size = 0;
+        NtFreeVirtualMemory(GetCurrentProcess(), (void **)&stream->tmp_buffer,
+                            &size, MEM_RELEASE);
+    }
+    if (stream->local_buffer) {
+        size = 0;
+        NtFreeVirtualMemory(GetCurrentProcess(), (void **)&stream->local_buffer,
+                            &size, MEM_RELEASE);
+    }
+    free(stream->peek_buffer);
+    free(stream);
+    return STATUS_SUCCESS;
 }
 
 static NTSTATUS pulse_start(void *args)
 {
     struct start_params *params = args;
     struct pulse_stream *stream = handle_get_stream(params->stream);
-    static const WCHAR name[] = {'a','u','d','i','o','_','c','l','i','e','n','t','_','t','i','m','e','r',0};
     int success;
 
     params->result = S_OK;
@@ -1719,9 +1816,9 @@ static NTSTATUS pulse_start(void *args)
     {
         stream->started = TRUE;
         stream->just_started = TRUE;
+        pulse_add_stream_to_period(stream);
     }
     pulse_unlock();
-    if (!stream->timer_thread) create_unix_thread( &stream->timer_thread, name, pulse_timer_loop, stream );
     return STATUS_SUCCESS;
 }
 
@@ -2079,12 +2176,147 @@ static NTSTATUS pulse_release_capture_buffer(void *args)
 static NTSTATUS pulse_is_format_supported(void *args)
 {
     struct is_format_supported_params *params = args;
+    WAVEFORMATEXTENSIBLE in;
+    WAVEFORMATEXTENSIBLE *out;
+    const WAVEFORMATEX *fmt = &in.Format;
+    const BOOLEAN exclusive = params->share == AUDCLNT_SHAREMODE_EXCLUSIVE;
 
-    /* This driver does not support exclusive mode. */
-    if (params->share == AUDCLNT_SHAREMODE_EXCLUSIVE)
-        params->result = AUDCLNT_E_EXCLUSIVE_MODE_NOT_ALLOWED;
-    else
-        params->result = S_OK;
+    params->result = S_OK;
+
+    if (!params->fmt_in || (params->share == AUDCLNT_SHAREMODE_SHARED && !params->fmt_out))
+        params->result = E_POINTER;
+    else if (params->share != AUDCLNT_SHAREMODE_SHARED && params->share != AUDCLNT_SHAREMODE_EXCLUSIVE)
+        params->result = E_INVALIDARG;
+    else {
+        memcpy(&in, params->fmt_in, params->fmt_in->wFormatTag == WAVE_FORMAT_EXTENSIBLE ?
+                                    sizeof(in) : sizeof(in.Format));
+
+        if (fmt->wFormatTag == WAVE_FORMAT_EXTENSIBLE) {
+            if (fmt->cbSize < sizeof(WAVEFORMATEXTENSIBLE) - sizeof(WAVEFORMATEX))
+                params->result = E_INVALIDARG;
+            else if (fmt->nAvgBytesPerSec == 0 || fmt->nBlockAlign == 0 ||
+                    (in.Samples.wValidBitsPerSample > fmt->wBitsPerSample))
+                params->result = E_INVALIDARG;
+            else if (fmt->nChannels == 0)
+                params->result = AUDCLNT_E_UNSUPPORTED_FORMAT;
+        }
+    }
+
+    if (FAILED(params->result))
+        return STATUS_SUCCESS;
+
+    if (exclusive)
+        out = &in;
+    else {
+        out = params->fmt_out;
+        memcpy(out, fmt, fmt->wFormatTag == WAVE_FORMAT_EXTENSIBLE ?
+                         sizeof(*out) : sizeof((*out).Format));
+    }
+
+    switch (fmt->wFormatTag) {
+    case WAVE_FORMAT_EXTENSIBLE: {
+        if ((fmt->cbSize != sizeof(WAVEFORMATEXTENSIBLE) - sizeof(WAVEFORMATEX) &&
+             fmt->cbSize != sizeof(WAVEFORMATEXTENSIBLE)) ||
+             fmt->nBlockAlign != fmt->wBitsPerSample / 8 * fmt->nChannels ||
+             in.Samples.wValidBitsPerSample > fmt->wBitsPerSample ||
+             fmt->nAvgBytesPerSec != fmt->nBlockAlign * fmt->nSamplesPerSec) {
+            params->result = E_INVALIDARG;
+            break;
+        }
+
+        if (exclusive) {
+            UINT32 mask = 0, i, channels = 0;
+
+            if (!(in.dwChannelMask & (SPEAKER_ALL | SPEAKER_RESERVED))) {
+                for (i = 1; !(i & SPEAKER_RESERVED); i <<= 1) {
+                    if (i & in.dwChannelMask) {
+                        mask |= i;
+                        ++channels;
+                    }
+                }
+
+                if (channels != fmt->nChannels || (in.dwChannelMask & ~mask)) {
+                    params->result = AUDCLNT_E_UNSUPPORTED_FORMAT;
+                    break;
+                }
+            } else {
+                params->result = AUDCLNT_E_UNSUPPORTED_FORMAT;
+                break;
+            }
+        }
+
+        if (IsEqualGUID(&in.SubFormat, &KSDATAFORMAT_SUBTYPE_IEEE_FLOAT)) {
+            if (fmt->wBitsPerSample != 32) {
+                params->result = E_INVALIDARG;
+                break;
+            }
+
+            if (in.Samples.wValidBitsPerSample != fmt->wBitsPerSample) {
+                params->result = S_FALSE;
+                out->Samples.wValidBitsPerSample = fmt->wBitsPerSample;
+            }
+        } else if (IsEqualGUID(&in.SubFormat, &KSDATAFORMAT_SUBTYPE_PCM)) {
+            if (!fmt->wBitsPerSample || fmt->wBitsPerSample > 32 || fmt->wBitsPerSample % 8) {
+                params->result = E_INVALIDARG;
+                break;
+            }
+
+            if (in.Samples.wValidBitsPerSample != fmt->wBitsPerSample &&
+               !(fmt->wBitsPerSample == 32 &&
+                in.Samples.wValidBitsPerSample == 24)) {
+                params->result = S_FALSE;
+                out->Samples.wValidBitsPerSample = fmt->wBitsPerSample;
+                break;
+            }
+        } else {
+            params->result = AUDCLNT_E_UNSUPPORTED_FORMAT;
+            break;
+        }
+
+        break;
+    }
+    case WAVE_FORMAT_ALAW:
+    case WAVE_FORMAT_MULAW:
+        if (fmt->wBitsPerSample != 8) {
+            params->result = E_INVALIDARG;
+            break;
+        }
+    /* Fall-through */
+    case WAVE_FORMAT_IEEE_FLOAT:
+        if (fmt->wFormatTag == WAVE_FORMAT_IEEE_FLOAT && fmt->wBitsPerSample != 32) {
+            params->result = E_INVALIDARG;
+            break;
+        }
+    /* Fall-through */
+    case WAVE_FORMAT_PCM: {
+        if (fmt->wFormatTag == WAVE_FORMAT_PCM &&
+           (!fmt->wBitsPerSample || fmt->wBitsPerSample > 32 || fmt->wBitsPerSample % 8)) {
+            params->result = E_INVALIDARG;
+            break;
+        }
+
+        if (fmt->nChannels > 2) {
+            params->result = AUDCLNT_E_UNSUPPORTED_FORMAT;
+            break;
+        }
+
+        /* fmt->cbSize, fmt->nBlockAlign and fmt->nAvgBytesPerSec seem to be
+         * ignored, invalid values are happily accepted. */
+        break;
+    }
+    default:
+        params->result = AUDCLNT_E_UNSUPPORTED_FORMAT;
+        break;
+    }
+
+    if (exclusive) { /* This driver does not support exclusive mode. */
+        if (params->result == S_OK)
+            params->result = params->flow == eCapture ?
+                                             AUDCLNT_E_UNSUPPORTED_FORMAT :
+                                             AUDCLNT_E_EXCLUSIVE_MODE_NOT_ALLOWED;
+        else if (params->result == S_FALSE)
+            params->result = AUDCLNT_E_UNSUPPORTED_FORMAT;
+    }
 
     return STATUS_SUCCESS;
 }
@@ -2509,6 +2741,18 @@ static NTSTATUS pulse_get_prop_value(void *args)
                 params->result = S_OK;
                 return STATUS_SUCCESS;
             }
+        } else if (IsEqualGUID(&params->prop->fmtid, &DEVPKEY_Device_ContainerId)) {
+            if (!params->buffer || *params->buffer_size < sizeof(*params->value->puuid)) {
+                *params->buffer_size = sizeof(*params->value->puuid);
+                params->result = E_NOT_SUFFICIENT_BUFFER;
+            } else {
+                params->value->vt = VT_CLSID;
+                params->value->puuid = params->buffer;
+                *params->value->puuid = dev->container_id;
+                params->result = S_OK;
+            }
+
+            return STATUS_SUCCESS;
         }
 
         params->result = E_NOTIMPL;
@@ -2520,26 +2764,18 @@ fail:
     return STATUS_SUCCESS;
 }
 
-static NTSTATUS pulse_midi_get_driver(void *args)
-{
-    static const WCHAR driver[] = {'a','l','s','a',0};
-
-    memcpy( args, driver, sizeof(driver) );
-    return STATUS_SUCCESS;
-}
-
 const unixlib_entry_t __wine_unix_call_funcs[] =
 {
     pulse_process_attach,
     pulse_process_detach,
-    pulse_main_loop_start,
-    pulse_main_loop_stop,
+    pulse_main_loop,
     pulse_get_endpoint_ids,
     pulse_create_stream,
     pulse_release_stream,
     pulse_start,
     pulse_stop,
     pulse_reset,
+    pulse_timer_loop,
     pulse_get_render_buffer,
     pulse_release_render_buffer,
     pulse_get_capture_buffer,
@@ -2560,7 +2796,6 @@ const unixlib_entry_t __wine_unix_call_funcs[] =
     pulse_test_connect,
     pulse_is_started,
     pulse_get_prop_value,
-    pulse_midi_get_driver,
     pulse_not_implemented,
     pulse_not_implemented,
     pulse_not_implemented,
@@ -2575,14 +2810,17 @@ C_ASSERT(ARRAYSIZE(__wine_unix_call_funcs) == funcs_count);
 
 typedef UINT PTR32;
 
-static NTSTATUS pulse_wow64_process_attach(void *args)
+static NTSTATUS pulse_wow64_main_loop(void *args)
 {
-    SYSTEM_BASIC_INFORMATION info;
-
-    NtQuerySystemInformation(SystemEmulationBasicInformation, &info, sizeof(info), NULL);
-    zero_bits = (ULONG_PTR)info.HighestUserAddress | 0x7fffffff;
-
-    return pulse_process_attach( args );
+    struct
+    {
+        PTR32 event;
+    } *params32 = args;
+    struct main_loop_params params =
+    {
+        .event = ULongToHandle(params32->event)
+    };
+    return pulse_main_loop(&params);
 }
 
 static NTSTATUS pulse_wow64_get_endpoint_ids(void *args)
@@ -2649,11 +2887,13 @@ static NTSTATUS pulse_wow64_release_stream(void *args)
     struct
     {
         stream_handle stream;
+        PTR32 timer_thread;
         HRESULT result;
     } *params32 = args;
     struct release_stream_params params =
     {
         .stream = params32->stream,
+        .timer_thread = ULongToHandle(params32->timer_thread)
     };
     pulse_release_stream(&params);
     params32->result = params.result;
@@ -2718,6 +2958,7 @@ static NTSTATUS pulse_wow64_is_format_supported(void *args)
         EDataFlow flow;
         AUDCLNT_SHAREMODE share;
         PTR32 fmt_in;
+        PTR32 fmt_out;
         HRESULT result;
     } *params32 = args;
     struct is_format_supported_params params =
@@ -2726,6 +2967,7 @@ static NTSTATUS pulse_wow64_is_format_supported(void *args)
         .flow = params32->flow,
         .share = params32->share,
         .fmt_in = ULongToPtr(params32->fmt_in),
+        .fmt_out = ULongToPtr(params32->fmt_out)
     };
     pulse_is_format_supported(&params);
     params32->result = params.result;
@@ -3011,6 +3253,7 @@ static NTSTATUS pulse_wow64_get_prop_value(void *args)
             value32->ulVal = value.ulVal;
             break;
         case VT_LPWSTR:
+        case VT_CLSID:
             value32->ptr = params32->buffer;
             break;
         default:
@@ -3022,16 +3265,16 @@ static NTSTATUS pulse_wow64_get_prop_value(void *args)
 
 const unixlib_entry_t __wine_unix_call_wow64_funcs[] =
 {
-    pulse_wow64_process_attach,
+    pulse_process_attach,
     pulse_process_detach,
-    pulse_main_loop_start,
-    pulse_main_loop_stop,
+    pulse_wow64_main_loop,
     pulse_wow64_get_endpoint_ids,
     pulse_wow64_create_stream,
     pulse_wow64_release_stream,
     pulse_start,
     pulse_stop,
     pulse_reset,
+    pulse_timer_loop,
     pulse_wow64_get_render_buffer,
     pulse_release_render_buffer,
     pulse_wow64_get_capture_buffer,
@@ -3052,7 +3295,6 @@ const unixlib_entry_t __wine_unix_call_wow64_funcs[] =
     pulse_wow64_test_connect,
     pulse_is_started,
     pulse_wow64_get_prop_value,
-    pulse_midi_get_driver,
     pulse_not_implemented,
     pulse_not_implemented,
     pulse_not_implemented,

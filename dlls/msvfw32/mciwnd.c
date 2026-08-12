@@ -561,7 +561,6 @@ static LRESULT WINAPI MCIWndProc(HWND hWnd, UINT wMsg, WPARAM wParam, LPARAM lPa
             static const WCHAR formatW[] = {'%','d',0};
             static const WCHAR mci32W[] = {'m','c','i','3','2',0};
             static const WCHAR system_iniW[] = {'s','y','s','t','e','m','.','i','n','i',0};
-            static const WCHAR avivideoW[] = {'a','v','i','v','i','d','e','o',0};
 
             TRACE("MCIWNDM_OPENW %s\n", debugstr_w((LPWSTR)lParam));
 
@@ -586,16 +585,6 @@ static LRESULT WINAPI MCIWndProc(HWND hWnd, UINT wMsg, WPARAM wParam, LPARAM lPa
             mwi->lasterror = mciSendCommandW(mwi->mci, MCI_OPEN,
                                              MCI_OPEN_ELEMENT | MCI_OPEN_ALIAS | MCI_WAIT,
                                              (DWORD_PTR)&mci_open);
-
-            if (mwi->lasterror)
-            {
-                mci_open.lpstrDeviceType = avivideoW;
-                mwi->lasterror = mciSendCommandW(mwi->mci, MCI_OPEN,
-                                                 MCI_OPEN_ELEMENT | MCI_OPEN_TYPE |
-                                                 MCI_OPEN_ALIAS | MCI_WAIT,
-                                                 (DWORD_PTR)&mci_open);
-            }
-
             SetCursor(hCursor);
 
             if (mwi->lasterror && !(mwi->dwStyle & MCIWNDF_NOERRORDLG))
@@ -633,7 +622,7 @@ static LRESULT WINAPI MCIWndProc(HWND hWnd, UINT wMsg, WPARAM wParam, LPARAM lPa
 
             if (mwi->lasterror == MCIERR_NO_WINDOW)
             {
-                has_window = FALSE;
+                has_window = 0;
                 mwi->lasterror = 0;
             }
             else if (mwi->lasterror)
@@ -641,7 +630,7 @@ static LRESULT WINAPI MCIWndProc(HWND hWnd, UINT wMsg, WPARAM wParam, LPARAM lPa
                 MCIWND_notify_error(mwi);
                 goto end_of_mci_open;
             }
-            else has_window = TRUE;
+            else has_window = 1;
 
             drv_name[0] = 0;
             SendMessageW(hWnd, MCIWNDM_GETDEVICEW, 256, (LPARAM)drv_name);

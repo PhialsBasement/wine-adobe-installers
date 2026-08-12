@@ -618,10 +618,7 @@ BOOL WINAPI ReportEventA ( HANDLE hEventLog, WORD wType, WORD wCategory, DWORD d
     ret = ReportEventW(hEventLog, wType, wCategory, dwEventID, lpUserSid,
                        wNumStrings, dwDataSize, (LPCWSTR *)wideStrArray, lpRawData);
     for (i = 0; i < wNumStrings; i++)
-    {
-        str.Buffer = wideStrArray[i];
-        RtlFreeUnicodeString(&str);
-    }
+        free(wideStrArray[i]);
     free(wideStrArray);
     return ret;
 }

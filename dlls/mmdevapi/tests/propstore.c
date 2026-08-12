@@ -31,6 +31,7 @@
 #include "ks.h"
 #include "ksmedia.h"
 #include "mmreg.h"
+#include "propvarutil.h"
 
 static BOOL (WINAPI *pIsWow64Process)(HANDLE, BOOL *);
 
@@ -41,37 +42,23 @@ static const WCHAR software_renderW[] =
 static void test_propertystore(IPropertyStore *store)
 {
     const WAVEFORMATEXTENSIBLE *format;
-    WCHAR temp[256];
     HRESULT hr;
-    PROPVARIANT pv, pv2;
+    PROPVARIANT pv;
+    char temp[128];
+    temp[sizeof(temp)-1] = 0;
 
     pv.vt = VT_EMPTY;
     hr = IPropertyStore_GetValue(store, &PKEY_AudioEndpoint_GUID, &pv);
     ok(hr == S_OK, "Failed with %08lx\n", hr);
     ok(pv.vt == VT_LPWSTR, "Value should be %i, is %i\n", VT_LPWSTR, pv.vt);
-    trace("guid: %s\n", debugstr_w(pv.pwszVal));
+    WideCharToMultiByte(CP_ACP, 0, pv.pwszVal, -1, temp, sizeof(temp)-1, NULL, NULL);
+    trace("guid: %s\n", temp);
     PropVariantClear(&pv);
 
     pv.vt = VT_EMPTY;
     hr = IPropertyStore_GetValue(store, (const PROPERTYKEY*)&DEVPKEY_DeviceInterface_FriendlyName, &pv);
     ok(hr == S_OK, "Failed with %08lx\n", hr);
     ok(pv.vt == VT_LPWSTR && pv.pwszVal, "FriendlyName value had wrong type: 0x%x or was NULL\n", pv.vt);
-
-    pv2.vt = VT_EMPTY;
-    hr = IPropertyStore_GetValue(store, (const PROPERTYKEY*)&DEVPKEY_Device_DeviceDesc, &pv2);
-    ok(hr == S_OK, "Failed with %#lx\n", hr);
-    ok(pv2.vt == VT_LPWSTR && pv2.pwszVal, "Device_DeviceDesc value had wrong type: %#x or was NULL\n", pv2.vt);
-
-    swprintf(temp, ARRAY_SIZE(temp), L"%ls (%ls)", pv2.pwszVal, pv.pwszVal);
-
-    PropVariantClear(&pv);
-    PropVariantClear(&pv2);
-
-    pv.vt = VT_EMPTY;
-    hr = IPropertyStore_GetValue(store, (const PROPERTYKEY*)&DEVPKEY_Device_FriendlyName, &pv);
-    ok(hr == S_OK, "Failed with %#lx\n", hr);
-    ok(pv.vt == VT_LPWSTR && pv.pwszVal, "Device_FriendlyName value had wrong type: %#x or was NULL\n", pv.vt);
-    ok(!wcscmp(temp, pv.pwszVal), "Expected Device_FriendlyName %s, but got %s\n", debugstr_w(temp), debugstr_w(pv.pwszVal));
     PropVariantClear(&pv);
 
     pv.vt = VT_EMPTY;
@@ -147,19 +134,150 @@ static void test_getat(IPropertyStore *store)
     ok(found_desc, "DEVPKEY_Device_DeviceDesc not found\n");
 }
 
+static const VARIANT_BOOL vt_bool_vals[] = { VARIANT_TRUE, VARIANT_FALSE };
+static const GUID vt_clsid_vals[] =  { { 1 }, { 2 } };
+static const BYTE vt_blob_val[] = { 1, 2, 3, 4, 5, 6 };
+static const WCHAR vt_bstr_val[] = L"Test1";
+
+static ULONG set_propvariant_for_vt(PROPVARIANT *pv, VARTYPE vt, const void *val, DWORD size)
+{
+    ULONG elems = 1;
+
+    PropVariantInit(pv);
+    pv->vt = vt;
+    switch (vt)
+    {
+        case VT_BOOL:
+            pv->boolVal = ((const VARIANT_BOOL *)val)[0];
+            break;
+
+        case VT_BOOL | VT_VECTOR:
+            pv->cabool.cElems = size / sizeof(*pv->cabool.pElems);
+            pv->cabool.pElems = CoTaskMemAlloc(size);
+            memcpy(pv->cabool.pElems, val, size);
+            elems = pv->cabool.cElems;
+            break;
+
+        case VT_CLSID:
+            pv->puuid = CoTaskMemAlloc(sizeof(*pv->puuid));
+            *pv->puuid = ((const GUID *)val)[0];
+            break;
+
+        case VT_CLSID | VT_VECTOR:
+            pv->cauuid.cElems = size / sizeof(*pv->cauuid.pElems);
+            pv->cauuid.pElems = CoTaskMemAlloc(size);
+            memcpy(pv->cauuid.pElems, val, size);
+            elems = pv->cauuid.cElems;
+            break;
+
+        case VT_BSTR:
+            pv->bstrVal = SysAllocString((const WCHAR *)val);
+            break;
+
+        case VT_BLOB:
+            pv->blob.cbSize = size;
+            pv->blob.pBlobData = CoTaskMemAlloc(size);
+            memcpy(pv->blob.pBlobData, val, size);
+            break;
+    }
+
+    return elems;
+}
+
+static BOOL compare_propvariant(PROPVARIANT *pv, PROPVARIANT *pv2)
+{
+    unsigned int i;
+
+    if (pv->vt != pv2->vt)
+        return FALSE;
+
+    switch (pv->vt)
+    {
+        case VT_BSTR:
+        case VT_CLSID:
+            return !PropVariantCompareEx(pv, pv2, 0, 0);
+
+        case VT_BOOL:
+            return pv->boolVal == pv2->boolVal;
+
+        case VT_BOOL | VT_VECTOR:
+            if (pv->cabool.cElems != pv2->cabool.cElems)
+                return FALSE;
+
+            for (i = 0; i < pv->cabool.cElems; i++)
+            {
+                if (pv->cabool.pElems[i] != pv2->cabool.pElems[i])
+                    return FALSE;
+            }
+            return TRUE;
+
+        case VT_CLSID | VT_VECTOR:
+            if (pv->cauuid.cElems != pv2->cauuid.cElems)
+                return FALSE;
+
+            for (i = 0; i < pv->cauuid.cElems; i++)
+            {
+                if (memcmp(&pv->cauuid.pElems[i], &pv2->cauuid.pElems[i], sizeof(*pv->cauuid.pElems)))
+                    return FALSE;
+            }
+            return TRUE;
+
+        case VT_BLOB:
+            if (pv->blob.cbSize != pv2->blob.cbSize)
+                return FALSE;
+
+            return !memcmp(pv->blob.pBlobData, pv2->blob.pBlobData, pv->blob.cbSize);
+    }
+
+    return FALSE;
+}
+
+struct reg_serialized {
+    VARTYPE vt;
+    WORD unk; /* Seems like mostly uninitialized memory... */
+    ULONG elems;
+    BYTE data[];
+};
+
 static void test_setvalue_on_wow64(IPropertyStore *store)
 {
-    PROPVARIANT pv;
+    static const struct
+    {
+        VARTYPE vt;
+        const void *data;
+        DWORD data_size;
+
+        HRESULT expected_hr;
+        DWORD expected_reg_type;
+        DWORD expected_size;
+        BOOL todo_hr;
+        BOOL todo_data;
+    } propvar_tests[] =
+    {
+        { VT_BOOL, vt_bool_vals, sizeof(vt_bool_vals) / 2, S_OK, REG_BINARY, 0xa },
+        { VT_BOOL | VT_VECTOR, vt_bool_vals, sizeof(vt_bool_vals), S_OK, REG_BINARY, 0xc },
+        { VT_CLSID, vt_clsid_vals, sizeof(vt_clsid_vals) / 2, S_OK, REG_BINARY, 0x18 },
+        { VT_CLSID | VT_VECTOR, vt_clsid_vals, sizeof(vt_clsid_vals), S_OK, REG_BINARY, 0x28 },
+        { VT_BSTR, vt_bstr_val, sizeof(vt_bstr_val), S_OK, REG_BINARY, 0x14, TRUE, TRUE },
+        { VT_BLOB, vt_blob_val, sizeof(vt_blob_val), S_OK, REG_BINARY, 0xe, .todo_data = TRUE },
+    };
+    PROPVARIANT pv, pv2;
     HRESULT hr;
     LONG ret;
     WCHAR *guidW;
     HKEY root, props, devkey;
     DWORD type, regval, size;
+    unsigned int i;
+    BYTE buf[256];
 
     static const PROPERTYKEY PKEY_Bogus = {
         {0x1da5d803, 0xd492, 0x4edd, {0x8c, 0x23, 0xe0, 0xc0, 0xff, 0xee, 0x7f, 0x00}}, 0x7f
     };
+    static const PROPERTYKEY PKEY_Bogus2 = {
+        {0x1da5d803, 0xd492, 0x4edd, {0x8c, 0x23, 0xe0, 0xc0, 0xff, 0xee, 0x7f, 0x00}}, 0x80
+    };
     static const WCHAR bogusW[] = L"{1DA5D803-D492-4EDD-8C23-E0C0FFEE7F00},127";
+    static const WCHAR bogus2W[] = L"{1DA5D803-D492-4EDD-8C23-E0C0FFEE7F00},128";
 
     PropVariantInit(&pv);
 
@@ -202,6 +320,47 @@ static void test_setvalue_on_wow64(IPropertyStore *store)
     ok(ret == ERROR_SUCCESS, "Couldn't get bogus propertykey value: %lu\n", ret);
     ok(type == REG_DWORD, "Got wrong value type: %lu\n", type);
     ok(regval == 0xAB, "Got wrong value: 0x%lx\n", regval);
+
+    for (i = 0; i < ARRAY_SIZE(propvar_tests); i++)
+    {
+        struct reg_serialized *reg_val;
+        ULONG expected_elems;
+
+        winetest_push_context("Test %u", i);
+
+        expected_elems = set_propvariant_for_vt(&pv, propvar_tests[i].vt, propvar_tests[i].data, propvar_tests[i].data_size);
+        hr = IPropertyStore_SetValue(store, &PKEY_Bogus2, &pv);
+        todo_wine_if(propvar_tests[i].todo_hr) ok(hr == propvar_tests[i].expected_hr, "Unexpected hr %#lx.\n", hr);
+        if (FAILED(hr))
+        {
+            winetest_pop_context();
+            PropVariantClear(&pv);
+            continue;
+        }
+
+        ret = RegQueryValueExW(props, bogus2W, NULL, &type, NULL, &size);
+        ok(ret == ERROR_SUCCESS, "Couldn't get bogus propertykey value: %lu.\n", ret);
+        ok(type == propvar_tests[i].expected_reg_type, "Unexpected registry value type %lu.\n", type);
+        todo_wine_if(propvar_tests[i].todo_data) ok(size >= propvar_tests[i].expected_size, "Unexpected registry value size 0x%lx.\n", size);
+
+        ret = RegQueryValueExW(props, bogus2W, NULL, &type, buf, &size);
+        ok(ret == ERROR_SUCCESS, "Couldn't get bogus propertykey value: %lu.\n", ret);
+        reg_val = (struct reg_serialized *)buf;
+        todo_wine_if(propvar_tests[i].todo_data)
+            ok(reg_val->vt == propvar_tests[i].vt, "Unexpected vt: %#x.\n", reg_val->vt);
+        todo_wine_if(propvar_tests[i].todo_data)
+            ok(reg_val->elems == expected_elems, "Unexpected elems: %lu.\n", reg_val->elems);
+        todo_wine_if(propvar_tests[i].todo_data)
+            ok(!memcmp(reg_val->data, propvar_tests[i].data, propvar_tests[i].data_size), "Unexpected data.\n");
+
+        hr = IPropertyStore_GetValue(store, &PKEY_Bogus2, &pv2);
+        ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+        ok(compare_propvariant(&pv, &pv2), "Propvariant mismatch.\n");
+
+        PropVariantClear(&pv);
+        PropVariantClear(&pv2);
+        winetest_pop_context();
+    }
 
     RegCloseKey(props);
     RegCloseKey(devkey);

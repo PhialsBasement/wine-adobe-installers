@@ -21,6 +21,7 @@
 #include <stdlib.h>
 #include <wchar.h>
 #include "ntstatus.h"
+#define WIN32_NO_STATUS
 #include "windef.h"
 #include "winbase.h"
 #include "winternl.h"
@@ -38,6 +39,14 @@
 #include "unixlib.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(ntlm);
+
+static ULONG ntlm_package_id;
+static LSA_DISPATCH_TABLE lsa_dispatch;
+
+static NTSTATUS ntlm_check_version(void)
+{
+    return WINE_UNIX_CALL( unix_check_version, NULL );
+}
 
 static void ntlm_cleanup( struct ntlm_ctx *ctx )
 {
@@ -104,10 +113,19 @@ static NTSTATUS NTAPI ntlm_LsaApInitializePackage( ULONG package_id, LSA_DISPATC
     TRACE( "%#lx, %p, %s, %s, %p\n", package_id, dispatch, debugstr_as(database), debugstr_as(confidentiality),
            package_name );
 
+    if (ntlm_check_version())
+    {
+        ERR( "no NTLM support, expect problems\n" );
+        return STATUS_UNSUCCESSFUL;
+    }
+
     if (!(str = dispatch->AllocateLsaHeap( sizeof(*str) + sizeof("NTLM" )))) return STATUS_NO_MEMORY;
     ptr = (char *)(str + 1);
     memcpy( ptr, "NTLM", sizeof("NTLM") );
     RtlInitString( str, ptr );
+
+    ntlm_package_id = package_id;
+    lsa_dispatch = *dispatch;
 
     *package_name = str;
     return STATUS_SUCCESS;
@@ -117,6 +135,12 @@ static NTSTATUS NTAPI ntlm_SpInitialize( ULONG_PTR package_id, SECPKG_PARAMETERS
                                          LSA_SECPKG_FUNCTION_TABLE *lsa_function_table )
 {
     TRACE( "%#Ix, %p, %p\n", package_id, params, lsa_function_table );
+
+    if (ntlm_check_version())
+    {
+        ERR( "no NTLM support, expect problems\n" );
+        return STATUS_UNSUCCESSFUL;
+    }
     return STATUS_SUCCESS;
 }
 
@@ -157,60 +181,18 @@ static char *get_domain_arg( const WCHAR *domain, int domain_len )
     return ret;
 }
 
-
-static NTSTATUS map_auth_data( const void *auth_data, SEC_WINNT_AUTH_IDENTITY_W *id )
-{
-    const SEC_WINNT_AUTH_IDENTITY_EXA *exA = auth_data;
-    const SEC_WINNT_AUTH_IDENTITY_EXW *exW = auth_data;
-
-    if (exW->Version != SEC_WINNT_AUTH_IDENTITY_VERSION)
-    {
-        *id = *(SEC_WINNT_AUTH_IDENTITY_W *)auth_data;
-        return SEC_E_OK;
-    }
-    if (exW->Flags == SEC_WINNT_AUTH_IDENTITY_UNICODE)
-    {
-        id->User           = exW->User;
-        id->UserLength     = exW->UserLength;
-        id->Domain         = exW->Domain;
-        id->DomainLength   = exW->DomainLength;
-        id->Password       = exW->Password;
-        id->PasswordLength = exW->PasswordLength;
-        id->Flags          = exW->Flags;
-        if (exW->PackageList)
-            FIXME( "ignoring package list %s\n", debugstr_wn(exW->PackageList, exW->PackageListLength) );
-    }
-    else
-    {
-        SEC_WINNT_AUTH_IDENTITY_A *idA = (SEC_WINNT_AUTH_IDENTITY_A *)id;
-
-        idA->User           = exA->User;
-        idA->UserLength     = exA->UserLength;
-        idA->Domain         = exA->Domain;
-        idA->DomainLength   = exA->DomainLength;
-        idA->Password       = exA->Password;
-        idA->PasswordLength = exA->PasswordLength;
-        idA->Flags          = exA->Flags;
-        if (exA->PackageList)
-            FIXME( "ignoring package list %s\n", debugstr_an((const char *)exA->PackageList, exA->PackageListLength) );
-    }
-    return SEC_E_OK;
-}
-
 #define WINE_NO_CACHED_CREDENTIALS 0x10000000
 static NTSTATUS NTAPI ntlm_SpAcquireCredentialsHandle( UNICODE_STRING *principal, ULONG cred_use, LUID *logon_id,
                                                        void *auth_data, void *get_key_fn, void *get_key_arg,
                                                        LSA_SEC_HANDLE *handle, TimeStamp *expiry )
 {
-    SECURITY_STATUS status;
+    SECURITY_STATUS status = SEC_E_INSUFFICIENT_MEMORY;
     struct ntlm_cred *cred = NULL;
     WCHAR *domain = NULL, *user = NULL, *password = NULL;
-    SEC_WINNT_AUTH_IDENTITY_W id = {0};
+    SEC_WINNT_AUTH_IDENTITY_W *id = NULL;
 
     TRACE( "%s, %#lx, %p, %p, %p, %p, %p, %p\n", debugstr_us(principal), cred_use, logon_id, auth_data,
            get_key_fn, get_key_arg, cred, expiry );
-
-    if (auth_data && (status = map_auth_data( auth_data, &id ))) return status;
 
     cred_use &= ~SECPKG_CRED_RESERVED;
     switch (cred_use)
@@ -240,38 +222,38 @@ static NTSTATUS NTAPI ntlm_SpAcquireCredentialsHandle( UNICODE_STRING *principal
         cred->password_len = 0;
         cred->no_cached_credentials = (cred_use & WINE_NO_CACHED_CREDENTIALS);
 
-        if (auth_data)
+        if ((id = auth_data))
         {
             int domain_len = 0, user_len = 0, password_len = 0;
-            if (id.Flags & SEC_WINNT_AUTH_IDENTITY_ANSI)
+            if (id->Flags & SEC_WINNT_AUTH_IDENTITY_ANSI)
             {
-                if (id.DomainLength)
+                if (id->DomainLength)
                 {
-                    domain_len = MultiByteToWideChar( CP_ACP, 0, (char *)id.Domain, id.DomainLength, NULL, 0 );
+                    domain_len = MultiByteToWideChar( CP_ACP, 0, (char *)id->Domain, id->DomainLength, NULL, 0 );
                     if (!(domain = malloc( sizeof(WCHAR) * domain_len ))) goto done;
-                    MultiByteToWideChar( CP_ACP, 0, (char *)id.Domain, id.DomainLength, domain, domain_len );
+                    MultiByteToWideChar( CP_ACP, 0, (char *)id->Domain, id->DomainLength, domain, domain_len );
                 }
-                if (id.UserLength)
+                if (id->UserLength)
                {
-                    user_len = MultiByteToWideChar( CP_ACP, 0, (char *)id.User, id.UserLength, NULL, 0 );
+                    user_len = MultiByteToWideChar( CP_ACP, 0, (char *)id->User, id->UserLength, NULL, 0 );
                     if (!(user = malloc( sizeof(WCHAR) * user_len ))) goto done;
-                    MultiByteToWideChar( CP_ACP, 0, (char *)id.User, id.UserLength, user, user_len );
+                    MultiByteToWideChar( CP_ACP, 0, (char *)id->User, id->UserLength, user, user_len );
                 }
-                if (id.PasswordLength)
+                if (id->PasswordLength)
                 {
-                    password_len = MultiByteToWideChar( CP_ACP, 0,(char *)id.Password, id.PasswordLength, NULL, 0 );
+                    password_len = MultiByteToWideChar( CP_ACP, 0,(char *)id->Password, id->PasswordLength, NULL, 0 );
                     if (!(password = malloc( sizeof(WCHAR) * password_len ))) goto done;
-                    MultiByteToWideChar( CP_ACP, 0, (char *)id.Password, id.PasswordLength, password, password_len );
+                    MultiByteToWideChar( CP_ACP, 0, (char *)id->Password, id->PasswordLength, password, password_len );
                 }
             }
             else
             {
-                domain = id.Domain;
-                domain_len = id.DomainLength;
-                user = id.User;
-                user_len = id.UserLength;
-                password = id.Password;
-                password_len = id.PasswordLength;
+                domain = id->Domain;
+                domain_len = id->DomainLength;
+                user = id->User;
+                user_len = id->UserLength;
+                password = id->Password;
+                password_len = id->PasswordLength;
             }
 
             TRACE( "username is %s\n", debugstr_wn(user, user_len) );
@@ -299,7 +281,7 @@ static NTSTATUS NTAPI ntlm_SpAcquireCredentialsHandle( UNICODE_STRING *principal
     }
 
 done:
-    if (auth_data && (id.Flags & SEC_WINNT_AUTH_IDENTITY_ANSI))
+    if (id && (id->Flags & SEC_WINNT_AUTH_IDENTITY_ANSI))
     {
         free( domain );
         free( user );
@@ -1357,11 +1339,11 @@ static void hmac_md5_final( struct hmac_md5_ctx *ctx, char *digest )
     memcpy( digest, outer_ctx.digest, 16 );
 }
 
-static SECURITY_STATUS create_signature( struct ntlm_ctx *ctx, unsigned int flags, SecBufferDesc *msg,
-                                         SecBuffer *sig_buf, enum sign_direction dir, BOOL encrypt )
+static SECURITY_STATUS create_signature( struct ntlm_ctx *ctx, unsigned int flags, SecBufferDesc *msg, int idx,
+                                         enum sign_direction dir, BOOL encrypt )
 {
     unsigned int i, sign_version = 1;
-    char *sig = sig_buf->pvBuffer;
+    char *sig = msg->pBuffers[idx].pvBuffer;
 
     if (flags & FLAG_NEGOTIATE_NTLM2 && flags & FLAG_NEGOTIATE_SIGN)
     {
@@ -1412,7 +1394,7 @@ static SECURITY_STATUS create_signature( struct ntlm_ctx *ctx, unsigned int flag
         memcpy( sig + 4, digest, 8 );
         memcpy( sig + 12, seq_no, 4 );
 
-        sig_buf->cbBuffer = 16;
+        msg->pBuffers[idx].cbBuffer = 16;
         return SEC_E_OK;
     }
 
@@ -1448,9 +1430,9 @@ static SECURITY_STATUS create_signature( struct ntlm_ctx *ctx, unsigned int flag
     if (flags & FLAG_NEGOTIATE_ALWAYS_SIGN || !flags)
     {
         /* create dummy signature */
-        memset( sig_buf->pvBuffer, 0, 16 );
-        memset( sig_buf->pvBuffer, 1, 1 );
-        sig_buf->cbBuffer = 16;
+        memset( msg->pBuffers[idx].pvBuffer, 0, 16 );
+        memset( msg->pBuffers[idx].pvBuffer, 1, 1 );
+        msg->pBuffers[idx].cbBuffer = 16;
         return SEC_E_OK;
     }
 
@@ -1471,13 +1453,13 @@ static NTSTATUS NTAPI ntlm_SpMakeSignature( LSA_SEC_HANDLE handle, ULONG qop, Se
         return SEC_E_INVALID_TOKEN;
     if (msg->pBuffers[idx].cbBuffer < 16) return SEC_E_BUFFER_TOO_SMALL;
 
-    return create_signature( ctx, ctx->flags, msg, &msg->pBuffers[idx], SIGN_SEND, TRUE );
+    return create_signature( ctx, ctx->flags, msg, idx, SIGN_SEND, TRUE );
 }
 
-static NTSTATUS verify_signature( struct ntlm_ctx *ctx, unsigned int flags, SecBufferDesc *msg, SecBuffer *sig_buf )
+static NTSTATUS verify_signature( struct ntlm_ctx *ctx, unsigned int flags, SecBufferDesc *msg, int idx )
 {
     NTSTATUS status;
-    unsigned int i, sig_idx = 0;
+    unsigned int i;
     SecBufferDesc desc;
     SecBuffer *buf;
     char sig[16];
@@ -1489,12 +1471,11 @@ static NTSTATUS verify_signature( struct ntlm_ctx *ctx, unsigned int flags, SecB
 
     for (i = 0; i < msg->cBuffers; i++)
     {
-        if (msg->pBuffers[i].BufferType == SECBUFFER_TOKEN || msg->pBuffers[i].BufferType == SECBUFFER_STREAM)
+        if (msg->pBuffers[i].BufferType == SECBUFFER_TOKEN)
         {
             buf[i].BufferType = SECBUFFER_TOKEN;
             buf[i].cbBuffer   = 16;
             buf[i].pvBuffer   = sig;
-            sig_idx = i;
         }
         else
         {
@@ -1504,9 +1485,9 @@ static NTSTATUS verify_signature( struct ntlm_ctx *ctx, unsigned int flags, SecB
         }
     }
 
-    if ((status = create_signature( ctx, flags, &desc, &buf[sig_idx], SIGN_RECV, TRUE )) == SEC_E_OK)
+    if ((status = create_signature( ctx, flags, &desc, idx, SIGN_RECV, TRUE )) == SEC_E_OK)
     {
-        if (memcmp( (char *)buf[sig_idx].pvBuffer + 8, (char *)sig_buf->pvBuffer + 8, 8 ))
+        if (memcmp( (char *)buf[idx].pvBuffer + 8, (char *)msg->pBuffers[idx].pvBuffer + 8, 8 ))
             status = SEC_E_MESSAGE_ALTERED;
     }
 
@@ -1527,7 +1508,7 @@ static NTSTATUS NTAPI ntlm_SpVerifySignature( LSA_SEC_HANDLE handle, SecBufferDe
         return SEC_E_INVALID_TOKEN;
     if (msg->pBuffers[idx].cbBuffer < 16) return SEC_E_BUFFER_TOO_SMALL;
 
-    return verify_signature( ctx, ctx->flags, msg, &msg->pBuffers[idx] );
+    return verify_signature( ctx, ctx->flags, msg, idx );
 }
 
 static NTSTATUS NTAPI ntlm_SpSealMessage( LSA_SEC_HANDLE handle, ULONG qop, SecBufferDesc *msg, ULONG msg_seq_no )
@@ -1550,7 +1531,7 @@ static NTSTATUS NTAPI ntlm_SpSealMessage( LSA_SEC_HANDLE handle, ULONG qop, SecB
     ctx = (struct ntlm_ctx *)handle;
     if (ctx->flags & FLAG_NEGOTIATE_NTLM2 && ctx->flags & FLAG_NEGOTIATE_SEAL)
     {
-        create_signature( ctx, ctx->flags, msg, &msg->pBuffers[token_idx], SIGN_SEND, FALSE );
+        create_signature( ctx, ctx->flags, msg, token_idx, SIGN_SEND, FALSE );
 
         arc4_process( &ctx->crypt.ntlm2.send_arc4info, msg->pBuffers[data_idx].pvBuffer,
                       msg->pBuffers[data_idx].cbBuffer );
@@ -1561,7 +1542,7 @@ static NTSTATUS NTAPI ntlm_SpSealMessage( LSA_SEC_HANDLE handle, ULONG qop, SecB
     {
         char *sig = msg->pBuffers[token_idx].pvBuffer;
 
-        create_signature( ctx, ctx->flags | FLAG_NEGOTIATE_SIGN, msg, &msg->pBuffers[token_idx], SIGN_SEND, FALSE );
+        create_signature( ctx, ctx->flags | FLAG_NEGOTIATE_SIGN, msg, token_idx, SIGN_SEND, FALSE );
 
         arc4_process( &ctx->crypt.ntlm.arc4info, msg->pBuffers[data_idx].pvBuffer, msg->pBuffers[data_idx].cbBuffer );
         arc4_process( &ctx->crypt.ntlm.arc4info, sig + 4, 12 );
@@ -1574,8 +1555,7 @@ static NTSTATUS NTAPI ntlm_SpSealMessage( LSA_SEC_HANDLE handle, ULONG qop, SecB
 
 static NTSTATUS NTAPI ntlm_SpUnsealMessage( LSA_SEC_HANDLE handle, SecBufferDesc *msg, ULONG msg_seq_no, ULONG *qop )
 {
-    int data_idx, stream_idx, token_idx;
-    SecBuffer token_buf;
+    int token_idx, data_idx;
     struct ntlm_ctx *ctx;
 
     TRACE( "%#Ix, %p, %lu, %p\n", handle, msg, msg_seq_no, qop );
@@ -1583,31 +1563,11 @@ static NTSTATUS NTAPI ntlm_SpUnsealMessage( LSA_SEC_HANDLE handle, SecBufferDesc
 
     if (!handle) return SEC_E_INVALID_HANDLE;
 
-    if (!msg || !msg->pBuffers || msg->cBuffers < 2) return SEC_E_INVALID_TOKEN;
+    if (!msg || !msg->pBuffers || msg->cBuffers < 2 ||
+        (token_idx = get_buffer_index( msg, SECBUFFER_TOKEN )) == -1 ||
+        (data_idx = get_buffer_index( msg, SECBUFFER_DATA )) == -1) return SEC_E_INVALID_TOKEN;
 
-    data_idx = get_buffer_index( msg, SECBUFFER_DATA );
-    stream_idx = get_buffer_index( msg, SECBUFFER_STREAM );
-    token_idx = get_buffer_index( msg, SECBUFFER_TOKEN );
-
-    if ((token_idx == -1 && stream_idx == -1) || (stream_idx != -1 && token_idx != -1) || data_idx == -1)
-        return SEC_E_INVALID_TOKEN;
-
-    if (stream_idx != -1)
-    {
-        if (msg->pBuffers[stream_idx].cbBuffer < 16) return SEC_E_BUFFER_TOO_SMALL;
-        token_buf.BufferType = SECBUFFER_TOKEN;
-        token_buf.cbBuffer = 16;
-        token_buf.pvBuffer = msg->pBuffers[stream_idx].pvBuffer;
-
-        /* native decrypts in-place even when an appropriately sized data buffer is supplied */
-        msg->pBuffers[data_idx].pvBuffer = (char *)msg->pBuffers[stream_idx].pvBuffer + 16;
-        msg->pBuffers[data_idx].cbBuffer = msg->pBuffers[stream_idx].cbBuffer - 16;
-    }
-    else
-    {
-        if (msg->pBuffers[token_idx].cbBuffer < 16) return SEC_E_BUFFER_TOO_SMALL;
-        token_buf = msg->pBuffers[token_idx];
-    }
+    if (msg->pBuffers[token_idx].cbBuffer < 16) return SEC_E_BUFFER_TOO_SMALL;
 
     ctx = (struct ntlm_ctx *)handle;
     if (ctx->flags & FLAG_NEGOTIATE_NTLM2 && ctx->flags & FLAG_NEGOTIATE_SEAL)
@@ -1619,7 +1579,7 @@ static NTSTATUS NTAPI ntlm_SpUnsealMessage( LSA_SEC_HANDLE handle, SecBufferDesc
 
     /* make sure we use a session key for the signature check, SealMessage always does that,
        even in the dummy case */
-    return verify_signature( ctx, ctx->flags | FLAG_NEGOTIATE_SIGN, msg, &token_buf );
+    return verify_signature( ctx, ctx->flags | FLAG_NEGOTIATE_SIGN, msg, token_idx );
 }
 
 static SECPKG_USER_FUNCTION_TABLE ntlm_user_table =

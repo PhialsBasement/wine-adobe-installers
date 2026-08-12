@@ -39,11 +39,6 @@ static HTHEME (WINAPI *pGetWindowTheme)(HWND);
 static BOOL (WINAPI *pIsThemeBackgroundPartiallyTransparent)(HTHEME, int, int);
 
 static BOOL (WINAPI *pInitCommonControlsEx)(const INITCOMMONCONTROLSEX*);
-
-static HIMAGELIST (WINAPI *pImageList_Create)(int, int, UINT, int, int);
-static BOOL (WINAPI *pImageList_Destroy)(HIMAGELIST);
-static int (WINAPI *pImageList_Add)(HIMAGELIST, HBITMAP, HBITMAP);
-
 static const char *TEST_CALLBACK_TEXT = "callback_text";
 
 static TVITEMA g_item_expanding, g_item_expanded;
@@ -57,7 +52,6 @@ static char *g_endedit_overwrite_ptr;
 static HFONT g_customdraw_font;
 static BOOL g_v6;
 static int g_reject_tvn_itemexpanding = 0;
-static int g_click_delete_test = 0;
 
 #define NUM_MSG_SEQUENCES   3
 #define TREEVIEW_SEQ_INDEX  0
@@ -249,20 +243,6 @@ static const struct message test_right_click_seq[] = {
     { 0 }
 };
 
-static const struct message test_click_delete_seq[] = {
-    { WM_LBUTTONDOWN, sent|wparam, MK_LBUTTON },
-    { WM_CAPTURECHANGED, sent|defwinproc },
-    { 0x90, sent|defwinproc|optional },
-    { WM_SHOWWINDOW, sent|defwinproc|wparam|lparam,  0, 0 },
-    { WM_WINDOWPOSCHANGING, sent|defwinproc },
-    { WM_WINDOWPOSCHANGED, sent|defwinproc },
-    { WM_KILLFOCUS, sent|defwinproc|optional },
-    { WM_IME_SETCONTEXT, sent|defwinproc|wparam|optional, 0 },
-    { WM_DESTROY, sent|defwinproc },
-    { WM_NCDESTROY, sent|defwinproc },
-    { 0 }
-};
-
 static const struct message parent_expand_seq[] = {
     { WM_NOTIFY, sent|id, 0, 0, TVN_ITEMEXPANDINGA },
     { WM_NOTIFY, sent|id, 0, 0, TVN_ITEMEXPANDEDA },
@@ -271,7 +251,6 @@ static const struct message parent_expand_seq[] = {
 
 static const struct message parent_expand_kb_seq[] = {
     { WM_NOTIFY, sent|id, 0, 0, TVN_KEYDOWN },
-    { WM_CANCELMODE, sent|optional },
     { WM_NOTIFY, sent|id, 0, 0, TVN_ITEMEXPANDINGA },
     { WM_NOTIFY, sent|id, 0, 0, TVN_ITEMEXPANDEDA },
     { WM_CHANGEUISTATE, sent|optional },
@@ -1499,15 +1478,6 @@ static LRESULT CALLBACK parent_wnd_proc(HWND hWnd, UINT message, WPARAM wParam, 
                 ok(selected == hChild, "child item should still be selected\n");
                 break;
             }
-            case NM_CLICK:
-            {
-                if (g_click_delete_test)
-                {
-                    DestroyWindow(pHdr->hwndFrom);
-                    return FALSE;
-                }
-                break;
-            }
             }
         }
         break;
@@ -2570,67 +2540,6 @@ static void test_htreeitem_layout(BOOL is_version_6)
     DestroyWindow(hTree);
 }
 
-/* Create a 3-state (unchecked/checked/indeterminate) image list */
-static HIMAGELIST setup_3state_imagelist(HWND wndTree)
-{
-    int itemHeight;
-    HDC dc; HBITMAP bmp;
-    RECT rcDraw;
-    const HBRUSH brush = (HBRUSH)GetStockObject(DC_BRUSH);
-    HIMAGELIST images;
-    HGDIOBJ restore;
-
-    if (wndTree == NULL) return NULL;
-    itemHeight = (int)SendMessageA(wndTree, TVM_GETITEMHEIGHT, 0, 0);
-    if ( itemHeight <= 0 ) return NULL;
-    dc = GetDC(wndTree);
-    if ( dc == NULL ) return NULL;
-    bmp = CreateCompatibleBitmap(dc, itemHeight, itemHeight);
-    ReleaseDC(wndTree, dc);
-    if ( bmp == NULL ) return NULL;
-
-    images = pImageList_Create(itemHeight, itemHeight, ILC_COLORDDB, 0, 5);
-    if ( images == NULL ) return NULL;
-
-    dc = CreateCompatibleDC(NULL);
-    if ( dc == NULL )
-    {
-        pImageList_Destroy(images);
-        return NULL;
-    }
-
-    rcDraw.left = 0; rcDraw.top = 0; rcDraw.right = itemHeight; rcDraw.bottom = itemHeight;
-
-    SetDCBrushColor(dc, GetSysColor(COLOR_WINDOW));
-
-    restore = SelectObject(dc, bmp);
-    FillRect(dc, &rcDraw, brush);
-    SelectObject(dc, restore);
-    pImageList_Add(images, bmp, NULL);
-
-    restore = SelectObject(dc, bmp);
-    FillRect(dc, &rcDraw, brush);
-    DrawFrameControl(dc, &rcDraw, DFC_BUTTON, DFCS_BUTTONCHECK);
-    SelectObject(dc, restore);
-    pImageList_Add(images, bmp, NULL);
-
-    restore = SelectObject(dc, bmp);
-    FillRect(dc, &rcDraw, brush);
-    DrawFrameControl(dc, &rcDraw, DFC_BUTTON, DFCS_BUTTONCHECK | DFCS_CHECKED);
-    SelectObject(dc, restore);
-    pImageList_Add(images, bmp, NULL);
-
-    restore = SelectObject(dc, bmp);
-    FillRect(dc, &rcDraw, brush);
-    DrawFrameControl(dc, &rcDraw, DFC_BUTTON, DFCS_BUTTONCHECK | DFCS_CHECKED | DFCS_BUTTON3STATE);
-    SelectObject(dc, restore);
-    pImageList_Add(images, bmp, NULL);
-
-    DeleteDC(dc);
-
-    return images;
-}
-
 static void test_TVS_CHECKBOXES(void)
 {
     HIMAGELIST himl, himl2;
@@ -2812,79 +2721,6 @@ static void test_TVS_CHECKBOXES(void)
 
     himl = (HIMAGELIST)SendMessageA(hTree, TVM_GETIMAGELIST, TVSIL_STATE, 0);
     ok(himl != NULL, "got %p\n", himl);
-
-    /*
-    Check cycling item states with default image list
-    1 >> 2 >> 1
-    */
-
-    item.hItem = hChild;
-    item.mask = TVIF_STATE;
-    item.state = INDEXTOSTATEIMAGEMASK(1);
-    ret = SendMessageA(hTree, TVM_SETITEMA, 0, (LPARAM)&item);
-    expect(TRUE, ret);
-
-    ret = SendMessageA(hTree,TVM_SELECTITEM,TVGN_CARET,(LPARAM)hChild);
-    expect(TRUE, ret);
-
-    SendMessageA(hTree, WM_KEYDOWN, VK_SPACE, 0);
-    item.hItem = hChild;
-    item.mask = TVIF_STATE;
-    ret = SendMessageA(hTree, TVM_GETITEMA, 0, (LPARAM)&item);
-    expect(TRUE, ret);
-    ok((item.state&TVIS_STATEIMAGEMASK) == INDEXTOSTATEIMAGEMASK(2), "item.state=%x\n", item.state);
-
-    SendMessageA(hTree, WM_KEYDOWN, VK_SPACE, 0);
-    item.hItem = hChild;
-    item.mask = TVIF_STATE;
-    ret = SendMessageA(hTree, TVM_GETITEMA, 0, (LPARAM)&item);
-    expect(TRUE, ret);
-    ok((item.state&TVIS_STATEIMAGEMASK) == INDEXTOSTATEIMAGEMASK(1), "item.state=%x\n", item.state);
-
-    /*
-    Check cycling item states with 3-state image list
-    1 >> 2 >> 3 >> 1
-    */
-
-    himl2 = setup_3state_imagelist(hTree);
-    ok(himl2 != NULL, "setup_3state_imagelist: %p\n", himl2);
-
-    himl = (HIMAGELIST)SendMessageA(hTree, TVM_SETIMAGELIST, TVSIL_STATE, (LPARAM)himl2);
-    ok(himl != NULL, "got %p\n", himl);
-
-    item.hItem = hChild;
-    item.mask = TVIF_STATE;
-    item.state = INDEXTOSTATEIMAGEMASK(1);
-    ret = SendMessageA(hTree, TVM_SETITEMA, 0, (LPARAM)&item);
-    expect(TRUE, ret);
-
-    ret = SendMessageA(hTree,TVM_SELECTITEM,TVGN_CARET,(LPARAM)hChild);
-    expect(TRUE, ret);
-
-    SendMessageA(hTree, WM_KEYDOWN, VK_SPACE, 0);
-    item.hItem = hChild;
-    item.mask = TVIF_STATE;
-    ret = SendMessageA(hTree, TVM_GETITEMA, 0, (LPARAM)&item);
-    expect(TRUE, ret);
-    ok((item.state&TVIS_STATEIMAGEMASK) == INDEXTOSTATEIMAGEMASK(2), "item.state=%x\n", item.state);
-
-    SendMessageA(hTree, WM_KEYDOWN, VK_SPACE, 0);
-    item.hItem = hChild;
-    item.mask = TVIF_STATE;
-    ret = SendMessageA(hTree, TVM_GETITEMA, 0, (LPARAM)&item);
-    expect(TRUE, ret);
-    ok((item.state&TVIS_STATEIMAGEMASK) == INDEXTOSTATEIMAGEMASK(3), "item.state=%x\n", item.state);
-
-    SendMessageA(hTree, WM_KEYDOWN, VK_SPACE, 0);
-    item.hItem = hChild;
-    item.mask = TVIF_STATE;
-    ret = SendMessageA(hTree, TVM_GETITEMA, 0, (LPARAM)&item);
-    expect(TRUE, ret);
-    ok((item.state&TVIS_STATEIMAGEMASK) == INDEXTOSTATEIMAGEMASK(1), "item.state=%x\n", item.state);
-
-    himl = (HIMAGELIST)SendMessageA(hTree, TVM_SETIMAGELIST, TVSIL_STATE, (LPARAM)himl);
-    ok(himl == himl2, "got %p\n", himl);
-    pImageList_Destroy(himl2);
 
     DestroyWindow(hTree);
 }
@@ -3287,43 +3123,6 @@ static void test_right_click(void)
     DestroyWindow(hTree);
 }
 
-static void test_treeview_delete_midclick(void)
-{
-    HWND treeview;
-    RECT rc;
-    POINT pt, orig_pos;
-
-    g_click_delete_test = 1;
-    treeview = create_treeview_control(0);
-    fill_tree(treeview);
-    ShowWindow(hMainWnd, SW_SHOW);
-    UpdateWindow(hMainWnd);
-
-    *(HTREEITEM *)&rc = hRoot;
-    SendMessageA(treeview, TVM_GETITEMRECT, TRUE, (LPARAM)&rc);
-
-    pt.x = (rc.left + rc.right) / 2;
-    pt.y = (rc.top + rc.bottom) / 2;
-    ClientToScreen(hMainWnd, &pt);
-    GetCursorPos(&orig_pos);
-    SetCursorPos(pt.x, pt.y);
-    ScreenToClient(treeview, &pt);
-
-    flush_events();
-    flush_sequences(sequences, NUM_MSG_SEQUENCES);
-
-    PostMessageA(treeview, WM_LBUTTONDOWN, MK_LBUTTON, MAKELPARAM(pt.x, pt.y));
-    if (IsWindow(treeview))
-        PostMessageA(treeview, WM_LBUTTONUP, 0, MAKELPARAM(pt.x, pt.y));
-
-    flush_events();
-    ok_sequence(sequences, TREEVIEW_SEQ_INDEX, test_click_delete_seq, "treeview click and destroy sequence", FALSE);
-
-    flush_sequences(sequences, NUM_MSG_SEQUENCES);
-    SetCursorPos(orig_pos.x, orig_pos.y);
-    g_click_delete_test = 0;
-}
-
 static void init_functions(void)
 {
     HMODULE hComCtl32 = LoadLibraryA("comctl32.dll");
@@ -3331,9 +3130,6 @@ static void init_functions(void)
 
 #define X(module, f) p##f = (void*)GetProcAddress(module, #f);
     X(hComCtl32, InitCommonControlsEx);
-    X(hComCtl32, ImageList_Create);
-    X(hComCtl32, ImageList_Destroy);
-    X(hComCtl32, ImageList_Add);
 
     X(hUxtheme, GetWindowTheme);
     X(hUxtheme, IsThemeBackgroundPartiallyTransparent);
@@ -3410,7 +3206,6 @@ START_TEST(treeview)
     test_TVS_FULLROWSELECT();
     test_TVM_SORTCHILDREN();
     test_right_click();
-    test_treeview_delete_midclick();
 
     if (!load_v6_module(&ctx_cookie, &hCtx))
     {
@@ -3446,7 +3241,6 @@ START_TEST(treeview)
     test_WM_KEYDOWN();
     test_TVS_FULLROWSELECT();
     test_TVM_SORTCHILDREN();
-    test_treeview_delete_midclick();
 
     unload_v6_module(ctx_cookie, hCtx);
 }

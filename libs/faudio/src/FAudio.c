@@ -226,7 +226,7 @@ uint32_t FAudio_Initialize(
 	FAudioProcessor XAudio2Processor
 ) {
 	LOG_API_ENTER(audio)
-	FAudio_assert((Flags & ~(FAUDIO_DEBUG_ENGINE | FAUDIO_1024_QUANTUM)) == 0);
+	FAudio_assert(Flags == 0 || Flags == FAUDIO_DEBUG_ENGINE);
 	FAudio_assert(XAudio2Processor == FAUDIO_DEFAULT_PROCESSOR);
 
 	audio->initFlags = Flags;
@@ -1614,17 +1614,6 @@ uint32_t FAudioVoice_SetEffectParameters(
 		return 0;
 	}
 
-	if (voice->effects.parameters == NULL)
-	{
-		/* Cannot set parameters if there is no effect chain! */
-		LOG_ERROR(
-			voice->audio,
-			"Setting effect parameters on voice with no effect chain: %p",
-			(void*) voice
-		);
-		return FAUDIO_E_INVALID_CALL;
-	}
-
 	if (voice->effects.parameters[EffectIndex] == NULL)
 	{
 		voice->effects.parameters[EffectIndex] = voice->audio->pMalloc(
@@ -2610,7 +2599,7 @@ uint32_t FAudioSourceVoice_SubmitSourceBuffer(
 	const FAudioBufferWMA *pBufferWMA
 ) {
 	uint32_t adpcmMask, *adpcmByteCount;
-	uint32_t playBegin, playLength, loopBegin, loopLength, bufferLength;
+	uint32_t playBegin, playLength, loopBegin, loopLength;
 	FAudioBufferEntry *entry, *list;
 
 	LOG_API_ENTER(voice->audio)
@@ -2649,43 +2638,37 @@ uint32_t FAudioSourceVoice_SubmitSourceBuffer(
 		return FAUDIO_E_INVALID_CALL;
 	}
 
-	if (voice->src.format->wFormatTag == FAUDIO_FORMAT_MSADPCM)
-	{
-		FAudioADPCMWaveFormat *fmtex = (FAudioADPCMWaveFormat*) voice->src.format;
-		bufferLength =
-			pBuffer->AudioBytes /
-			fmtex->wfx.nBlockAlign *
-			fmtex->wSamplesPerBlock;
-	}
-	else if (voice->src.format->wFormatTag == FAUDIO_FORMAT_XMAUDIO2)
-	{
-		FAudioXMA2WaveFormat *fmtex = (FAudioXMA2WaveFormat*) voice->src.format;
-		bufferLength = fmtex->dwSamplesEncoded;
-	}
-	else if (pBufferWMA != NULL)
-	{
-		bufferLength =
-			pBufferWMA->pDecodedPacketCumulativeBytes[pBufferWMA->PacketCount - 1] /
-			(voice->src.format->nChannels * voice->src.format->wBitsPerSample / 8);
-	}
-	else
-	{
-		bufferLength =
-			pBuffer->AudioBytes /
-			voice->src.format->nBlockAlign;
-	}
-
 	/* PlayLength Default */
 	if (playLength == 0)
 	{
-		playLength = bufferLength - playBegin;
-	}
-	else if (playBegin + playLength > bufferLength || playBegin + playLength < playLength)
-	{
-		/* Reading past the end of the buffer, or begin + length overflow uint32_t, which
-		 * would also read past the end of the buffer. */
-		LOG_API_EXIT(voice->audio)
-		return FAUDIO_E_INVALID_CALL;
+		if (voice->src.format->wFormatTag == FAUDIO_FORMAT_MSADPCM)
+		{
+			FAudioADPCMWaveFormat *fmtex = (FAudioADPCMWaveFormat*) voice->src.format;
+			playLength = (
+				pBuffer->AudioBytes /
+				fmtex->wfx.nBlockAlign *
+				fmtex->wSamplesPerBlock
+			) - playBegin;
+		}
+		else if (voice->src.format->wFormatTag == FAUDIO_FORMAT_XMAUDIO2)
+		{
+			FAudioXMA2WaveFormat *fmtex = (FAudioXMA2WaveFormat*) voice->src.format;
+			playLength = fmtex->dwSamplesEncoded - playBegin;
+		}
+		else if (pBufferWMA != NULL)
+		{
+			playLength = (
+				pBufferWMA->pDecodedPacketCumulativeBytes[pBufferWMA->PacketCount - 1] /
+				(voice->src.format->nChannels * voice->src.format->wBitsPerSample / 8)
+			) - playBegin;
+		}
+		else
+		{
+			playLength = (
+				pBuffer->AudioBytes /
+				voice->src.format->nBlockAlign
+			) - playBegin;
+		}
 	}
 
 	if (pBuffer->LoopCount > 0 && pBufferWMA == NULL && voice->src.format->wFormatTag != FAUDIO_FORMAT_XMAUDIO2)

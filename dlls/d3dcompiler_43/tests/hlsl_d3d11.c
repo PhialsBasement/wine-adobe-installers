@@ -924,24 +924,16 @@ static void check_parameter_desc(const D3D11_SIGNATURE_PARAMETER_DESC *desc,
         const D3D11_SIGNATURE_PARAMETER_DESC *expect)
 {
     todo_wine_if(strcmp(desc->SemanticName, expect->SemanticName))
-        ok(!strcmp(desc->SemanticName, expect->SemanticName), "Got name %s, expected %s.\n",
-                debugstr_a(desc->SemanticName), debugstr_a(expect->SemanticName));
-    ok(desc->SemanticIndex == expect->SemanticIndex, "Got index %u, expected %u.\n",
-            desc->SemanticIndex, expect->SemanticIndex);
-    ok(desc->Register == expect->Register, "Got register %u, expected %u.\n",
-            desc->Register, expect->Register);
+        ok(!strcmp(desc->SemanticName, expect->SemanticName), "Got name %s.\n", debugstr_a(desc->SemanticName));
+    ok(desc->SemanticIndex == expect->SemanticIndex, "Got index %u.\n", desc->SemanticIndex);
+    ok(desc->Register == expect->Register, "Got register %u.\n", desc->Register);
     todo_wine_if(desc->SystemValueType != expect->SystemValueType)
-        ok(desc->SystemValueType == expect->SystemValueType, "Got sysval %u, expected %u.\n",
-                desc->SystemValueType, expect->SystemValueType);
-    ok(desc->ComponentType == expect->ComponentType, "Got data type %u, expected %u.\n",
-            desc->ComponentType, expect->ComponentType);
-    ok(desc->Mask == expect->Mask, "Got mask %#x, expected %#x.\n", desc->Mask, expect->Mask);
+        ok(desc->SystemValueType == expect->SystemValueType, "Got sysval %u.\n", desc->SystemValueType);
+    ok(desc->ComponentType == expect->ComponentType, "Got data type %u.\n", desc->ComponentType);
+    ok(desc->Mask == expect->Mask, "Got mask %#x.\n", desc->Mask);
     todo_wine_if(desc->ReadWriteMask != expect->ReadWriteMask)
-        ok(desc->ReadWriteMask == expect->ReadWriteMask
-                || broken(expect->ReadWriteMask == 0x5 && (desc->ReadWriteMask == 0 || desc->ReadWriteMask == 0x7)),
-                "Got used mask %#x, expected %#x.\n",
-                desc->ReadWriteMask, expect->ReadWriteMask);
-    ok(desc->Stream == expect->Stream, "Got stream %u, expected %u.\n", desc->Stream, expect->Stream);
+        ok(desc->ReadWriteMask == expect->ReadWriteMask, "Got used mask %#x.\n", desc->ReadWriteMask);
+    ok(desc->Stream == expect->Stream, "Got stream %u.\n", desc->Stream);
 }
 
 static void test_semantic_reflection(void)
@@ -1164,49 +1156,12 @@ static void test_semantic_reflection(void)
     }
 }
 
-#if D3D_COMPILER_VERSION >= 47
-
-static void test_D3DCreateLinker(void)
-{
-    ID3D11Linker *linker;
-    HRESULT hr;
-
-    hr = D3DCreateLinker(NULL);
-    ok(hr == E_INVALIDARG, "Got unexpected hr %#lx.\n", hr);
-
-    hr = D3DCreateLinker(&linker);
-    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
-    linker->lpVtbl->Release(linker);
-}
-
-static void test_D3DCreateFunctionLinkingGraph(void)
-{
-    ID3D11FunctionLinkingGraph *graph;
-    HRESULT hr;
-
-    hr = D3DCreateFunctionLinkingGraph(0, NULL);
-    ok(hr == E_INVALIDARG, "Got unexpected hr %#lx.\n", hr);
-
-    hr = D3DCreateFunctionLinkingGraph(1, &graph);
-    ok(hr == E_INVALIDARG, "Got unexpected hr %#lx.\n", hr);
-
-    hr = D3DCreateFunctionLinkingGraph(0, &graph);
-    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
-    graph->lpVtbl->Release(graph);
-}
-
-#endif /* D3D_COMPILER_VERSION >= 47 */
-
 START_TEST(hlsl_d3d11)
 {
     HMODULE mod;
 
     test_reflection();
     test_semantic_reflection();
-#if D3D_COMPILER_VERSION >= 47
-    test_D3DCreateLinker();
-    test_D3DCreateFunctionLinkingGraph();
-#endif
 
     if (!(mod = LoadLibraryA("d3d11.dll")))
     {

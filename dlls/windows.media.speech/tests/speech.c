@@ -58,6 +58,8 @@
 #define IAsyncHandler_IInspectable_iface IAsyncOperationCompletedHandler_IInspectable_iface
 
 HRESULT (WINAPI *pDllGetActivationFactory)(HSTRING, IActivationFactory **);
+static BOOL is_win10_1507 = FALSE;
+static BOOL is_win10_1709 = FALSE;
 
 static inline LONG get_ref(IUnknown *obj)
 {
@@ -200,7 +202,23 @@ HRESULT WINAPI recognition_result_handler_Invoke( IHandler_RecognitionResult *if
                                                   ISpeechContinuousRecognitionSession *sender,
                                                   ISpeechContinuousRecognitionResultGeneratedEventArgs *args )
 {
-    trace("iface %p, sender %p, args %p.\n", iface, sender, args);
+    ISpeechRecognitionResult *result;
+    HSTRING hstring;
+    HRESULT hr;
+
+    if (!args) return S_OK;
+
+    hr = ISpeechContinuousRecognitionResultGeneratedEventArgs_get_Result(args, &result);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+
+    hr = ISpeechRecognitionResult_get_Text(result, &hstring);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+
+    trace("iface %p, sender %p, args %p, text %s.\n", iface, sender, args, debugstr_w(WindowsGetStringRawBuffer(hstring, NULL)));
+
+    WindowsDeleteString(hstring);
+    ISpeechRecognitionResult_Release(result);
+
     return S_OK;
 }
 
@@ -428,9 +446,9 @@ static void check_async_info_( unsigned int line, IInspectable *async_obj, UINT3
 
     async_id = 0xdeadbeef;
     hr = IAsyncInfo_get_Id(async_info, &async_id);
-    if (expect_status < 4) ok_(__FILE__, line)(hr == S_OK, "IAsyncInfo_get_Id returned %#lx\n", hr);
-    else ok_(__FILE__, line)(hr == E_ILLEGAL_METHOD_CALL, "IAsyncInfo_get_Id returned %#lx\n", hr);
-    todo_wine_if(expect_id != 1) ok_(__FILE__, line)(async_id == expect_id, "got async_id %#x\n", async_id);
+    if (expect_status < 4) todo_wine ok_(__FILE__, line)(hr == S_OK, "IAsyncInfo_get_Id returned %#lx\n", hr);
+    else todo_wine ok_(__FILE__, line)(hr == E_ILLEGAL_METHOD_CALL, "IAsyncInfo_get_Id returned %#lx\n", hr);
+    todo_wine ok_(__FILE__, line)(async_id == expect_id, "got async_id %#x\n", async_id);
 
     async_status = 0xdeadbeef;
     hr = IAsyncInfo_get_Status(async_info, &async_status);
@@ -703,8 +721,8 @@ static void _check_comparable_presence( unsigned line, IVectorView_VoiceInformat
         ok_(__FILE__, line)(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
         hr = IVoiceInformation_get_Gender(vc_voice, &vc_gender);
         ok_(__FILE__, line)(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
-        trace("%2u] %s | %s | %s | %u\n",
-              idx, debugstr_hstring(vc_display), debugstr_hstring(vc_id), debugstr_hstring(vc_language), vc_gender);
+        trace("%u] %s/%s/%s/%u\n",
+              idx - 1, debugstr_hstring(vc_display), debugstr_hstring(vc_id), debugstr_hstring(vc_language), vc_gender);
 
         if (SUCCEEDED(WindowsCompareStringOrdinal(in_display, vc_display, &cmp)) && !cmp &&
             SUCCEEDED(WindowsCompareStringOrdinal(in_id, vc_id, &cmp)) && !cmp &&
@@ -722,7 +740,7 @@ static void _check_comparable_presence( unsigned line, IVectorView_VoiceInformat
     ok(idx != 0, "Vector view shouldn't be empty!\n");
     ok(idx == size, "Incoherent index/size %u/%u!\n", idx, size);
 
-    ok_(__FILE__, line)(found_count == 1, "Found several (%u) instances of %s | %s | %s | %u\n",
+    ok_(__FILE__, line)(found_count == 1, "Found several (%u) instances of %s/%s/%s/%u\n",
                         found_count,
                         debugstr_hstring(in_display), debugstr_hstring(in_id), debugstr_hstring(in_language), in_gender);
 
@@ -793,6 +811,7 @@ static void test_ActivationFactory(void)
             ref = ISpeechRecognizerStatics2_Release(recognizer_statics2);
             ok(ref == 2, "Got unexpected refcount: %lu.\n", ref);
         }
+        else is_win10_1507 = TRUE;
 
         check_interface(factory3, &IID_IInstalledVoicesStatic, FALSE);
 
@@ -846,11 +865,11 @@ static void test_SpeechSynthesizer(void)
     IVectorView_IMediaMarker *media_markers = NULL;
     IVectorView_VoiceInformation *voices = NULL;
     IInstalledVoicesStatic *voices_static = NULL;
-    ISpeechSynthesisStream *ss_stream = NULL, *tmp;
+    ISpeechSynthesisStream *ss_stream = NULL;
     IRandomAccessStream *ra_stream;
     IInputStream *inp_stream;
     IBuffer *buffer = NULL, *buffer2 = NULL;
-    IVoiceInformation *voice, *voice2;
+    IVoiceInformation *voice;
     IInspectable *inspectable = NULL, *tmp_inspectable = NULL;
     IAgileObject *agile_object = NULL, *tmp_agile_object = NULL;
     ISpeechSynthesizer *synthesizer;
@@ -858,7 +877,7 @@ static void test_SpeechSynthesizer(void)
     IClosable *closable;
     struct async_inspectable_handler async_inspectable_handler;
     HMODULE hdll;
-    HSTRING str, str2, default_voice_id = NULL;
+    HSTRING str, str2, default_voice_id;
     UINT64 value;
     HRESULT hr;
     UINT32 size, idx;
@@ -933,10 +952,7 @@ static void test_SpeechSynthesizer(void)
     IAgileObject_Release(tmp_agile_object);
 
     hr = IInstalledVoicesStatic_get_AllVoices(voices_static, &voices);
-    ok(hr == S_OK || broken(hr == COR_E_FILENOTFOUND) /* Broken on Win 8 + 8.1 */, "IInstalledVoicesStatic_get_AllVoices failed, hr %#lx\n", hr);
-
-    if (FAILED(hr))
-        goto skip_voices;
+    ok(hr == S_OK, "IInstalledVoicesStatic_get_AllVoices failed, hr %#lx\n", hr);
 
     hr = IVectorView_VoiceInformation_QueryInterface(voices, &IID_IInspectable, (void **)&tmp_inspectable);
     ok(hr == S_OK, "IVectorView_VoiceInformation_QueryInterface voices failed, hr %#lx\n", hr);
@@ -952,23 +968,6 @@ static void test_SpeechSynthesizer(void)
     ok(size != 0 && size != 0xdeadbeef, "IVectorView_VoiceInformation_get_Size returned %u\n", size);
 
     voice = (IVoiceInformation *)0xdeadbeef;
-    hr = IVectorView_VoiceInformation_GetAt(voices, 0, &voice);
-    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
-
-    hr = IVectorView_VoiceInformation_GetAt(voices, 0, &voice2);
-    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
-    ok(voice == voice2, "Didn't get the same object\n");
-
-    if (voice && voice != (IVoiceInformation *)0xdeadbeef){
-        ref = IVoiceInformation_Release(voice);
-        ok(ref == 2, "Unexpected ref count %ld\n", ref);
-    }
-    if (voice2 && voice2 != (IVoiceInformation *)0xdeadbeef){
-        ref = IVoiceInformation_Release(voice2);
-        ok(ref == 1, "Unexpected ref count %ld\n", ref);
-    }
-
-    voice = (IVoiceInformation *)0xdeadbeef;
     hr = IVectorView_VoiceInformation_GetAt(voices, size, &voice);
     ok(hr == E_BOUNDS, "IVectorView_VoiceInformation_GetAt failed, hr %#lx\n", hr);
     ok(voice == NULL, "IVectorView_VoiceInformation_GetAt returned %p\n", voice);
@@ -976,16 +975,6 @@ static void test_SpeechSynthesizer(void)
     hr = IVectorView_VoiceInformation_GetMany(voices, size, 1, &voice, &size);
     ok(hr == S_OK, "IVectorView_VoiceInformation_GetMany failed, hr %#lx\n", hr);
     ok(size == 0, "IVectorView_VoiceInformation_GetMany returned count %u\n", size);
-
-    hr = IVectorView_VoiceInformation_GetMany(voices, 0, 1, &voice, &size);
-    ok(hr == S_OK, "IVectorView_VoiceInformation_GetMany failed, hr %#lx\n", hr);
-    ok(size == 1, "IVectorView_VoiceInformation_GetMany returned count %u\n", size);
-    ok(voice == voice2, "Didn't get the same object\n");
-    if (size)
-    {
-        ref = IVoiceInformation_Release(voice);
-        ok(ref == 1, "Unexpected ref count %ld\n", ref);
-    }
 
     hr = IInstalledVoicesStatic_get_DefaultVoice(voices_static, &voice);
     ok(hr == S_OK, "IInstalledVoicesStatic_get_DefaultVoice failed, hr %#lx\n", hr);
@@ -1009,7 +998,6 @@ static void test_SpeechSynthesizer(void)
     ref = IVoiceInformation_Release(voice);
     ok(ref == 0, "Got unexpected ref %lu.\n", ref);
 
-skip_voices:
     IInstalledVoicesStatic_Release(voices_static);
     IAgileObject_Release(agile_object);
     IInspectable_Release(inspectable);
@@ -1031,11 +1019,8 @@ skip_voices:
     hr = IVoiceInformation_get_Id(voice, &str);
     ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
 
-    if (default_voice_id)
-    {
-        hr = WindowsCompareStringOrdinal(str, default_voice_id, &cmp);
-        ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
-    }
+    hr = WindowsCompareStringOrdinal(str, default_voice_id, &cmp);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
 
     hr = WindowsDeleteString(str);
     ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
@@ -1044,23 +1029,6 @@ skip_voices:
 
     hr = WindowsDeleteString(default_voice_id);
     ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
-
-    if (voices)
-    {
-        voice = (IVoiceInformation *)0xdeadbeef;
-        hr = IVectorView_VoiceInformation_GetAt(voices, 0, &voice);
-        ok(hr == S_OK, "IVectorView_VoiceInformation_GetAt failed, hr %#lx\n", hr);
-        ok(voice != (IVoiceInformation *)0xdeadbeef, "IVectorView_VoiceInformation_GetAt returned %p\n", voice);
-
-        ref = IVectorView_VoiceInformation_Release(voices);
-        ok(!ref, "Got unexpected ref %lu.\n", ref);
-
-        hr = ISpeechSynthesizer_put_Voice(synthesizer, voice);
-        ok(hr == S_OK, "ISpeechSynthesizer_put_Voice failed, hr %#lx\n", hr);
-
-        ref = IVoiceInformation_Release(voice);
-        ok(ref == 1, "Got unexpected ref %lu.\n", ref);
-    }
 
     /* Test SynthesizeTextToStreamAsync */
     hr = WindowsCreateString(simple_synth_text, wcslen(simple_synth_text), &str);
@@ -1118,12 +1086,6 @@ skip_voices:
     ref = IBuffer_Release(buffer2);
     ok(!ref, "got refcount %ld.\n", ref);
 
-    tmp = (void *)0xdeadbeef;
-    hr = IAsyncOperation_SpeechSynthesisStream_GetResults(operation_ss_stream, &tmp);
-    ok(hr == S_OK, "IAsyncOperation_SpeechSynthesisStream_GetResults failed, hr %#lx\n", hr);
-    todo_wine ok(tmp == NULL, "Got %p.\n", tmp);
-    if (tmp && tmp != (void *)0xdeadbeef) ISpeechSynthesisStream_Release(tmp);
-
     hr = ISpeechSynthesisStream_get_Markers(ss_stream, &media_markers);
     ok(hr == S_OK, "ISpeechSynthesisStream_get_Markers failed, hr %#lx\n", hr);
     check_interface(media_markers, &IID_IVectorView_IMediaMarker, TRUE);
@@ -1134,7 +1096,7 @@ skip_voices:
     ok(ref == 0, "Got unexpected ref %lu.\n", ref);
 
     ref = ISpeechSynthesisStream_Release(ss_stream);
-    todo_wine ok(ref == 0, "Got unexpected ref %lu.\n", ref);
+    ok(ref == 0, "Got unexpected ref %lu.\n", ref);
 
     IAsyncOperation_SpeechSynthesisStream_Release(operation_ss_stream);
 
@@ -1158,7 +1120,7 @@ skip_voices:
     check_interface(ss_stream, &IID_IAgileObject, TRUE);
 
     ref = ISpeechSynthesisStream_Release(ss_stream);
-    todo_wine ok(ref == 0, "Got unexpected ref %lu.\n", ref);
+    ok(ref == 0, "Got unexpected ref %lu.\n", ref);
 
     IAsyncOperation_SpeechSynthesisStream_Release(operation_ss_stream);
 
@@ -1205,12 +1167,12 @@ skip_voices:
 
         if (hr == S_OK)
         {
-            enum SpeechPunctuationSilence punctuation_value;
-            enum SpeechAppendedSilence silence_value;
             ISpeechSynthesizerOptions2 *options2;
             ISpeechSynthesizerOptions3 *options3;
             boolean bool_value;
             DOUBLE double_value;
+            enum SpeechAppendedSilence silence_value;
+            enum SpeechPunctuationSilence punctuation_value;
 
             check_interface(options, &IID_IAgileObject, TRUE);
             bool_value = 0xff;
@@ -1222,26 +1184,23 @@ skip_voices:
             ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
             ok(!bool_value, "Got unepected option %u\n", bool_value);
 
+            check_optional_interface(options, &IID_ISpeechSynthesizerOptions2, TRUE); /* Requires Win10 >= 1709 */
             hr = ISpeechSynthesizerOptions_QueryInterface(options, &IID_ISpeechSynthesizerOptions2, (void **)&options2);
-            ok(hr == S_OK || broken(hr == E_NOINTERFACE), "Got unexpected hr %#lx.\n", hr); /* Requires Win10 >= 1709 */
+            ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
 
-            if (hr == S_OK)
-            {
-                hr = ISpeechSynthesizerOptions2_get_AudioPitch(options2, &double_value);
-                ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
-                ok(double_value == 1.0f, "Got unepected option %f\n", double_value);
+            hr = ISpeechSynthesizerOptions2_get_AudioPitch(options2, &double_value);
+            ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+            ok(double_value == 1.0f, "Got unepected option %f\n", double_value);
 
-                hr = ISpeechSynthesizerOptions2_get_AudioVolume(options2, &double_value);
-                ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
-                ok(double_value == 1.0f, "Got unepected option %f\n", double_value);
+            hr = ISpeechSynthesizerOptions2_get_AudioVolume(options2, &double_value);
+            ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+            ok(double_value == 1.0f, "Got unepected option %f\n", double_value);
 
-                hr = ISpeechSynthesizerOptions2_get_SpeakingRate(options2, &double_value);
-                ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
-                ok(double_value == 1.0f, "Got unepected option %f\n", double_value);
+            hr = ISpeechSynthesizerOptions2_get_SpeakingRate(options2, &double_value);
+            ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+            ok(double_value == 1.0f, "Got unepected option %f\n", double_value);
 
-                ref = ISpeechSynthesizerOptions2_Release(options2);
-                ok(ref == 2, "Got unexpected ref %lu.\n", ref);
-            }
+            ISpeechSynthesizerOptions2_Release(options2);
 
             hr = ISpeechSynthesizerOptions_QueryInterface(options, &IID_ISpeechSynthesizerOptions3, (void **)&options3);
             ok(hr == S_OK || broken(hr == E_NOINTERFACE), "Got unexpected hr %#lx.\n", hr); /* Requires Win10 >= 1803 */
@@ -1259,6 +1218,8 @@ skip_voices:
                 ref = ISpeechSynthesizerOptions3_Release(options3);
                 ok(ref == 2, "Got unexpected ref %lu.\n", ref);
             }
+            else
+                is_win10_1709 = TRUE;
 
             ref = ISpeechSynthesizerOptions_Release(options);
             ok(ref == 1, "Got unexpected ref %lu.\n", ref);
@@ -1404,7 +1365,7 @@ static void test_SpeechRecognizer(void)
     ok(ref == 1, "Got unexpected ref %lu.\n", ref);
 
     hr = RoActivateInstance(hstr, &inspectable);
-    ok(hr == S_OK || broken(hr == SPERR_WINRT_INTERNAL_ERROR), "Got unexpected hr %#lx.\n", hr);
+    ok(hr == S_OK || hr == SPERR_WINRT_INTERNAL_ERROR, "Got unexpected hr %#lx.\n", hr);
 
     if (hr == S_OK)
     {
@@ -1503,13 +1464,10 @@ static void test_SpeechRecognizer(void)
         ok(result_status == SpeechRecognitionResultStatus_Success, "Got unexpected status %#x.\n", result_status);
 
         ref = ISpeechRecognitionCompilationResult_Release(compilation_result);
-        todo_wine ok(!ref , "Got unexpected ref %lu.\n", ref);
+        ok(!ref , "Got unexpected ref %lu.\n", ref);
 
-        compilation_result = (void *)0xdeadbeef;
         hr = IAsyncOperation_SpeechRecognitionCompilationResult_GetResults(operation, &compilation_result);
-        todo_wine ok(hr == E_UNEXPECTED, "Got unexpected hr %#lx.\n", hr);
-        todo_wine ok(compilation_result == (void *)0xdeadbeef, "Got %p.\n", compilation_result);
-        if (compilation_result && compilation_result != (void *)0xdeadbeef) ISpeechRecognitionCompilationResult_Release(compilation_result);
+        ok(hr == E_UNEXPECTED, "Got unexpected hr %#lx.\n", hr);
 
         hr = IAsyncOperation_SpeechRecognitionCompilationResult_QueryInterface(operation, &IID_IAsyncInfo, (void **)&info);
         ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
@@ -1626,7 +1584,7 @@ skip_operation:
     }
     else if (hr == SPERR_WINRT_INTERNAL_ERROR) /* Not sure when this triggers. Probably if a language pack is not installed. */
     {
-        win_skip("Could not init SpeechRecognizer with default language!\n");
+        skip("Could not init SpeechRecognizer with default language!\n");
     }
 
 done:
@@ -1802,7 +1760,7 @@ static void test_Recognition(void)
     static const WCHAR *list_constraint_name = L"Windows.Media.SpeechRecognition.SpeechRecognitionListConstraint";
     static const WCHAR *recognizer_name = L"Windows.Media.SpeechRecognition.SpeechRecognizer";
     static const WCHAR *speech_constraint_tag = L"test_message";
-    static const WCHAR *speech_constraints[] = { L"This is a test.", L"Number 5!", L"What time is it?" };
+    static const WCHAR *speech_constraints[] = { L"This is a test", L"Number 5", L"What time is it" };
     ISpeechRecognitionListConstraintFactory *listconstraint_factory = NULL;
     IAsyncOperation_SpeechRecognitionCompilationResult *operation = NULL;
     IVector_ISpeechRecognitionConstraint *constraints = NULL;
@@ -1843,12 +1801,12 @@ static void test_Recognition(void)
     ok(hr == S_OK, "WindowsCreateString failed, hr %#lx.\n", hr);
 
     hr = RoActivateInstance(hstr, &inspectable);
-    ok(hr == S_OK || broken(hr == SPERR_WINRT_INTERNAL_ERROR || hr == REGDB_E_CLASSNOTREG), "Got unexpected hr %#lx.\n", hr);
+    ok(hr == S_OK || hr == SPERR_WINRT_INTERNAL_ERROR || broken(hr == REGDB_E_CLASSNOTREG), "Got unexpected hr %#lx.\n", hr);
     WindowsDeleteString(hstr);
 
-    if (FAILED(hr))  /* Win 8 and 8.1 and Win10 without enabled SR. */
+    if (FAILED(hr))  /* Win 8 and 8.1 and Win10 without enabled SR. Wine with missing Unix side dependencies. */
     {
-        win_skip("SpeechRecognizer cannot be activated!\n");
+        skip("SpeechRecognizer cannot be activated!\n");
         goto done;
     }
 
@@ -1965,6 +1923,8 @@ static void test_Recognition(void)
     ok(hr == S_OK, "ISpeechRecognizer2_get_State failed, hr %#lx.\n", hr);
     ok(recog_state == SpeechRecognizerState_Capturing || broken(recog_state == SpeechRecognizerState_Idle), "recog_state was %u.\n", recog_state);
 
+
+    Sleep(10000);
     /*
      * TODO: Use a loopback device together with prerecorded audio files to test the recognizer's functionality.
      */

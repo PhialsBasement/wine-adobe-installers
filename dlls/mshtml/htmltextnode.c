@@ -221,8 +221,8 @@ static void CharacterData_init_dispex_info(dispex_data_t *info, compat_mode_t mo
 }
 
 dispex_static_data_t CharacterData_dispex = {
-    .id           = OBJID_CharacterData,
-    .prototype_id = OBJID_Node,
+    .id           = PROT_CharacterData,
+    .prototype_id = PROT_Node,
     .init_info    = CharacterData_init_dispex_info,
 };
 
@@ -370,6 +370,18 @@ static const IHTMLDOMTextNode2Vtbl HTMLDOMTextNode2Vtbl = {
     HTMLDOMTextNode2_replaceData
 };
 
+static inline HTMLDOMTextNode *impl_from_HTMLDOMNode(HTMLDOMNode *iface)
+{
+    return CONTAINING_RECORD(iface, HTMLDOMTextNode, node);
+}
+
+static HRESULT HTMLDOMTextNode_clone(HTMLDOMNode *iface, nsIDOMNode *nsnode, HTMLDOMNode **ret)
+{
+    HTMLDOMTextNode *This = impl_from_HTMLDOMNode(iface);
+
+    return HTMLDOMTextNode_Create(This->node.doc, nsnode, ret);
+}
+
 static inline HTMLDOMTextNode *impl_from_DispatchEx(DispatchEx *iface)
 {
     return CONTAINING_RECORD(iface, HTMLDOMTextNode, node.event_target.dispex);
@@ -393,6 +405,7 @@ static const cpc_entry_t HTMLDOMTextNode_cpc[] = {{NULL}};
 
 static const NodeImplVtbl HTMLDOMTextNodeImplVtbl = {
     .cpc_entries           = HTMLDOMTextNode_cpc,
+    .clone                 = HTMLDOMTextNode_clone
 };
 
 static const dispex_static_data_vtbl_t Text_dispex_vtbl = {
@@ -421,8 +434,8 @@ static const tid_t Text_iface_tids[] = {
     0
 };
 dispex_static_data_t Text_dispex = {
-    .id           = OBJID_Text,
-    .prototype_id = OBJID_CharacterData,
+    .id           = PROT_Text,
+    .prototype_id = PROT_CharacterData,
     .vtbl         = &Text_dispex_vtbl,
     .disp_tid     = DispHTMLDOMTextNode_tid,
     .iface_tids   = Text_iface_tids,
@@ -656,8 +669,8 @@ static void Comment_init_dispex_info(dispex_data_t *info, compat_mode_t mode)
 }
 
 dispex_static_data_t Comment_dispex = {
-    .id           = OBJID_Comment,
-    .prototype_id = OBJID_CharacterData,
+    .id           = PROT_Comment,
+    .prototype_id = PROT_CharacterData,
     .vtbl         = &HTMLCommentElement_event_target_vtbl.dispex_vtbl,
     .disp_tid     = DispHTMLCommentElement_tid,
     .init_info    = Comment_init_dispex_info,

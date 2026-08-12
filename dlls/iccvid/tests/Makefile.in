@@ -1,5 +1,0 @@
-TESTDLL   = iccvid.dll
-IMPORTS   = msvfw32
-
-SOURCES = \
-	iccvid.c

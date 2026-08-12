@@ -43,6 +43,27 @@ extern WORD int16_sel;
 
 #define ADD_LOWORD(dw,val)  ((dw) = ((dw) & 0xffff0000) | LOWORD((DWORD)(dw)+(val)))
 
+/* NOTE: Interrupts might get called from four modes: real mode, 16-bit,
+ *       32-bit segmented (DPMI32) and 32-bit linear (via DeviceIoControl).
+ *       For automatic conversion of pointer
+ *       parameters, interrupt handlers should use CTX_SEG_OFF_TO_LIN with
+ *       the contents of a segment register as second and the contents of
+ *       a *32-bit* general register as third parameter, e.g.
+ *          CTX_SEG_OFF_TO_LIN( context, DS_reg(context), EDX_reg(context) )
+ *       This will generate a linear pointer in all three cases:
+ *         Real-Mode:   Seg*16 + LOWORD(Offset)
+ *         16-bit:      convert (Seg, LOWORD(Offset)) to linear
+ *         32-bit segmented: convert (Seg, Offset) to linear
+ *         32-bit linear:    use Offset as linear address (DeviceIoControl!)
+ *
+ *       Real-mode is recognized by checking the V86 bit in the flags register,
+ *       32-bit linear mode is recognized by checking whether 'seg' is
+ *       a system selector (0 counts also as 32-bit segment) and 32-bit
+ *       segmented mode is recognized by checking whether 'seg' is 32-bit
+ *       selector which is neither system selector nor zero.
+ */
+#define CTX_SEG_OFF_TO_LIN(context,seg,off) (ldt_get_ptr((seg),(off)))
+
 #define INT_BARF(context,num) \
     ERR( "int%x: unknown/not implemented parameters:\n" \
                      "int%x: AX %04x, BX %04x, CX %04x, DX %04x, " \
@@ -53,7 +74,8 @@ extern WORD int16_sel;
 
 /* pushing on stack in 16 bit needs segment wrap around */
 #define PUSH_WORD16(context,val) \
-    *((WORD*)ldt_get_ptr( (context)->SegSs, ADD_LOWORD( context->Esp, -2 ) )) = (val)
+    *((WORD*)CTX_SEG_OFF_TO_LIN((context), \
+        (context)->SegSs, ADD_LOWORD( context->Esp, -2 ) )) = (val)
 
 /* Macros for easier access to i386 context registers */
 
@@ -95,7 +117,7 @@ extern WORD int16_sel;
 #define SET_CH(context,val)  ((void)((context)->Ecx = ((context)->Ecx & ~0xff00) | (((BYTE)(val)) << 8)))
 #define SET_DH(context,val)  ((void)((context)->Edx = ((context)->Edx & ~0xff00) | (((BYTE)(val)) << 8)))
 
-#pragma pack(push,1)
+#include <pshpack1.h>
 
 typedef struct
 {
@@ -155,11 +177,11 @@ typedef struct
     BYTE  DiskDataRate;              /* 8B: Last disk data rate selected */
 } BIOSDATA;
 
-#pragma pack(pop)
+#include <poppack.h>
 
 /* Device driver header */
 
-#pragma pack(push,1)
+#include <pshpack1.h>
 
 typedef struct
 {
@@ -170,7 +192,7 @@ typedef struct
     char  name[8];
 } DOS_DEVICE_HEADER;
 
-#pragma pack(pop)
+#include <poppack.h>
 
 /* dosvm.c */
 extern void DOSVM_Exit( WORD retval );

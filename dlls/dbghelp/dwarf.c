@@ -792,7 +792,7 @@ static BOOL dwarf2_fill_in_variant(struct module *module, VARIANT *v, const stru
         return FALSE;
     }
     /* native always stores in the shortest format in variant */
-    if (bt == btChar || bt == btInt || bt == btLong || bt == btBool)
+    if (bt == btChar || bt == btInt || bt == btLong)
     {
         if (sinteger == (signed char)sinteger)
         {
@@ -2449,7 +2449,7 @@ static struct symt* dwarf2_parse_subprogram(dwarf2_debug_info_t* di)
         return NULL;
     }
 
-    subpgm.top_func = symt_new_function(di->unit_ctx->module_ctx->module, symt_ptr_to_symref(&di->unit_ctx->compiland->symt),
+    subpgm.top_func = symt_new_function(di->unit_ctx->module_ctx->module, di->unit_ctx->compiland,
                                         dwarf2_get_cpp_name(di, name.u.string),
                                         addr_ranges[0].low, addr_ranges[0].high - addr_ranges[0].low,
                                         symt_ptr_to_symref(dwarf2_parse_subroutine_type(di)), 0);
@@ -3050,9 +3050,12 @@ static BOOL dwarf2_parse_compilation_unit(dwarf2_parse_context_t* ctx)
             struct attribute            language;
             char                       *tmp;
 
-            if (!dwarf2_find_attribute(di, DW_AT_name, &name) ||
-                !dwarf2_find_attribute(di, DW_AT_comp_dir, &comp_dir))
-                goto failure;
+            if (!dwarf2_find_attribute(di, DW_AT_name, &name))
+                name.u.string = NULL;
+
+            /* get working directory of current compilation unit */
+            if (!dwarf2_find_attribute(di, DW_AT_comp_dir, &comp_dir))
+                comp_dir.u.string = NULL;
 
             if (!dwarf2_find_attribute(di, DW_AT_low_pc, &low_pc))
                 low_pc.u.uvalue = 0;
@@ -3063,7 +3066,7 @@ static BOOL dwarf2_parse_compilation_unit(dwarf2_parse_context_t* ctx)
             ctx->language = language.u.uvalue;
 
             tmp = source_build_path(comp_dir.u.string, name.u.string);
-            ctx->compiland = symt_new_compiland(ctx->module_ctx->module, symt_ptr_to_symref(&ctx->module_ctx->module->top->symt), tmp);
+            ctx->compiland = symt_new_compiland(ctx->module_ctx->module, tmp);
             HeapFree(GetProcessHeap(), 0, tmp);
             ctx->compiland->address = ctx->module_ctx->load_offset + low_pc.u.uvalue;
             dwarf2_cache_cuhead(ctx->module_ctx->module, ctx->module_ctx->module->format_info[DFI_DWARF]->u.dwarf2_info, ctx->compiland, &ctx->head);
@@ -3084,7 +3087,6 @@ static BOOL dwarf2_parse_compilation_unit(dwarf2_parse_context_t* ctx)
         }
         else FIXME("Should have a compilation unit here %Iu\n", di->abbrev->tag);
     }
-failure:
     if (ctx->status == UNIT_BEINGLOADED) ctx->status = UNIT_LOADED_FAIL;
     return ret;
 }
@@ -4215,20 +4217,13 @@ static BOOL dwarf2_load_CU_module(dwarf2_parse_module_context_t* module_ctx, str
     mod_ctx.end_data = mod_ctx.data + sections[section_debug].size;
     while (mod_ctx.data < mod_ctx.end_data)
     {
-        dwarf2_parse_context_t* unit;
+        dwarf2_parse_context_t **punit_ctx = vector_add(&module_ctx->unit_contexts, &module_ctx->module->pool);
 
-        if (!(unit = pool_alloc(&module_ctx->module->pool, sizeof(dwarf2_parse_context_t))))
+        if (!(*punit_ctx = pool_alloc(&module_ctx->module->pool, sizeof(dwarf2_parse_context_t))))
             return FALSE;
 
-        unit->module_ctx = module_ctx;
-        if (dwarf2_parse_compilation_unit_head(unit, &mod_ctx))
-        {
-            dwarf2_parse_context_t **punit_ctx = vector_add(&module_ctx->unit_contexts, &module_ctx->module->pool);
-            if (!punit_ctx) return FALSE;
-            *punit_ctx = unit;
-        }
-        else
-            pool_free(&module_ctx->module->pool, unit);
+        (*punit_ctx)->module_ctx = module_ctx;
+        dwarf2_parse_compilation_unit_head(*punit_ctx, &mod_ctx);
     }
 
     /* phase2: load content of all CU
@@ -4324,6 +4319,11 @@ BOOL dwarf2_parse(struct module* module, ULONG_PTR load_offset,
     struct module_format* dwarf2_modfmt;
     dwarf2_parse_module_context_t module_ctx;
 
+/* Our DWARF parser has been known to crash winedbg in some cases. Since
+ * probably no concerned parties are going to be using plain winedbg, just don't
+ * bother parsing anything. */
+return FALSE;
+
     if (!dwarf2_init_section(&eh_frame,                fmap, ".eh_frame",     NULL,             &eh_frame_sect))
         /* lld produces .eh_fram to avoid generating a long name */
         dwarf2_init_section(&eh_frame,                fmap, ".eh_fram",      NULL,             &eh_frame_sect);
@@ -4387,7 +4387,7 @@ BOOL dwarf2_parse(struct module* module, ULONG_PTR load_offset,
         dwarf2_modfmt->module->module.SourceIndexed = TRUE;
         dwarf2_modfmt->module->module.Publics = TRUE;
     }
-    else ret = FALSE;
+
     dwarf2_unload_CU_module(&module_ctx);
 leave:
 
@@ -4402,7 +4402,7 @@ leave:
     image_unmap_section(&debug_str_sect);
     image_unmap_section(&debug_line_sect);
     image_unmap_section(&debug_ranges_sect);
-    if (!module->format_info[DFI_DWARF]) image_unmap_section(&eh_frame_sect);
+    if (!ret) image_unmap_section(&eh_frame_sect);
 
     return ret;
 }

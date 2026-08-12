@@ -101,7 +101,7 @@ static void clip_cursor_location(CGRect cursorClipRect, CGPoint *location)
 }
 
 
-static void scale_rect_for_retina_mode(BOOL mode, CGRect *cursorClipRect)
+static void scale_rect_for_retina_mode(int mode, CGRect *cursorClipRect)
 {
     double scale = mode ? 0.5 : 2.0;
     cursorClipRect->origin.x *= scale;
@@ -378,7 +378,7 @@ static void scale_rect_for_retina_mode(BOOL mode, CGRect *cursorClipRect)
         clip_cursor_location(cursorClipRect, location);
     }
 
-    - (void) setRetinaMode:(BOOL)mode
+    - (void) setRetinaMode:(int)mode
     {
         scale_rect_for_retina_mode(mode, &cursorClipRect);
     }
@@ -428,9 +428,14 @@ static void scale_rect_for_retina_mode(BOOL mode, CGRect *cursorClipRect)
 
     + (BOOL) isAvailable
     {
-        NSOperatingSystemVersion requiredVersion = { 10, 13, 0 };
-        return [[NSProcessInfo processInfo] isOperatingSystemAtLeastVersion:requiredVersion] &&
-               [NSWindow instancesRespondToSelector:@selector(setMouseConfinementRect:)];
+        if ([NSProcessInfo instancesRespondToSelector:@selector(isOperatingSystemAtLeastVersion:)])
+        {
+            NSOperatingSystemVersion requiredVersion = { 10, 13, 0 };
+            return [[NSProcessInfo processInfo] isOperatingSystemAtLeastVersion:requiredVersion] &&
+                   [NSWindow instancesRespondToSelector:@selector(setMouseConfinementRect:)];
+        }
+
+        return FALSE;
     }
 
     /* Returns the region of the given rect that intersects with the given
@@ -499,7 +504,7 @@ static void scale_rect_for_retina_mode(BOOL mode, CGRect *cursorClipRect)
         clip_cursor_location(cursorClipRect, location);
     }
 
-    - (void) setRetinaMode:(BOOL)mode
+    - (void) setRetinaMode:(int)mode
     {
         scale_rect_for_retina_mode(mode, &cursorClipRect);
     }

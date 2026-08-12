@@ -332,6 +332,8 @@ static void MSI_FreePackage( MSIOBJECTHDR *arg)
 {
     MSIPACKAGE *package = (MSIPACKAGE *)arg;
 
+    msi_destroy_assembly_caches( package );
+
     if( package->dialog )
         msi_dialog_destroy( package->dialog );
 
@@ -618,6 +620,29 @@ done:
     free(version);
 }
 
+static void fixup_winver(DWORD *verval)
+{
+    static int cached = -1;
+
+    if (cached == -1)
+    {
+        const char *s;
+
+        cached = (s = getenv("STEAM_COMPAT_APP_ID")) &&
+                    (
+                        !strcmp(s, "976730")
+                        || !strcmp(s, "231430")
+                        || !strcmp(s, "1017900")
+                        || !strcmp(s, "285190")
+                        || !strcmp(s, "627270")
+                    );
+        if (cached)
+            ERR("HACK: setting winver 502.\n");
+    }
+    if (!cached) return;
+    if (*verval > 502) *verval = 502;
+}
+
 static VOID set_installer_properties(MSIPACKAGE *package)
 {
     WCHAR *ptr;
@@ -745,6 +770,7 @@ static VOID set_installer_properties(MSIPACKAGE *package)
         verval = 603;
         OSVersion.dwBuildNumber = 9600;
     }
+    fixup_winver(&verval);
     len = swprintf( verstr, ARRAY_SIZE(verstr), L"%u", verval );
     switch (OSVersion.dwPlatformId)
     {

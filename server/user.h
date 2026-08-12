@@ -34,7 +34,16 @@ struct window_class;
 struct atom_table;
 struct clipboard;
 
+enum user_object
+{
+    USER_WINDOW = 1,
+    USER_HOOK,
+    USER_CLIENT  /* arbitrary client handle */
+};
+
 #define DESKTOP_ATOM  ((atom_t)32769)
+
+#define MAX_USER_HANDLES ((LAST_USER_HANDLE - FIRST_USER_HANDLE + 1) >> 1)
 
 struct winstation
 {
@@ -57,6 +66,7 @@ struct key_repeat
     timeout_t            delay;            /* auto-repeat delay */
     timeout_t            period;           /* auto-repeat period */
     union hw_input       input;            /* the input to repeat */
+    unsigned int         flags;            /* the queue_keyboard_message flags */
     user_handle_t        win;              /* target window for input event */
     struct timeout_user *timeout;          /* timeout for repeat */
 };
@@ -78,25 +88,25 @@ struct desktop
     struct list          hotkeys;          /* list of registered hotkeys */
     struct list          pointers;         /* list of active pointers */
     struct timeout_user *close_timeout;    /* timeout before closing the desktop */
+    timeout_t            close_timeout_val;/* timeout duration before closing desktop */
     struct thread_input *foreground_input; /* thread input of foreground thread */
-    process_id_t         foreground_pid;   /* id of the foreground process */
     unsigned int         users;            /* processes and threads using this desktop */
     unsigned char        keystate[256];    /* asynchronous key state */
     unsigned char        alt_pressed;      /* last key press was Alt (used to determine msg on release) */
     struct key_repeat    key_repeat;       /* key auto-repeat */
     unsigned int         clip_flags;       /* last cursor clip flags */
     user_handle_t        cursor_win;       /* window that contains the cursor */
-    desktop_shm_t       *shared;           /* desktop session shared memory */
+    const desktop_shm_t *shared;           /* desktop session shared memory */
 };
 
 /* user handles functions */
 
-extern user_handle_t alloc_user_handle( void *ptr, volatile void *shared, unsigned short type );
-extern void *get_user_object( user_handle_t handle, unsigned short type );
-extern void *get_user_object_handle( user_handle_t *handle, unsigned short type );
+extern user_handle_t alloc_user_handle( void *ptr, enum user_object type );
+extern void *get_user_object( user_handle_t handle, enum user_object type );
+extern void *get_user_object_handle( user_handle_t *handle, enum user_object type );
 extern user_handle_t get_user_full_handle( user_handle_t handle );
 extern void *free_user_handle( user_handle_t handle );
-extern void *next_user_handle( user_handle_t *handle, unsigned short type );
+extern void *next_user_handle( user_handle_t *handle, enum user_object type );
 extern void free_process_user_handles( struct process *process );
 
 /* clipboard functions */
@@ -120,6 +130,7 @@ extern void add_queue_hook_count( struct thread *thread, unsigned int index, int
 extern void inc_queue_paint_count( struct thread *thread, int incr );
 extern void queue_cleanup_window( struct thread *thread, user_handle_t win );
 extern int init_thread_queue( struct thread *thread );
+extern void check_thread_queue_idle( struct thread *thread );
 extern int attach_thread_input( struct thread *thread_from, struct thread *thread_to );
 extern void detach_thread_input( struct thread *thread_from );
 extern void set_clip_rectangle( struct desktop *desktop, const struct rectangle *rect,
@@ -175,8 +186,7 @@ extern void post_desktop_message( struct desktop *desktop, unsigned int message,
 extern void free_window_handle( struct window *win );
 extern void destroy_thread_windows( struct thread *thread );
 extern int is_child_window( user_handle_t parent, user_handle_t child );
-extern struct thread *make_window_foreground( struct desktop *desktop, user_handle_t window,
-                                              int *is_desktop, int *set_foreground );
+extern int is_valid_foreground_window( user_handle_t window );
 extern int is_window_visible( user_handle_t window );
 extern int is_window_transparent( user_handle_t window );
 extern int make_window_active( user_handle_t window );
@@ -189,11 +199,11 @@ extern struct window_class *get_window_class( user_handle_t window );
 /* window class functions */
 
 extern void destroy_process_classes( struct process *process );
-extern struct window_class *grab_class( struct process *process, atom_t atom, mod_handle_t instance,
-                                        int *extra_bytes, struct obj_locator *locator );
+extern struct window_class *grab_class( struct process *process, atom_t atom,
+                                        mod_handle_t instance, int *extra_bytes );
 extern void release_class( struct window_class *class );
 extern int is_desktop_class( struct window_class *class );
-extern int is_message_class( struct window_class *class );
+extern int is_hwnd_message_class( struct window_class *class );
 extern int get_class_style( struct window_class *class );
 extern atom_t get_class_atom( struct window_class *class );
 extern client_ptr_t get_class_client_ptr( struct window_class *class );
@@ -306,7 +316,7 @@ static inline void union_rect( struct rectangle *dest, const struct rectangle *s
 /* validate a window handle and return the full handle */
 static inline user_handle_t get_valid_window_handle( user_handle_t win )
 {
-    if (get_user_object_handle( &win, NTUSER_OBJ_WINDOW )) return win;
+    if (get_user_object_handle( &win, USER_WINDOW )) return win;
     set_win32_error( ERROR_INVALID_WINDOW_HANDLE );
     return 0;
 }

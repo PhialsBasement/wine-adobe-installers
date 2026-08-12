@@ -394,7 +394,7 @@ static jsstr_t *format_error_message(HRESULT error, const WCHAR *arg)
 HRESULT throw_error(script_ctx_t *ctx, HRESULT error, const WCHAR *str)
 {
     jsexcept_t *ei = ctx->ei;
-    TRACE("%08lx\n", error);
+    WARN("%08lx %s\n", error, debugstr_w(str));
     reset_ei(ei);
     ei->error = error;
     if(str)
@@ -404,7 +404,7 @@ HRESULT throw_error(script_ctx_t *ctx, HRESULT error, const WCHAR *str)
 
 void handle_dispatch_exception(script_ctx_t *ctx, EXCEPINFO *ei)
 {
-    TRACE("%08lx %s %s\n", ei->scode, debugstr_w(ei->bstrSource), debugstr_w(ei->bstrDescription));
+    WARN("%08lx %s %s\n", ei->scode, debugstr_w(ei->bstrSource), debugstr_w(ei->bstrDescription));
 
     reset_ei(ctx->ei);
     if(ei->pfnDeferredFillIn)
@@ -479,7 +479,6 @@ jsdisp_t *create_builtin_error(script_ctx_t *ctx)
         case JS_E_MISSING_ARG:
         case JS_E_OBJECT_NOT_COLLECTION:
         case JS_E_FUNCTION_EXPECTED:
-        case JS_E_STRING_EXPECTED:
         case JS_E_DATE_EXPECTED:
         case JS_E_NUMBER_EXPECTED:
         case JS_E_OBJECT_EXPECTED:
@@ -490,7 +489,6 @@ jsdisp_t *create_builtin_error(script_ctx_t *ctx)
         case JS_E_JSCRIPT_EXPECTED:
         case JS_E_ENUMERATOR_EXPECTED:
         case JS_E_REGEXP_EXPECTED:
-        case JS_E_ARRAY_OR_ARGS_EXPECTED:
         case JS_E_ARRAY_EXPECTED:
         case JS_E_CYCLIC_PROTO_VALUE:
         case JS_E_CANNOT_CREATE_FOR_NONEXTENSIBLE:

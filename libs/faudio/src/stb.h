@@ -207,7 +207,7 @@ CREDITS
  * binding various stdlib functions stb.h uses to FAudio's stdlib.
  * -flibit
  */
-#ifdef STB_MEMCPY_OVERRIDE
+#ifndef NO_MEMCPY_OVERRIDE
 #ifdef memcpy /* Thanks Apple! */
 #undef memcpy
 #endif

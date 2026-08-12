@@ -1233,7 +1233,7 @@ static void test_xdr(IHTMLDocument2 *doc)
     CHECK_CALLED(xdomainrequest_onload);
 
     hres = IHTMLXDomainRequest_get_responseText(xdr, &bstr);
-    ok(hres == S_OK, "get_responseText returned %08lx\n", hres);
+    ok(hres == S_OK, "get_contentType returned %08lx\n", hres);
     ok(!lstrcmpW(bstr, L"<html><body>test</body></html>\n"), "responseText = %s\n", debugstr_w(bstr));
     SysFreeString(bstr);
 

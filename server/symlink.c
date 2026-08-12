@@ -28,6 +28,7 @@
 #include <sys/types.h>
 
 #include "ntstatus.h"
+#define WIN32_NO_STATUS
 #include "winternl.h"
 #include "ddk/wdm.h"
 
@@ -70,10 +71,11 @@ static const struct object_ops symlink_ops =
     no_add_queue,                 /* add_queue */
     NULL,                         /* remove_queue */
     NULL,                         /* signaled */
+    NULL,                         /* get_esync_fd */
+    NULL,                         /* get_fsync_idx */
     NULL,                         /* satisfied */
     no_signal,                    /* signal */
     no_get_fd,                    /* get_fd */
-    default_get_sync,             /* get_sync */
     default_map_access,           /* map_access */
     default_get_sd,               /* get_sd */
     default_set_sd,               /* set_sd */
@@ -177,7 +179,7 @@ struct object *create_obj_symlink( struct object *root, const struct unicode_str
     data_size_t len;
     WCHAR *target_name;
 
-    if (!(target_name = target->ops->get_full_name( target, ~0u, &len )))
+    if (!(target_name = target->ops->get_full_name( target, &len )))
     {
         set_error( STATUS_INVALID_PARAMETER );
         return NULL;

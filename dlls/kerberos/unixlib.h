@@ -21,7 +21,7 @@
 
 #include "wine/unixlib.h"
 
-#define KERBEROS_MAX_BUF 48000
+#define KERBEROS_MAX_BUF 12000
 
 struct accept_context_params
 {
@@ -106,10 +106,8 @@ struct seal_message_params
 struct unseal_message_params
 {
     UINT64 context;
-    BYTE *stream;
-    ULONG stream_length;
-    BYTE **data;
-    ULONG *data_length;
+    BYTE *data;
+    ULONG data_length;
     BYTE *token;
     ULONG token_length;
     ULONG *qop;

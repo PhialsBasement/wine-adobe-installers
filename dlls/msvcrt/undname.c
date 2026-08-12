@@ -198,7 +198,6 @@ static BOOL str_array_push(struct parsed_symbol* sym, const char* ptr, int len,
     memcpy(a->elts[a->num], ptr, len);
     a->elts[a->num][len] = '\0'; 
     if (++a->num >= a->max) a->max = a->num;
-    if (TRACE_ON(msvcrt))
     {
         int i;
         char c;
@@ -720,12 +719,6 @@ static BOOL get_class(struct parsed_symbol* sym)
                 if ((name = get_template_name(sym)) &&
                     !str_array_push(sym, name, -1, &sym->names))
                     return FALSE;
-                break;
-            case 'A':
-                while(sym->current && *sym->current != '@') sym->current++;
-                if (!sym->current) return FALSE;
-                name = "`anonymous namespace'";
-                sym->current++;
                 break;
             case '?':
                 {
