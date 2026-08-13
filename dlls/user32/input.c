@@ -830,6 +830,16 @@ BOOL WINAPI SetGestureConfig( HWND hwnd, DWORD reserved, UINT count,
     return FALSE;
 }
 
+/**********************************************************************
+ * SetWindowFeedbackSetting (USER32.@)
+ */
+BOOL WINAPI SetWindowFeedbackSetting( HWND hwnd, FEEDBACK_TYPE feedback, DWORD flags, UINT32 size, const void *config )
+{
+    FIXME( "handle %p, feedback %d, flags %#lx, size %u, config %p stub!\n",
+           hwnd, feedback, flags, size, config );
+    return TRUE;
+}
+
 BOOL WINAPI GetPointerTouchInfo( UINT32 id, POINTER_TOUCH_INFO *info )
 {
     FIXME( "id %u, info %p stub!\n", id, info );

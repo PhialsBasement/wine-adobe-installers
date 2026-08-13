@@ -1108,7 +1108,7 @@
 # @ stub SetWindowCompositionTransition
 @ stdcall SetWindowContextHelpId(long long)
 @ stdcall SetWindowDisplayAffinity(long long)
-# @ stub SetWindowFeedbackSetting
+@ stdcall SetWindowFeedbackSetting(long long long long ptr)
 @ stdcall SetWindowLongA(long long long)
 @ stdcall -arch=win64 SetWindowLongPtrA(long long long)
 @ stdcall -arch=win64 SetWindowLongPtrW(long long long)
